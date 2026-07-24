@@ -116,26 +116,35 @@ not by reading file contents alone):
 
 Elsewhere:
 
-- `Gc/Model/Validity.lean` has two remaining `sorry`s (in `oid_loc_rgn_iff_in_heap` and
-  `oid_loc_stk_iff_in_stack`).
+- **`Gc/Model/Validity.lean`** — **fully proved, builds cleanly, zero `sorry`** (as of 2026-07-24). Its
+  last two gaps, `oid_loc_rgn_iff_in_heap` (the `find?`-minimality sub-goal: an earlier heap entry can't
+  also contain `oid`) and the full `oid_loc_stk_iff_in_stack` theorem, are both closed. Both use the same
+  core technique: `L1` (`cfg.objectIds.Nodup`) split via `List.nodup_append` into the stack/heap parts,
+  then `List.nodup_flatten` + `List.pairwise_map` turns the relevant part's nodup into a
+  `List.Pairwise Disjoint` fact over per-region/per-frame `objectIds` lists, and
+  `List.Pairwise.rel_get_of_lt` extracts pairwise disjointness at two explicit indices to contradict
+  `oid` appearing in both. `oid_loc_stk_iff_in_stack`'s backward direction additionally needed
+  `List.find?_eq_some_of_unique` (see below) to build the `findRev?` witness from global oid-uniqueness,
+  and reuses the already-proved `oid_in_stack_implies_not_in_heap` to rule out the heap side rather than
+  re-deriving stack/heap disjointness by hand. Axiom check confirms only
+  `propext`/`Classical.choice`/`Quot.sound`. As part of this, `List.find?_eq_some_of_unique` — fully
+  generic, no domain dependency — was moved from `Preservation/Exit.lean` into `Theorems.lean` (which
+  `Validity.lean` now also imports) so both files can use it without an import cycle; `Exit.lean`'s own
+  proofs were unaffected (same qualified name, still builds clean).
 - `Gc/Reachability/Guarantees.lean` is empty; `Gc/Reachability/Invariants.lean` has no proofs yet — this
   layer is much earlier-stage than `Gc/Model/`.
 
 ## Next planned step
 
-`Exit.lean` is now fully done (see above, zero `sorry`). Agreed order for what's next:
+`Exit.lean` and `Validity.lean` are now both fully done (zero `sorry`). Agreed next step:
 
-1. **First, clear `Gc/Model/Validity.lean`'s two remaining `sorry`s** (in `oid_loc_rgn_iff_in_heap` and
-   `oid_loc_stk_iff_in_stack`). These are general-purpose lemmas relating `Reference.loc?` to heap/stack
-   membership that other proofs (including `Enter.lean`'s corollaries) are likely to want to build on —
-   better to have them sorry-free before leaning on them, rather than accumulate proofs that are
-   secretly axiom-dependent through a sorry'd helper.
-2. **Then finish `Enter.lean`**, invariants before corollaries: `enter_L1`, `enter_L2`, `enter_H1` are
-   already proved; fix `enter_H2` first (currently a genuine "unsolved goals" error partway through — an
-   intermediate `have` isn't fully closed by its `rw` — which is what fails the build), then
-   `enter_H3`, `enter_S1`, `enter_S2`, `enter_S3` (all untouched `sorry` stubs). Only after all 8
-   invariants are real proofs should the 4 `enter_corollary_*` lemmas (also untouched `sorry` stubs) be
-   tackled — mirrors how `Exit.lean` was done (8 invariants solid first, corollaries built on top of
-   them afterward).
+**Finish `Enter.lean`**, invariants before corollaries: `enter_L1`, `enter_L2`, `enter_H1` are already
+proved; fix `enter_H2` first (currently a genuine "unsolved goals" error partway through — an
+intermediate `have` isn't fully closed by its `rw` — which is what fails the build), then `enter_H3`,
+`enter_S1`, `enter_S2`, `enter_S3` (all untouched `sorry` stubs). Only after all 8 invariants are real
+proofs should the 4 `enter_corollary_*` lemmas (also untouched `sorry` stubs) be tackled — mirrors how
+`Exit.lean` was done (8 invariants solid first, corollaries built on top of them afterward). With
+`Validity.lean` now sorry-free, `Enter.lean`'s corollaries can lean on `oid_loc_rgn_iff_in_heap` /
+`oid_loc_stk_iff_in_stack` without inheriting a hidden `sorry` dependency.
 
 Not yet started — confirm with the user before diving in.
