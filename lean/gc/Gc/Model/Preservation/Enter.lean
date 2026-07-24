@@ -4,6 +4,185 @@ import Gc.Model.Validity
 import Gc.Model.Theorems
 import Gc.Model.Mutation
 
+theorem enter_corollary_8 :
+  L1 cfg →
+  (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region1.objMap.keys →
+  (⟨rid2, region2⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region2.objMap.keys →
+  rid1 = rid2 := by
+  intro l1 mem1 in1 mem2 in2
+  by_contra hne
+  unfold L1 RuntimeConfig.objectIds at l1
+  obtain ⟨_, heap_nodup, _⟩ := List.nodup_append.mp l1
+  unfold Heap.objectIds at heap_nodup
+  rw [List.nodup_flatten, List.pairwise_map] at heap_nodup
+  obtain ⟨_, pairwise_disjoint⟩ := heap_nodup
+  have hneq : (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ≠ ⟨rid2, region2⟩ := by
+    intro heq
+    exact hne (congrArg Sigma.fst heq)
+  have disj := List.Pairwise.forall
+    (R := fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds)
+    (fun _ _ hd => List.disjoint_symm hd)
+    pairwise_disjoint mem1 mem2 hneq
+  unfold Region.objectIds at disj
+  exact disj in1 in2
+
+theorem enter_corollary_9 : ValidConfig cfg →
+  enter xf a cfg = some cfg' →
+  ∀ oid, (Reference.OId oid).loc? cfg = (Reference.OId oid).loc? cfg' := by
+  intro vcfg h oid
+  have h' := h
+  unfold enter at h
+  cases resolvexf: resolveFA xf cfg with
+  | none =>
+    rw [resolvexf] at h
+    contradiction
+  | some xfRef =>
+    rw [resolvexf] at h
+    dsimp at h
+    cases xfRef with
+    | OId _ =>
+      contradiction
+    | RId rid =>
+      dsimp at h
+      cases heapLookup : cfg.heap.lookup rid with
+      | none =>
+        rw [heapLookup] at h
+        contradiction
+      | some region =>
+        rw [heapLookup] at h
+        dsimp at h
+        cases regionStatus : region.status with
+        | Open =>
+          rw [regionStatus] at h
+          contradiction
+        | Closed =>
+          rw [regionStatus] at h
+          rw [if_pos (by rfl)] at h
+          rw [Option.some_inj] at h
+          subst h
+          have l1 := vcfg.l1
+          unfold Reference.loc?
+          dsimp
+          have stack_eq :
+              cfg.stackWithIndex.findRev? (fun frame => (AList.keys frame.objMap).contains oid) =
+              (RuntimeConfig.stackWithIndex
+                { stack := cfg.stack ++ [{ regionId := rid, bridgeVar := a, objMap := ∅, varMap := ∅ }],
+                  heap := AList.insert rid { bridgeObjectId := region.bridgeObjectId, objMap := region.objMap, status := Status.Open } cfg.heap
+                }).findRev? (fun frame => (AList.keys frame.objMap).contains oid) := by
+            unfold RuntimeConfig.stackWithIndex
+            dsimp
+            rw [List.mapIdx_concat, List.findRev?_eq_find?_reverse, List.findRev?_eq_find?_reverse, List.reverse_append]
+            have newFrame_pred_false :
+                ¬ (fun frame => (AList.keys frame.objMap).contains oid)
+                  ({ regionId := rid, bridgeVar := a, objMap := ∅, varMap := ∅, index := cfg.stack.length } :
+                    FrameWithIndex) := by
+              dsimp
+              decide
+            have find_eq :
+                List.find? (fun frame => (AList.keys frame.objMap).contains oid)
+                  (({ regionId := rid, bridgeVar := a, objMap := ∅, varMap := ∅, index := cfg.stack.length } :
+                      FrameWithIndex) ::
+                    (List.mapIdx (fun idx frame => { toFrame := frame, index := idx }) cfg.stack).reverse) =
+                List.find? (fun frame => (AList.keys frame.objMap).contains oid)
+                  (List.mapIdx (fun idx frame => { toFrame := frame, index := idx }) cfg.stack).reverse :=
+              List.find?_cons_of_neg newFrame_pred_false
+            rw [List.reverse_singleton, List.singleton_append, find_eq]
+          rw [stack_eq]
+          cases heapLookup' : List.find? (fun x => (AList.keys x.snd.objMap).contains oid) cfg.heap.entries with
+          | none =>
+            have new_none :
+                List.find? (fun x => (AList.keys x.snd.objMap).contains oid)
+                  (⟨rid, { bridgeObjectId := region.bridgeObjectId, objMap := region.objMap, status := Status.Open }⟩ ::
+                    List.kerase rid cfg.heap.entries) = none := by
+              rw [List.find?_eq_none]
+              rw [List.find?_eq_none] at heapLookup'
+              intro x hx
+              rw [List.mem_cons] at hx
+              cases hx with
+              | inl heq =>
+                subst heq
+                have := heapLookup' ⟨rid, region⟩ (AList.lookup_mem_entries heapLookup)
+                dsimp at this
+                exact this
+              | inr hmem =>
+                exact heapLookup' x ((List.kerase_sublist rid cfg.heap.entries).subset hmem)
+            rw [new_none]
+          | some ridregion =>
+            obtain ⟨rid1, region1⟩ := ridregion
+            have region1_mem : (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries :=
+              List.mem_of_find?_eq_some heapLookup'
+            have region1_pred := List.find?_some heapLookup'
+            have region1_contains_oid : oid ∈ region1.objMap.keys := by
+              dsimp at region1_pred
+              exact List.contains_iff_mem.mp region1_pred
+            by_cases rid1_eq_rid : rid1 = rid
+            · subst rid1_eq_rid
+              have region1_eq_region : region1 = region :=
+                List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys region1_mem (AList.lookup_mem_entries heapLookup)
+              subst region1
+              have entry_pred :
+                  (fun x => (AList.keys x.snd.objMap).contains oid)
+                    (⟨rid1, { bridgeObjectId := region.bridgeObjectId, objMap := region.objMap, status := Status.Open }⟩ :
+                      Sigma (fun _ : RegionId => Region)) = true := by
+                dsimp
+                exact List.contains_iff_mem.mpr region1_contains_oid
+              have find_eq :
+                  List.find? (fun x => (AList.keys x.snd.objMap).contains oid)
+                    (⟨rid1, { bridgeObjectId := region.bridgeObjectId, objMap := region.objMap, status := Status.Open }⟩ ::
+                      List.kerase rid1 cfg.heap.entries) =
+                  some (⟨rid1, { bridgeObjectId := region.bridgeObjectId, objMap := region.objMap, status := Status.Open }⟩ :
+                    Sigma (fun _ : RegionId => Region)) :=
+                List.find?_cons_of_pos entry_pred
+              rw [find_eq]
+              have key : ∀ s : Option FrameWithIndex,
+                  (match s, (some ⟨rid1, region⟩ : Option (Sigma (fun _ : RegionId => Region))) with
+                    | some frame, none => some (Location.Stk frame.index)
+                    | none, some ⟨rid, _⟩ => some (Location.Rgn rid)
+                    | _, _ => none) =
+                  (match s,
+                      (some ⟨rid1, { bridgeObjectId := region.bridgeObjectId, objMap := region.objMap, status := Status.Open }⟩ :
+                        Option (Sigma (fun _ : RegionId => Region))) with
+                    | some frame, none => some (Location.Stk frame.index)
+                    | none, some ⟨rid, _⟩ => some (Location.Rgn rid)
+                    | _, _ => none) := by
+                intro s
+                cases s <;> rfl
+              exact key _
+            · have front_false :
+                  ¬ (fun x => (AList.keys x.snd.objMap).contains oid)
+                      (⟨rid, { bridgeObjectId := region.bridgeObjectId, objMap := region.objMap, status := Status.Open }⟩ :
+                        Sigma (fun _ : RegionId => Region)) := by
+                dsimp
+                intro hcontra
+                exact rid1_eq_rid
+                  (enter_corollary_8 l1 region1_mem region1_contains_oid
+                    (AList.lookup_mem_entries heapLookup) (List.contains_iff_mem.mp hcontra))
+              obtain ⟨b, l1e, l2e, _, entries_eq, kerase_eq⟩ :=
+                List.exists_of_kerase (a := rid) (l := cfg.heap.entries)
+                  (List.mem_keys_of_mem (AList.lookup_mem_entries heapLookup))
+              have b_eq_region : b = region :=
+                List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys
+                  (entries_eq ▸ List.mem_append_right l1e List.mem_cons_self) (AList.lookup_mem_entries heapLookup)
+              have b_pred_false :
+                  ¬ (fun x => (AList.keys x.snd.objMap).contains oid)
+                    (⟨rid, b⟩ : Sigma (fun _ : RegionId => Region)) := by
+                rw [b_eq_region]
+                exact front_false
+              have find_eq :
+                  List.find? (fun x => (AList.keys x.snd.objMap).contains oid)
+                    (⟨rid, { bridgeObjectId := region.bridgeObjectId, objMap := region.objMap, status := Status.Open }⟩ ::
+                      List.kerase rid cfg.heap.entries) =
+                  List.find? (fun x => (AList.keys x.snd.objMap).contains oid) (List.kerase rid cfg.heap.entries) :=
+                List.find?_cons_of_neg front_false
+              rw [find_eq, kerase_eq]
+              rw [entries_eq, List.find?_append] at heapLookup'
+              have find_eq2 :
+                  List.find? (fun x => (AList.keys x.snd.objMap).contains oid) (⟨rid, b⟩ :: l2e) =
+                  List.find? (fun x => (AList.keys x.snd.objMap).contains oid) l2e :=
+                List.find?_cons_of_neg b_pred_false
+              rw [find_eq2] at heapLookup'
+              rw [List.find?_append, heapLookup']
+
 theorem enter_corollary_4 : ValidConfig cfg →
   enter xf a cfg = some cfg' →
   cfg.stack.refs.Perm cfg'.stack.refs := by
