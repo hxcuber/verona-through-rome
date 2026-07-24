@@ -23,15 +23,14 @@ All commands below assume `cd lean/gc`.
 
 - **Build/check a single file**: `lake build Gc.Model.Theorems` (dotted module path mirrors the file
   path, e.g. `Gc/Model/Preservation/Swap.lean` → `Gc.Model.Preservation.Swap`).
-- **`lake build` / `lake build Gc` (the library target) may still be broken** — don't assume it works
-  without checking. `Gc.lean` now correctly imports every module under `Gc/Model` and `Gc/Reachability`
-  (fixed 2026-07-24; it used to have the stale `lake new` template's `import Gc.Basic` pointing at a
-  `Gc/Basic.lean` that no longer exists). `Gc/Model/Preservation/Enter.lean` is no longer a blocker —
-  it's fully proved as of 2026-07-24 (see below). `Gc/Reachability/Reachability.lean` (wrong `Location`
-  constructor names) and `Main.lean`'s undefined `hello` (leftover from the `lake new` template) may
-  still be issues; the user has been making their own in-progress edits to `Gc.lean` (e.g. dropping the
-  `Reachability` import) to work around this, so check current state rather than assuming either fixed
-  or broken. Always build the specific module(s) you're touching by qualified name instead.
+- **`lake build` (bare, no target) now succeeds end to end**, including `Gc`, `Main`, and the `gc`
+  executable — fixed 2026-07-24. `Gc.lean` no longer imports `Gc/Reachability/Reachability.lean` (it
+  pattern-matched on wrong `Location` constructor names — `Location.Stack`/`Location.Region` instead of
+  the real `Location.Stk`/`Location.Rgn` — and never built; that file itself is untouched/still broken,
+  it's just no longer pulled in). `Main.lean`'s undefined `hello` (leftover from the `lake new` template)
+  was replaced with a plain greeting. The only remaining build output is expected `sorry` warnings from
+  the not-yet-started `Preservation` files. Still prefer building the specific module(s) you're touching
+  by qualified name for faster iteration, e.g. `lake build Gc.Model.Theorems`.
 - Toolchain is pinned via `lean-toolchain` (`leanprover/lean4:v4.29.0-rc6`) and dependencies via
   `lake-manifest.json`; the main dependency is `mathlib`. First builds after a fresh clone can be slow
   because of mathlib — subsequent builds reuse `.lake/build`.
