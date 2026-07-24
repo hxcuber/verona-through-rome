@@ -561,7 +561,53 @@ theorem enter_H3 : ValidConfig cfg →
 theorem enter_S1 : ValidConfig cfg →
   enter xf a cfg = some cfg' →
   S1 cfg' := by
-  sorry
+  intro vcfg h
+  have h' := h
+  unfold enter at h
+  cases resolvexf: resolveFA xf cfg with
+  | none =>
+    rw [resolvexf] at h
+    contradiction
+  | some xfRef =>
+    rw [resolvexf] at h
+    dsimp at h
+    cases xfRef with
+    | OId _ =>
+      contradiction
+    | RId rid0 =>
+      dsimp at h
+      cases heapLookup : cfg.heap.lookup rid0 with
+      | none =>
+        rw [heapLookup] at h
+        contradiction
+      | some region0 =>
+        rw [heapLookup] at h
+        dsimp at h
+        cases regionStatus : region0.status with
+        | Open =>
+          rw [regionStatus] at h
+          contradiction
+        | Closed =>
+          rw [regionStatus] at h
+          rw [if_pos (by rfl)] at h
+          rw [Option.some_inj] at h
+          subst h
+          unfold S1
+          dsimp
+          rw [List.map_append]
+          apply List.nodup_append.mpr
+          refine ⟨vcfg.s1, List.nodup_singleton rid0, ?_⟩
+          intro rid hrid rid' hrid'mem
+          rw [List.map_singleton, List.mem_singleton] at hrid'mem
+          subst hrid'mem
+          intro rideq
+          subst rideq
+          obtain ⟨frame, hframe_mem, hframe_regionId⟩ := List.mem_map.mp hrid
+          obtain ⟨region', lookup_region', region'_open⟩ := vcfg.l2 frame hframe_mem
+          rw [hframe_regionId, heapLookup, Option.some_inj] at lookup_region'
+          rw [← lookup_region'] at region'_open
+          rw [regionStatus] at region'_open
+          contradiction
 
 theorem enter_S2 : ValidConfig cfg →
   enter xf a cfg = some cfg' →
