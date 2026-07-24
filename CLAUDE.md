@@ -24,10 +24,14 @@ All commands below assume `cd lean/gc`.
 - **Build/check a single file**: `lake build Gc.Model.Theorems` (dotted module path mirrors the file
   path, e.g. `Gc/Model/Preservation/Swap.lean` → `Gc.Model.Preservation.Swap`).
 - **`lake build` / `lake build Gc` (the library target) is currently broken** — do not rely on it.
-  `Gc.lean` still has the `lake new` template's `import Gc.Basic`, and `Gc/Basic.lean` no longer
-  exists (the model code moved under `Gc/Model` and `Gc/Reachability` without updating the root
-  import). Building the bare `Gc` target fails immediately with a missing-file error. Always build
-  the specific module(s) you're touching by qualified name instead. The same applies to `Main.lean`.
+  `Gc.lean` now correctly imports every module under `Gc/Model` and `Gc/Reachability` (fixed
+  2026-07-24; it used to have the stale `lake new` template's `import Gc.Basic` pointing at a
+  `Gc/Basic.lean` that no longer exists), but the bare `Gc` target still fails to build because two
+  files it now pulls in have genuine, pre-existing errors: `Gc/Model/Preservation/Enter.lean`
+  (`enter_H2`'s unsolved-goals error, see below) and `Gc/Reachability/Reachability.lean` (wrong
+  `Location` constructor names, see below). `Main.lean` additionally references an undefined `hello`
+  (leftover from the `lake new` template) on top of transitively depending on the broken `Gc` target.
+  Always build the specific module(s) you're touching by qualified name instead.
 - Toolchain is pinned via `lean-toolchain` (`leanprover/lean4:v4.29.0-rc6`) and dependencies via
   `lake-manifest.json`; the main dependency is `mathlib`. First builds after a fresh clone can be slow
   because of mathlib — subsequent builds reuse `.lake/build`.
