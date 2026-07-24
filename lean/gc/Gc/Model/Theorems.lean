@@ -93,3 +93,17 @@ theorem List.Sublist.flatten_sublist {α : Type} {l m : List (List α)} (h : l.S
   | cons₂ head sublist ih =>
     rw [List.flatten_cons, List.flatten_cons]
     exact (List.append_sublist_append_left head).mpr ih
+
+theorem List.find?_eq_some_of_unique {α} {p : α → Bool} {l : List α} {e : α}
+    (mem : e ∈ l) (pe : p e) (uniq : ∀ x ∈ l, p x → x = e) : l.find? p = some e := by
+  obtain ⟨as, bs, hl, e_notin_as⟩ := List.eq_append_cons_of_mem mem
+  apply List.find?_eq_some_iff_append.mpr
+  refine ⟨pe, as, bs, hl, ?_⟩
+  intro x hx
+  simp only [Bool.not_eq_true']
+  by_contra hpx
+  simp only [Bool.not_eq_false] at hpx
+  apply e_notin_as
+  have hx' : x ∈ l := by rw [hl]; exact List.mem_append_left _ hx
+  rw [uniq x hx' hpx] at hx
+  exact hx

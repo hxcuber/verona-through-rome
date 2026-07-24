@@ -39,20 +39,6 @@ theorem heap_objectIds_of_mem {heap : Heap} :
   unfold Region.objectIds
   exact in_region
 
-theorem List.find?_eq_some_of_unique {α} {p : α → Bool} {l : List α} {e : α}
-    (mem : e ∈ l) (pe : p e) (uniq : ∀ x ∈ l, p x → x = e) : l.find? p = some e := by
-  obtain ⟨as, bs, hl, e_notin_as⟩ := List.eq_append_cons_of_mem mem
-  apply List.find?_eq_some_iff_append.mpr
-  refine ⟨pe, as, bs, hl, ?_⟩
-  intro x hx
-  simp only [Bool.not_eq_true']
-  by_contra hpx
-  simp only [Bool.not_eq_false] at hpx
-  apply e_notin_as
-  have hx' : x ∈ l := by rw [hl]; exact List.mem_append_left _ hx
-  rw [uniq x hx' hpx] at hx
-  exact hx
-
 theorem heap_status_update_find_none_iff {heap : Heap} {rid : RegionId} {region : Region}
     {status : Status} {oid : ObjectId} (hlookup : heap.lookup rid = some region) :
     List.find? (fun x => (AList.keys x.snd.objMap).contains oid) heap.entries = none ↔

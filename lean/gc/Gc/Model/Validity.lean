@@ -1,5 +1,6 @@
 import Gc.Model.Types
 import Gc.Model.Helpers
+import Gc.Model.Theorems
 
 def L1 (cfg : RuntimeConfig) : Prop :=
   cfg.objectIds.Nodup
@@ -254,12 +255,127 @@ theorem oid_loc_rgn_iff_in_heap : ValidConfig cfg →
         · exact get_n
         · intro j j_lt_n
           have l1 := vcfg.l1
-          -- use l1 to show that no other objMap in the heap contains oid and prove the goal
-          sorry
+          by_contra hcon
+          rw [Bool.not_eq_true, Bool.not_eq_false'] at hcon
+          unfold L1 RuntimeConfig.objectIds at l1
+          obtain ⟨_, heap_nodup, _⟩ := List.nodup_append.mp l1
+          unfold Heap.objectIds at heap_nodup
+          rw [List.nodup_flatten, List.pairwise_map] at heap_nodup
+          obtain ⟨_, pairwise_disjoint⟩ := heap_nodup
+          have j_lt_length : j < cfg.heap.entries.length := lt_trans j_lt_n n_lt_length
+          have disj := List.Pairwise.rel_get_of_lt pairwise_disjoint
+            (a := ⟨j, j_lt_length⟩) (b := ⟨n, n_lt_length⟩) j_lt_n
+          simp only [List.get_eq_getElem] at disj
+          rw [get_n] at disj
+          unfold Region.objectIds at disj
+          have in_j : oid ∈ (AList.keys cfg.heap.entries[j].snd.objMap) := List.contains_iff_mem.mp hcon
+          have in_n : oid ∈ (AList.keys region.objMap) := List.contains_iff_mem.mp oid_in_region
+          exact disj in_j in_n
     have not_in_stack := oid_in_heap_implies_not_in_stack vcfg this
     rw [this, not_in_stack]
 
 theorem oid_loc_stk_iff_in_stack : ValidConfig cfg →
   ((Reference.OId oid).loc? cfg = some (Location.Stk fid) ↔
   ∃ frame, cfg.stackWithIndex[fid]? = some frame ∧ oid ∈ frame.objMap) := by
-  sorry
+  intro vcfg
+  constructor
+  · intro loc_oid
+    unfold Reference.loc? at loc_oid
+    dsimp at loc_oid
+    cases h1 : cfg.stackWithIndex.findRev? (fun frame => (AList.keys frame.objMap).contains oid) with
+    | none =>
+      rw [h1] at loc_oid
+      cases h2 : List.find? (fun x => (AList.keys x.snd.objMap).contains oid) cfg.heap.entries with
+      | none =>
+        rw [h2] at loc_oid
+        dsimp at loc_oid
+        contradiction
+      | some rid_region =>
+        obtain ⟨rid', region'⟩ := rid_region
+        rw [h2] at loc_oid
+        dsimp at loc_oid
+        rw [Option.some_inj] at loc_oid
+        contradiction
+    | some frame0 =>
+      rw [h1] at loc_oid
+      cases h2 : List.find? (fun x => (AList.keys x.snd.objMap).contains oid) cfg.heap.entries with
+      | none =>
+        rw [h2] at loc_oid
+        dsimp at loc_oid
+        rw [Option.some_inj, Location.Stk.injEq] at loc_oid
+        rw [List.findRev?_eq_find?_reverse] at h1
+        have mem_rev : frame0 ∈ cfg.stackWithIndex.reverse := List.mem_of_find?_eq_some h1
+        have pred_true := List.find?_some h1
+        rw [List.mem_reverse] at mem_rev
+        obtain ⟨n, n_lt_length, f_eq⟩ := List.mem_mapIdx.mp mem_rev
+        have idx_eq : frame0.index = n := by rw [← f_eq]
+        refine ⟨frame0, ?_, ?_⟩
+        · unfold RuntimeConfig.stackWithIndex
+          rw [← loc_oid, idx_eq, List.getElem?_mapIdx, List.getElem?_eq_getElem n_lt_length]
+          dsimp
+          rw [f_eq]
+        · rw [AList.mem_keys, ← List.contains_iff_mem]
+          exact pred_true
+      | some rid_region =>
+        obtain ⟨rid', region'⟩ := rid_region
+        rw [h2] at loc_oid
+        dsimp at loc_oid
+        contradiction
+  · intro frame_in_stack
+    obtain ⟨frame, stk_lookup_frame, oid_in_frame⟩ := frame_in_stack
+    have l1 := vcfg.l1
+    unfold L1 RuntimeConfig.objectIds at l1
+    obtain ⟨stack_nodup, _, _⟩ := List.nodup_append.mp l1
+    unfold Stack.objectIds at stack_nodup
+    rw [List.bind_eq_flatMap, List.flatMap_id, List.nodup_flatten, List.pairwise_map] at stack_nodup
+    obtain ⟨_, stack_pairwise_disjoint⟩ := stack_nodup
+    rw [AList.mem_keys, ← List.contains_iff_mem] at oid_in_frame
+    unfold RuntimeConfig.stackWithIndex at stk_lookup_frame
+    rw [List.getElem?_mapIdx, Option.map_eq_some_iff] at stk_lookup_frame
+    obtain ⟨stackFrame, hfid, hframe_eq⟩ := stk_lookup_frame
+    obtain ⟨fid_lt_length, stackFrame_eq⟩ := List.getElem?_eq_some_iff.mp hfid
+    have frame_eq : ({cfg.stack[fid] with index := fid} : FrameWithIndex) = frame := by
+      rw [stackFrame_eq]; exact hframe_eq
+    have idx_eq_fid : frame.index = fid := by rw [← frame_eq]
+    have frame_objMap_eq : frame.objMap = cfg.stack[fid].objMap := by rw [← frame_eq]
+    have h1_eq : cfg.stackWithIndex.findRev? (fun f => (AList.keys f.objMap).contains oid) = some frame := by
+      rw [List.findRev?_eq_find?_reverse]
+      apply List.find?_eq_some_of_unique
+      · rw [List.mem_reverse]
+        unfold RuntimeConfig.stackWithIndex
+        exact List.mem_mapIdx.mpr ⟨fid, fid_lt_length, frame_eq⟩
+      · exact oid_in_frame
+      · intro frame' frame'_mem frame'_pred
+        rw [List.mem_reverse] at frame'_mem
+        unfold RuntimeConfig.stackWithIndex at frame'_mem
+        obtain ⟨n', n'_lt_length, f'_eq⟩ := List.mem_mapIdx.mp frame'_mem
+        have oid_in_n' : oid ∈ Frame.objectIds cfg.stack[n'] := by
+          unfold Frame.objectIds
+          have frame'_objMap_eq : frame'.objMap = cfg.stack[n'].objMap := by rw [← f'_eq]
+          rw [← frame'_objMap_eq]
+          exact List.contains_iff_mem.mp frame'_pred
+        have oid_in_fid : oid ∈ Frame.objectIds cfg.stack[fid] := by
+          unfold Frame.objectIds
+          rw [← frame_objMap_eq]
+          exact List.contains_iff_mem.mp oid_in_frame
+        have idx_eq : n' = fid := by
+          by_contra hne
+          rcases Nat.lt_or_gt_of_ne hne with hlt | hgt
+          · have disj := List.Pairwise.rel_get_of_lt stack_pairwise_disjoint
+              (a := ⟨n', n'_lt_length⟩) (b := ⟨fid, fid_lt_length⟩) hlt
+            simp only [List.get_eq_getElem] at disj
+            exact disj oid_in_n' oid_in_fid
+          · have disj := List.Pairwise.rel_get_of_lt stack_pairwise_disjoint
+              (a := ⟨fid, fid_lt_length⟩) (b := ⟨n', n'_lt_length⟩) hgt
+            simp only [List.get_eq_getElem] at disj
+            exact disj oid_in_fid oid_in_n'
+        rw [← f'_eq]
+        subst idx_eq
+        exact frame_eq
+    unfold Reference.loc?
+    dsimp
+    rw [h1_eq]
+    have not_in_heap := oid_in_stack_implies_not_in_heap vcfg h1_eq
+    rw [not_in_heap]
+    dsimp
+    rw [idx_eq_fid]
