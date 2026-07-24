@@ -123,8 +123,19 @@ Elsewhere:
 
 ## Next planned step
 
-`Exit.lean` is now fully done (see above, zero `sorry`). The next natural target is `Enter.lean`:
-`enter_L1`, `enter_L2`, `enter_H1` are proved; `enter_H2` has a genuine "unsolved goals" error partway
-through (an intermediate `have` isn't fully closed by its `rw`) which is what currently fails the build;
-`enter_H3`, `enter_S1`–`S3`, and all 4 `enter_corollary_*` lemmas are untouched `sorry` stubs. Not yet
-started — confirm with the user before diving in.
+`Exit.lean` is now fully done (see above, zero `sorry`). Agreed order for what's next:
+
+1. **First, clear `Gc/Model/Validity.lean`'s two remaining `sorry`s** (in `oid_loc_rgn_iff_in_heap` and
+   `oid_loc_stk_iff_in_stack`). These are general-purpose lemmas relating `Reference.loc?` to heap/stack
+   membership that other proofs (including `Enter.lean`'s corollaries) are likely to want to build on —
+   better to have them sorry-free before leaning on them, rather than accumulate proofs that are
+   secretly axiom-dependent through a sorry'd helper.
+2. **Then finish `Enter.lean`**, invariants before corollaries: `enter_L1`, `enter_L2`, `enter_H1` are
+   already proved; fix `enter_H2` first (currently a genuine "unsolved goals" error partway through — an
+   intermediate `have` isn't fully closed by its `rw` — which is what fails the build), then
+   `enter_H3`, `enter_S1`, `enter_S2`, `enter_S3` (all untouched `sorry` stubs). Only after all 8
+   invariants are real proofs should the 4 `enter_corollary_*` lemmas (also untouched `sorry` stubs) be
+   tackled — mirrors how `Exit.lean` was done (8 invariants solid first, corollaries built on top of
+   them afterward).
+
+Not yet started — confirm with the user before diving in.
