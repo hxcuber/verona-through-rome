@@ -515,7 +515,48 @@ theorem enter_H2 : ValidConfig cfg →
 theorem enter_H3 : ValidConfig cfg →
   enter xf a cfg = some cfg' →
   H3 cfg' := by
-  sorry
+  intro vcfg h
+  have h' := h
+  unfold enter at h
+  cases resolvexf: resolveFA xf cfg with
+  | none =>
+    rw [resolvexf] at h
+    contradiction
+  | some xfRef =>
+    rw [resolvexf] at h
+    dsimp at h
+    cases xfRef with
+    | OId _ =>
+      contradiction
+    | RId rid0 =>
+      dsimp at h
+      cases heapLookup : cfg.heap.lookup rid0 with
+      | none =>
+        rw [heapLookup] at h
+        contradiction
+      | some region0 =>
+        rw [heapLookup] at h
+        dsimp at h
+        cases regionStatus : region0.status with
+        | Open =>
+          rw [regionStatus] at h
+          contradiction
+        | Closed =>
+          rw [regionStatus] at h
+          rw [if_pos (by rfl)] at h
+          rw [Option.some_inj] at h
+          subst h
+          have h3 := vcfg.h3
+          unfold H3
+          intro rid oid region cfg'_lookup oid_in_refs
+          rw [← enter_corollary_9 vcfg h' oid]
+          by_cases rideq : rid = rid0
+          · subst rideq
+            rw [AList.lookup_insert, Option.some_inj] at cfg'_lookup
+            subst cfg'_lookup
+            exact h3 rid oid region0 heapLookup oid_in_refs
+          · rw [AList.lookup_insert_ne rideq] at cfg'_lookup
+            exact h3 rid oid region cfg'_lookup oid_in_refs
 
 theorem enter_S1 : ValidConfig cfg →
   enter xf a cfg = some cfg' →
