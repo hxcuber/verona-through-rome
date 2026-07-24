@@ -23,15 +23,15 @@ All commands below assume `cd lean/gc`.
 
 - **Build/check a single file**: `lake build Gc.Model.Theorems` (dotted module path mirrors the file
   path, e.g. `Gc/Model/Preservation/Swap.lean` → `Gc.Model.Preservation.Swap`).
-- **`lake build` / `lake build Gc` (the library target) is currently broken** — do not rely on it.
-  `Gc.lean` now correctly imports every module under `Gc/Model` and `Gc/Reachability` (fixed
-  2026-07-24; it used to have the stale `lake new` template's `import Gc.Basic` pointing at a
-  `Gc/Basic.lean` that no longer exists), but the bare `Gc` target still fails to build because two
-  files it now pulls in have genuine, pre-existing errors: `Gc/Model/Preservation/Enter.lean`
-  (`enter_H2`'s unsolved-goals error, see below) and `Gc/Reachability/Reachability.lean` (wrong
-  `Location` constructor names, see below). `Main.lean` additionally references an undefined `hello`
-  (leftover from the `lake new` template) on top of transitively depending on the broken `Gc` target.
-  Always build the specific module(s) you're touching by qualified name instead.
+- **`lake build` / `lake build Gc` (the library target) may still be broken** — don't assume it works
+  without checking. `Gc.lean` now correctly imports every module under `Gc/Model` and `Gc/Reachability`
+  (fixed 2026-07-24; it used to have the stale `lake new` template's `import Gc.Basic` pointing at a
+  `Gc/Basic.lean` that no longer exists). `Gc/Model/Preservation/Enter.lean` is no longer a blocker —
+  it's fully proved as of 2026-07-24 (see below). `Gc/Reachability/Reachability.lean` (wrong `Location`
+  constructor names) and `Main.lean`'s undefined `hello` (leftover from the `lake new` template) may
+  still be issues; the user has been making their own in-progress edits to `Gc.lean` (e.g. dropping the
+  `Reachability` import) to work around this, so check current state rather than assuming either fixed
+  or broken. Always build the specific module(s) you're touching by qualified name instead.
 - Toolchain is pinned via `lean-toolchain` (`leanprover/lean4:v4.29.0-rc6`) and dependencies via
   `lake-manifest.json`; the main dependency is `mathlib`. First builds after a fresh clone can be slow
   because of mathlib — subsequent builds reuse `.lake/build`.
@@ -105,10 +105,24 @@ not by reading file contents alone):
   `h` directly. Same applies to defeq-only mismatches when supplying a record literal that only differs
   by one field (e.g. `status`) to a hypothesis expecting the original value — prefer a fully explicit
   term over `_` so elaboration doesn't propagate the wrong expected type into the hole.
-- **`Enter.lean`** — partial: `enter_L1`, `enter_L2`, `enter_H1` are fully proved. `enter_H2` is
-  attempted but currently ends in a genuine **"unsolved goals"** error partway through (an intermediate
-  `have` isn't fully closed by its `rw`) — this is what makes the file fail to build. `enter_H3`,
-  `enter_S1`, `enter_S2`, `enter_S3`, and all 4 `enter_corollary_*` lemmas are untouched `sorry` stubs.
+- **`Enter.lean`** — **fully proved, builds cleanly, zero `sorry`, zero warnings** (as of 2026-07-24).
+  All 8 invariants (`enter_L1` … `enter_S3`) plus `enter_valid` are real proofs. Three reusable
+  corollaries carry the weight: `enter_corollary_1` (heap region/oid uniqueness, stated over bare `L1
+  cfg` rather than full `ValidConfig cfg` so it's usable on `cfg` inside proofs about `cfg'` before
+  `cfg'`'s validity is established), `enter_corollary_2` (`(OId oid).loc? cfg = (OId oid).loc? cfg'`;
+  the heap side needed a case split directly on the *main goal* rather than a standalone `find?`-equality
+  lemma, since the entered region's `status` genuinely differs between `cfg`/`cfg'` when the entered
+  `rid` is the one being looked up — a small match-congruence `have` shows the discarded `Region` isn't
+  read by the outer `Location` match, so the differing `status` doesn't matter), and `enter_corollary_3`
+  (the general `ref.loc? cfg = loc ↔ ref.loc? cfg' = loc`, reducing to `enter_corollary_2` for `OId` and
+  to a heap-key-permutation argument for `RId`). `enter_H3`, `enter_S2`, `enter_S3` all lean on
+  `enter_corollary_2`/`_3` to transport the `loc?` fact across the mutation; `enter_S1` instead uses `L2`
+  directly (the freshly-pushed frame's region must have been Closed just before `enter` flips it Open, so
+  no existing Open-region frame could already share that `regionId`). Three originally-stubbed
+  corollaries (`enter_corollary_4`/`_5`/`_6`, refs-permutation facts) turned out unneeded by any of the
+  8 invariants — `enter_H2`'s proof already computes the same permutation facts inline via its own
+  unnamed `have`s — and were deleted rather than left as dead `sorry` stubs. Axiom check confirms only
+  `propext`/`Classical.choice`/`Quot.sound` throughout.
 - **`Merge.lean`, `Swap.lean`, `VarAsgn.lean`, `FieldAsgn.lean`, `MakeObjRegion.lean`,
   `MakeObjStack.lean`, `MakeRegion.lean`** — not started: all 8 invariant lemmas are bare `sorry`: only
   the combining `<op>_valid` theorem (which just assembles the 8 sorry'd lemmas) is written. These
@@ -136,15 +150,10 @@ Elsewhere:
 
 ## Next planned step
 
-`Exit.lean` and `Validity.lean` are now both fully done (zero `sorry`). Agreed next step:
-
-**Finish `Enter.lean`**, invariants before corollaries: `enter_L1`, `enter_L2`, `enter_H1` are already
-proved; fix `enter_H2` first (currently a genuine "unsolved goals" error partway through — an
-intermediate `have` isn't fully closed by its `rw` — which is what fails the build), then `enter_H3`,
-`enter_S1`, `enter_S2`, `enter_S3` (all untouched `sorry` stubs). Only after all 8 invariants are real
-proofs should the 4 `enter_corollary_*` lemmas (also untouched `sorry` stubs) be tackled — mirrors how
-`Exit.lean` was done (8 invariants solid first, corollaries built on top of them afterward). With
-`Validity.lean` now sorry-free, `Enter.lean`'s corollaries can lean on `oid_loc_rgn_iff_in_heap` /
-`oid_loc_stk_iff_in_stack` without inheriting a hidden `sorry` dependency.
+`Exit.lean`, `Validity.lean`, and `Enter.lean` are now all fully done (zero `sorry`). The remaining
+`Preservation/*.lean` files — `Merge.lean`, `Swap.lean`, `VarAsgn.lean`, `FieldAsgn.lean`,
+`MakeObjRegion.lean`, `MakeObjStack.lean`, `MakeRegion.lean` — are all not started (8 bare-`sorry`
+invariant lemmas each, only the combining `<op>_valid` assembled). No specific one has been agreed on
+next.
 
 Not yet started — confirm with the user before diving in.
