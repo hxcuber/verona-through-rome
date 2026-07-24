@@ -4,7 +4,7 @@ import Gc.Model.Validity
 import Gc.Model.Theorems
 import Gc.Model.Mutation
 
-theorem enter_corollary_8 :
+theorem enter_corollary_1 :
   L1 cfg →
   (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region1.objMap.keys →
   (⟨rid2, region2⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region2.objMap.keys →
@@ -26,7 +26,7 @@ theorem enter_corollary_8 :
   unfold Region.objectIds at disj
   exact disj in1 in2
 
-theorem enter_corollary_9 : ValidConfig cfg →
+theorem enter_corollary_2 : ValidConfig cfg →
   enter xf a cfg = some cfg' →
   ∀ oid, (Reference.OId oid).loc? cfg = (Reference.OId oid).loc? cfg' := by
   intro vcfg h oid
@@ -155,7 +155,7 @@ theorem enter_corollary_9 : ValidConfig cfg →
                 dsimp
                 intro hcontra
                 exact rid1_eq_rid
-                  (enter_corollary_8 l1 region1_mem region1_contains_oid
+                  (enter_corollary_1 l1 region1_mem region1_contains_oid
                     (AList.lookup_mem_entries heapLookup) (List.contains_iff_mem.mp hcontra))
               obtain ⟨b, l1e, l2e, _, entries_eq, kerase_eq⟩ :=
                 List.exists_of_kerase (a := rid) (l := cfg.heap.entries)
@@ -183,31 +183,14 @@ theorem enter_corollary_9 : ValidConfig cfg →
               rw [find_eq2] at heapLookup'
               rw [List.find?_append, heapLookup']
 
-theorem enter_corollary_4 : ValidConfig cfg →
-  enter xf a cfg = some cfg' →
-  cfg.stack.refs.Perm cfg'.stack.refs := by
-  sorry
-
-theorem enter_corollary_5 : ValidConfig cfg →
-  enter xf a cfg = some cfg' →
-  cfg.heap.refs.Perm cfg'.heap.refs := by
-  sorry
-
-theorem enter_corollary_6 : ValidConfig cfg →
-  enter xf a cfg = some cfg' →
-  cfg.heap.lookup rid = some region →
-  cfg'.heap.lookup rid = some region' →
-  region.refs = region'.refs := by
-  sorry
-
-theorem enter_corollary_7 : ∀ ref : Reference,
+theorem enter_corollary_3 : ∀ ref : Reference,
   ValidConfig cfg →
   enter xf a cfg = some cfg' →
   (ref.loc? cfg = loc ↔ ref.loc? cfg' = loc) := by
   intro ref vcfg h
   cases ref with
   | OId oid =>
-    rw [enter_corollary_9 vcfg h oid]
+    rw [enter_corollary_2 vcfg h oid]
   | RId rid =>
     have h' := h
     unfold enter at h
@@ -549,7 +532,7 @@ theorem enter_H3 : ValidConfig cfg →
           have h3 := vcfg.h3
           unfold H3
           intro rid oid region cfg'_lookup oid_in_refs
-          rw [← enter_corollary_9 vcfg h' oid]
+          rw [← enter_corollary_2 vcfg h' oid]
           by_cases rideq : rid = rid0
           · subst rideq
             rw [AList.lookup_insert, Option.some_inj] at cfg'_lookup
@@ -661,7 +644,7 @@ theorem enter_S2 : ValidConfig cfg →
           rw [stackWithIndex_eq, List.mem_append, List.mem_singleton] at hframe
           cases hframe with
           | inl hframe_old =>
-            have hlocEq_cfg : ref.loc? cfg = some (Location.Stk fid') := (enter_corollary_7 ref vcfg h').mpr hlocEq
+            have hlocEq_cfg : ref.loc? cfg = some (Location.Stk fid') := (enter_corollary_3 ref vcfg h').mpr hlocEq
             exact vcfg.s2 frame hframe_old ref href fid' oid hrefeq hlocEq_cfg
           | inr hframe_new =>
             subst hframe_new
@@ -719,7 +702,7 @@ theorem enter_S3 : ValidConfig cfg →
           rw [stackWithIndex_eq, List.mem_append, List.mem_singleton] at hframe
           cases hframe with
           | inl hframe_old =>
-            have hlocEq_cfg : ref.loc? cfg = some (Location.Rgn rid') := (enter_corollary_7 ref vcfg h').mpr hlocEq
+            have hlocEq_cfg : ref.loc? cfg = some (Location.Rgn rid') := (enter_corollary_3 ref vcfg h').mpr hlocEq
             obtain ⟨frame', hframe'_mem, hframe'_regionId, hframe'_index⟩ :=
               vcfg.s3 frame hframe_old ref href rid' oid hrefeq hlocEq_cfg
             refine ⟨frame', ?_, hframe'_regionId, hframe'_index⟩
