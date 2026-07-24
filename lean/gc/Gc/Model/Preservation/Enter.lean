@@ -257,8 +257,29 @@ theorem enter_H2 : ValidConfig cfg →
             rw [← h]
             unfold Stack.refs
             dsimp
-            rw [List.flatMap_id, List.flatMap_id]
-          sorry
+            rw [List.flatMap_id, List.flatMap_id, List.map_append, List.flatten_append]
+            simp [Frame.refs]
+          have cfg'_heap_refs_perm_cfg_heap_refs : cfg'.heap.refs.Perm cfg.heap.refs := by
+            rw [← h]
+            dsimp
+            apply List.Perm.flatten
+            unfold Region.refs AList.insert
+            dsimp
+            obtain ⟨a, b, c, d, e, f⟩ := List.exists_of_kerase (List.mem_map_of_mem (AList.lookup_mem_entries heapLookup))
+            have a_eq_region : a = region := by
+              have mem_a : ⟨rid, a⟩ ∈ cfg.heap.entries := by
+                rw [e, List.mem_append, List.mem_cons]
+                right
+                left
+                dsimp
+              exact List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys mem_a (AList.lookup_mem_entries heapLookup)
+            subst a
+            rw [f, e, List.map_append, List.map_append, List.map_append, List.map_append, List.map_cons]
+            dsimp
+            exact List.perm_middle.symm
+          have h2 := vcfg.h2 rid'
+          rw [← cfg_stack_refs_perm_cfg'_stack_refs.count_eq, cfg'_heap_refs_perm_cfg_heap_refs.count_eq]
+          exact h2
 
 theorem enter_H3 : ValidConfig cfg →
   enter xf a cfg = some cfg' →
