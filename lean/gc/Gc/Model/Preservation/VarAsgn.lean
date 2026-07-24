@@ -44,6 +44,11 @@ theorem varAsgn_S3 : ValidConfig cfg →
   S3 cfg' := by
   sorry
 
+theorem varAsgn_HS1 : ValidConfig cfg →
+  varAsgn xf y cfg = some cfg' →
+  HS1 cfg' := by
+  sorry
+
 theorem varAsgn_valid : ValidConfig cfg →
   varAsgn xf y cfg = some cfg' →
   ValidConfig cfg' := by
@@ -56,5 +61,6 @@ theorem varAsgn_valid : ValidConfig cfg →
     h3 := varAsgn_H3 vcfg h,
     s1 := varAsgn_S1 vcfg h,
     s2 := varAsgn_S2 vcfg h,
-    s3 := varAsgn_S3 vcfg h
+    s3 := varAsgn_S3 vcfg h,
+    hs1 := varAsgn_HS1 vcfg h
   }

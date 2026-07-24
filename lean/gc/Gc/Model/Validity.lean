@@ -41,6 +41,15 @@ def S3 (cfg : RuntimeConfig) : Prop :=
     ∃ frame' ∈ cfg.stackWithIndex,
       frame'.regionId = rid' ∧ frame'.index <= frame.index
 
+-- No dangling pointers: every object reference stored anywhere (a stack frame's varMap/objMap,
+-- or a heap region's objMap) actually points at a currently allocated object id. Unlike H2/H3/S2/S3,
+-- which only constrain refs that are already known to resolve somewhere, HS1 is what rules out a
+-- ref value coincidentally matching an id that hasn't been allocated yet (e.g. a not-yet-fresh
+-- RuntimeConfig.freshObjectId), which would otherwise let a later object creation retroactively
+-- "resolve" a stale/unrelated reference.
+def HS1 (cfg : RuntimeConfig) : Prop :=
+  ∀ oid, Reference.OId oid ∈ cfg.refs → oid ∈ cfg.objectIds
+
 structure ValidConfig (cfg : RuntimeConfig) where
   l1 : L1 cfg
   l2 : L2 cfg
@@ -50,6 +59,7 @@ structure ValidConfig (cfg : RuntimeConfig) where
   s1 : S1 cfg
   s2 : S2 cfg
   s3 : S3 cfg
+  hs1 : HS1 cfg
 
 theorem oid_in_stack_implies_not_in_heap : ValidConfig cfg →
   cfg.stackWithIndex.findRev? (λ frame => frame.objMap.keys.contains oid) = some frame →

@@ -44,6 +44,11 @@ theorem makeObjRegion_S3 : ValidConfig cfg →
   S3 cfg' := by
   sorry
 
+theorem makeObjRegion_HS1 : ValidConfig cfg →
+  makeObjRegion x cfg = some cfg' →
+  HS1 cfg' := by
+  sorry
+
 theorem makeObjRegion_valid : ValidConfig cfg →
   makeObjRegion x cfg = some cfg' →
   ValidConfig cfg' := by
@@ -56,5 +61,6 @@ theorem makeObjRegion_valid : ValidConfig cfg →
     h3 := makeObjRegion_H3 vcfg h,
     s1 := makeObjRegion_S1 vcfg h,
     s2 := makeObjRegion_S2 vcfg h,
-    s3 := makeObjRegion_S3 vcfg h
+    s3 := makeObjRegion_S3 vcfg h,
+    hs1 := makeObjRegion_HS1 vcfg h
   }

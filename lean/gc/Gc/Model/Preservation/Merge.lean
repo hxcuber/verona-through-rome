@@ -44,6 +44,11 @@ theorem merge_S3 : ValidConfig cfg →
   S3 cfg' := by
   sorry
 
+theorem merge_HS1 : ValidConfig cfg →
+  merge x cfg = some cfg' →
+  HS1 cfg' := by
+  sorry
+
 theorem merge_valid : ValidConfig cfg →
   merge x cfg = some cfg' →
   ValidConfig cfg' := by
@@ -56,5 +61,6 @@ theorem merge_valid : ValidConfig cfg →
     h3 := merge_H3 vcfg h,
     s1 := merge_S1 vcfg h,
     s2 := merge_S2 vcfg h,
-    s3 := merge_S3 vcfg h
+    s3 := merge_S3 vcfg h,
+    hs1 := merge_HS1 vcfg h
   }

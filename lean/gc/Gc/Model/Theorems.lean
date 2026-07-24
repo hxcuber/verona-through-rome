@@ -94,6 +94,25 @@ theorem List.Sublist.flatten_sublist {α : Type} {l m : List (List α)} (h : l.S
     rw [List.flatten_cons, List.flatten_cons]
     exact (List.append_sublist_append_left head).mpr ih
 
+theorem List.le_foldl_max_self {l : List Nat} : ∀ init : Nat, init ≤ l.foldl max init := by
+  induction l with
+  | nil => intro init; exact le_refl init
+  | cons a l ih =>
+    intro init
+    rw [List.foldl_cons]
+    exact le_trans (le_max_left init a) (ih (max init a))
+
+theorem List.mem_le_foldl_max {l : List Nat} : ∀ (init x : Nat), x ∈ l → x ≤ l.foldl max init := by
+  induction l with
+  | nil => intro init x hx; exact absurd hx (List.not_mem_nil)
+  | cons a l ih =>
+    intro init x hx
+    rw [List.foldl_cons]
+    rcases List.mem_cons.mp hx with heq | hmem
+    · subst heq
+      exact le_trans (le_max_right init x) (List.le_foldl_max_self (max init x))
+    · exact ih (max init a) x hmem
+
 theorem List.find?_eq_some_of_unique {α} {p : α → Bool} {l : List α} {e : α}
     (mem : e ∈ l) (pe : p e) (uniq : ∀ x ∈ l, p x → x = e) : l.find? p = some e := by
   obtain ⟨as, bs, hl, e_notin_as⟩ := List.eq_append_cons_of_mem mem

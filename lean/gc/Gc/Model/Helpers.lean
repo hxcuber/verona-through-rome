@@ -1,4 +1,5 @@
 import Gc.Model.Types
+import Gc.Model.Theorems
 import Mathlib.Data.List.AList
 
 def Heap.regions (heap : Heap) : List Region := heap.entries.map (·.2)
@@ -30,6 +31,16 @@ def RuntimeConfig.freshObjectId (cfg : RuntimeConfig) : ObjectId :=
   match cfg.objectIds with
   | [] => 0
   | ids => ids.foldl max 0 + 1
+
+theorem RuntimeConfig.freshObjectId_not_mem (cfg : RuntimeConfig) : cfg.freshObjectId ∉ cfg.objectIds := by
+  intro hmem
+  unfold RuntimeConfig.freshObjectId at hmem
+  cases h : cfg.objectIds with
+  | nil => rw [h] at hmem; exact absurd hmem List.not_mem_nil
+  | cons a l =>
+    rw [h] at hmem
+    have hle := List.mem_le_foldl_max 0 (List.foldl max 0 (a :: l) + 1) hmem
+    omega
 
 def Reference.loc? (ref : Reference) (cfg : RuntimeConfig) : Option Location :=
   match ref with

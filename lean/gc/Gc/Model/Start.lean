@@ -109,6 +109,13 @@ theorem RuntimeConfig.start_valid_S4 : S3 RuntimeConfig.start := by
   | tail =>
     contradiction
 
+theorem RuntimeConfig.start_HS1 : HS1 RuntimeConfig.start := by
+  unfold HS1
+  intro oid hmem
+  unfold RuntimeConfig.start RuntimeConfig.refs Stack.refs Frame.refs Heap.refs Region.refs Object.refs at hmem
+  dsimp at hmem
+  simp at hmem
+
 theorem RuntimeConfig.start_valid : ValidConfig RuntimeConfig.start :=
   { l1 := RuntimeConfig.start_L1,
     l2 := RuntimeConfig.start_L2,
@@ -118,4 +125,5 @@ theorem RuntimeConfig.start_valid : ValidConfig RuntimeConfig.start :=
     s1 := RuntimeConfig.start_valid_S2,
     s2 := RuntimeConfig.start_valid_S3,
     s3 := RuntimeConfig.start_valid_S4,
+    hs1 := RuntimeConfig.start_HS1,
   }
