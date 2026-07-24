@@ -83,17 +83,24 @@ The proof development has two layers under `Gc/`:
 Per-operation status of the `Preservation/*.lean` proofs (verified by building each module directly,
 not by reading file contents alone):
 
-- **`Exit.lean`** — furthest along and **builds cleanly** (as of 2026-07-24). All 8 invariants
+- **`Exit.lean`** — **fully proved, builds cleanly, zero `sorry`** (as of 2026-07-24). All 8 invariants
   (`exit_L1` … the `S1`/`S2`/`S3` analogues, misleadingly named `exit_S2`/`exit_S3`/`exit_S4` in the
-  file) have real, fully written proofs, no `sorry`. `exit_corollary_1` is now also fully proved (both
-  `RId`/`OId` cases, both directions) — this required three new reusable helper lemmas at the top of the
-  file (`heap_oid_unique_key`, `heap_objectIds_of_mem`, `List.find?_eq_some_of_unique`) plus a `subst h`
-  refactor of the whole theorem to match the pattern used elsewhere in the file. The only remaining gap
-  is `exit_corollary_3`, which is still a bare `sorry` (untouched — not this session's target).
-  Recurring gotcha worth remembering for future proofs in this style: `rw [find?_cons_of_pos/neg h]`
-  frequently fails via higher-order-unification ambiguity when `h`'s type is an unreduced lambda
-  application; work around it by stating the target `find?` equality as its own fully-concrete-typed
-  `have` first (with `h` as the proof term), then `rw` with that `have` instead of `h` directly.
+  file) plus all 3 corollaries (`exit_corollary_1`, `exit_corollary_2`, `exit_corollary_3`) have real,
+  fully written proofs. `exit_corollary_3` (the last gap) required two more reusable helper lemmas
+  alongside the three from `exit_corollary_1` (`heap_oid_unique_key`, `heap_objectIds_of_mem`,
+  `List.find?_eq_some_of_unique`): `heap_status_update_find_none_iff` (a heap `find?` for a given `oid`
+  is unaffected — as a `none`-preserving fact — by a status-only update at a key that already existed)
+  and `stack_frame_oid_disjoint_of_dropLast` (L1's global object-id uniqueness rules out the
+  about-to-be-popped last frame containing an `oid` that's already present earlier in the stack). Axiom
+  check (`lean_verify`/`lean4-skills-check-axioms-inline`) confirms every declaration in the file only
+  depends on `propext`/`Classical.choice`/`Quot.sound`, i.e. no accidental `sorry` leakage through a
+  dependency. Recurring gotcha worth remembering for future proofs in this style: `rw
+  [find?_cons_of_pos/neg h]` frequently fails via higher-order-unification ambiguity when `h`'s type is
+  an unreduced lambda application; work around it by stating the target `find?` equality as its own
+  fully-concrete-typed `have` first (with `h` as the proof term), then `rw` with that `have` instead of
+  `h` directly. Same applies to defeq-only mismatches when supplying a record literal that only differs
+  by one field (e.g. `status`) to a hypothesis expecting the original value — prefer a fully explicit
+  term over `_` so elaboration doesn't propagate the wrong expected type into the hole.
 - **`Enter.lean`** — partial: `enter_L1`, `enter_L2`, `enter_H1` are fully proved. `enter_H2` is
   attempted but currently ends in a genuine **"unsolved goals"** error partway through (an intermediate
   `have` isn't fully closed by its `rw`) — this is what makes the file fail to build. `enter_H3`,
@@ -112,8 +119,8 @@ Elsewhere:
 
 ## Next planned step
 
-`Exit.lean` is done (see above) except for `exit_corollary_3`'s `sorry`. The next natural target is
-`Enter.lean`: `enter_L1`, `enter_L2`, `enter_H1` are proved; `enter_H2` has a genuine "unsolved goals"
-error partway through (an intermediate `have` isn't fully closed by its `rw`) which is what currently
-fails the build; `enter_H3`, `enter_S1`–`S3`, and all 4 `enter_corollary_*` lemmas are untouched `sorry`
-stubs. Not yet started — confirm with the user before diving in.
+`Exit.lean` is now fully done (see above, zero `sorry`). The next natural target is `Enter.lean`:
+`enter_L1`, `enter_L2`, `enter_H1` are proved; `enter_H2` has a genuine "unsolved goals" error partway
+through (an intermediate `have` isn't fully closed by its `rw`) which is what currently fails the build;
+`enter_H3`, `enter_S1`–`S3`, and all 4 `enter_corollary_*` lemmas are untouched `sorry` stubs. Not yet
+started — confirm with the user before diving in.
