@@ -268,9 +268,7 @@ theorem oid_loc_rgn_iff_in_heap : ValidConfig cfg →
           simp only [List.get_eq_getElem] at disj
           rw [get_n] at disj
           unfold Region.objectIds at disj
-          have in_j : oid ∈ (AList.keys cfg.heap.entries[j].snd.objMap) := List.contains_iff_mem.mp hcon
-          have in_n : oid ∈ (AList.keys region.objMap) := List.contains_iff_mem.mp oid_in_region
-          exact disj in_j in_n
+          exact disj (List.contains_iff_mem.mp hcon) (List.contains_iff_mem.mp oid_in_region)
     have not_in_stack := oid_in_heap_implies_not_in_stack vcfg this
     rw [this, not_in_stack]
 
@@ -304,9 +302,8 @@ theorem oid_loc_stk_iff_in_stack : ValidConfig cfg →
         dsimp at loc_oid
         rw [Option.some_inj, Location.Stk.injEq] at loc_oid
         rw [List.findRev?_eq_find?_reverse] at h1
-        have mem_rev : frame0 ∈ cfg.stackWithIndex.reverse := List.mem_of_find?_eq_some h1
+        have mem_rev : frame0 ∈ cfg.stackWithIndex := List.mem_reverse.mp (List.mem_of_find?_eq_some h1)
         have pred_true := List.find?_some h1
-        rw [List.mem_reverse] at mem_rev
         obtain ⟨n, n_lt_length, f_eq⟩ := List.mem_mapIdx.mp mem_rev
         have idx_eq : frame0.index = n := by rw [← f_eq]
         refine ⟨frame0, ?_, ?_⟩
@@ -334,8 +331,8 @@ theorem oid_loc_stk_iff_in_stack : ValidConfig cfg →
     rw [List.getElem?_mapIdx, Option.map_eq_some_iff] at stk_lookup_frame
     obtain ⟨stackFrame, hfid, hframe_eq⟩ := stk_lookup_frame
     obtain ⟨fid_lt_length, stackFrame_eq⟩ := List.getElem?_eq_some_iff.mp hfid
-    have frame_eq : ({cfg.stack[fid] with index := fid} : FrameWithIndex) = frame := by
-      rw [stackFrame_eq]; exact hframe_eq
+    have frame_eq : ({cfg.stack[fid] with index := fid} : FrameWithIndex) = frame :=
+      stackFrame_eq ▸ hframe_eq
     have idx_eq_fid : frame.index = fid := by rw [← frame_eq]
     have frame_objMap_eq : frame.objMap = cfg.stack[fid].objMap := by rw [← frame_eq]
     have h1_eq : cfg.stackWithIndex.findRev? (fun f => (AList.keys f.objMap).contains oid) = some frame := by
