@@ -204,7 +204,59 @@ theorem enter_corollary_7 : ∀ ref : Reference,
   ValidConfig cfg →
   enter xf a cfg = some cfg' →
   (ref.loc? cfg = loc ↔ ref.loc? cfg' = loc) := by
-  sorry
+  intro ref vcfg h
+  cases ref with
+  | OId oid =>
+    rw [enter_corollary_9 vcfg h oid]
+  | RId rid =>
+    have h' := h
+    unfold enter at h
+    cases resolvexf: resolveFA xf cfg with
+    | none =>
+      rw [resolvexf] at h
+      contradiction
+    | some xfRef =>
+      rw [resolvexf] at h
+      dsimp at h
+      cases xfRef with
+      | OId _ =>
+        contradiction
+      | RId rid0 =>
+        dsimp at h
+        cases heapLookup : cfg.heap.lookup rid0 with
+        | none =>
+          rw [heapLookup] at h
+          contradiction
+        | some region =>
+          rw [heapLookup] at h
+          dsimp at h
+          cases regionStatus : region.status with
+          | Open =>
+            rw [regionStatus] at h
+            contradiction
+          | Closed =>
+            rw [regionStatus] at h
+            rw [if_pos (by rfl)] at h
+            rw [Option.some_inj] at h
+            subst h
+            unfold Reference.loc?
+            dsimp
+            have keys_perm :
+                (AList.insert rid0 { bridgeObjectId := region.bridgeObjectId, objMap := region.objMap, status := Status.Open }
+                  cfg.heap).keys.Perm cfg.heap.keys := by
+              rw [AList.keys_insert]
+              exact (List.perm_cons_erase (AList.mem_keys.mp (AList.lookup_isSome.mp (by rw [heapLookup]; rfl)))).symm
+            have contains_eq :
+                (AList.insert rid0 { bridgeObjectId := region.bridgeObjectId, objMap := region.objMap, status := Status.Open }
+                  cfg.heap).keys.contains rid = cfg.heap.keys.contains rid := by
+              by_cases hmem : rid ∈ cfg.heap.keys
+              · rw [List.contains_iff_mem.mpr hmem, List.contains_iff_mem.mpr (keys_perm.mem_iff.mpr hmem)]
+              · have hmem' : rid ∉ (AList.insert rid0
+                    { bridgeObjectId := region.bridgeObjectId, objMap := region.objMap, status := Status.Open }
+                    cfg.heap).keys := fun hc => hmem (keys_perm.mem_iff.mp hc)
+                rw [Bool.eq_false_iff.mpr (fun hc => hmem' (List.contains_iff_mem.mp hc)),
+                  Bool.eq_false_iff.mpr (fun hc => hmem (List.contains_iff_mem.mp hc))]
+            rw [contains_eq]
 
 theorem enter_L1 : ValidConfig cfg →
   enter xf a cfg = some cfg' →
