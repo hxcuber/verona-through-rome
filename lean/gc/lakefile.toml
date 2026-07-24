@@ -1,0 +1,14 @@
+name = "gc"
+version = "0.1.0"
+defaultTargets = ["gc"]
+
+[[lean_lib]]
+name = "Gc"
+
+[[lean_exe]]
+name = "gc"
+root = "Main"
+
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
