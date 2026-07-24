@@ -17,5 +17,4 @@ import Gc.Model.Types
 import Gc.Model.Validity
 import Gc.Reachability.Guarantees
 import Gc.Reachability.Invariants
-import Gc.Reachability.Reachability
 import Gc.Reachability.Semantics
