@@ -69,9 +69,7 @@ theorem oid_in_stack_implies_not_in_heap : ValidConfig cfg →
     unfold g
     rw [← f_eq]
     dsimp
-    apply List.mem_iff_getElem.mpr
-    use n
-    exact ⟨_, rfl⟩
+    exact List.mem_iff_getElem.mpr ⟨n, _, rfl⟩
 
   have oid_in_g_keys : oid ∈ g.objMap.keys := by
     unfold g
@@ -80,11 +78,7 @@ theorem oid_in_stack_implies_not_in_heap : ValidConfig cfg →
   have oid_in_stack : oid ∈ cfg.stack.objectIds := by
     unfold Stack.objectIds Frame.objectIds
     rw [List.bind_eq_flatMap, List.flatMap_id, List.mem_flatten]
-    use g.objMap.keys
-    constructor
-    · apply List.mem_map_of_mem
-      exact g_in_stack
-    · exact oid_in_g_keys
+    exact ⟨g.objMap.keys, List.mem_map_of_mem g_in_stack, oid_in_g_keys⟩
 
   cases region_in_heap : List.find?
     (fun x => match x with | ⟨rid, region⟩ => (AList.keys region.objMap).contains oid)
@@ -101,13 +95,10 @@ theorem oid_in_stack_implies_not_in_heap : ValidConfig cfg →
       exact List.contains_iff_mem.mp region_obj_contains
     have oid_in_heap : oid ∈ cfg.heap.objectIds := by
       unfold Heap.objectIds Region.objectIds
-      apply List.mem_flatten.mpr
-      use region.objMap.keys
-      constructor
-      · replace region_in_entries := List.mem_map_of_mem (f := λ ⟨_, r⟩ => r.objMap.keys) region_in_entries
-        dsimp at region_in_entries
-        exact region_in_entries
-      · exact oid_in_region
+      refine List.mem_flatten.mpr ⟨region.objMap.keys, ?_, oid_in_region⟩
+      replace region_in_entries := List.mem_map_of_mem (f := λ ⟨_, r⟩ => r.objMap.keys) region_in_entries
+      dsimp at region_in_entries
+      exact region_in_entries
 
     unfold L1 RuntimeConfig.objectIds at l1
     obtain ⟨_, _, helper⟩ := List.nodup_append.mp l1
@@ -128,13 +119,10 @@ theorem oid_in_heap_implies_not_in_stack : ValidConfig cfg →
     exact List.contains_iff_mem.mp region_obj_contains
   have oid_in_heap : oid ∈ cfg.heap.objectIds := by
     unfold Heap.objectIds Region.objectIds
-    apply List.mem_flatten.mpr
-    use region.objMap.keys
-    constructor
-    · replace region_in_entries := List.mem_map_of_mem (f := λ ⟨_, r⟩ => r.objMap.keys) region_in_entries
-      dsimp at region_in_entries
-      exact region_in_entries
-    · exact oid_in_region
+    refine List.mem_flatten.mpr ⟨region.objMap.keys, ?_, oid_in_region⟩
+    replace region_in_entries := List.mem_map_of_mem (f := λ ⟨_, r⟩ => r.objMap.keys) region_in_entries
+    dsimp at region_in_entries
+    exact region_in_entries
 
   cases frame_in_stack : List.findRev?
     (fun frame => (AList.keys frame.objMap).contains oid)
@@ -155,9 +143,7 @@ theorem oid_in_heap_implies_not_in_stack : ValidConfig cfg →
       unfold g
       rw [← f_eq]
       dsimp
-      apply List.mem_iff_getElem.mpr
-      use n
-      exact ⟨_, rfl⟩
+      exact List.mem_iff_getElem.mpr ⟨n, _, rfl⟩
 
     have oid_in_g_keys : oid ∈ g.objMap.keys := by
       unfold g
@@ -166,11 +152,7 @@ theorem oid_in_heap_implies_not_in_stack : ValidConfig cfg →
     have oid_in_stack : oid ∈ cfg.stack.objectIds := by
       unfold Stack.objectIds Frame.objectIds
       rw [List.bind_eq_flatMap, List.flatMap_id, List.mem_flatten]
-      use g.objMap.keys
-      constructor
-      · apply List.mem_map_of_mem
-        exact g_in_stack
-      · exact oid_in_g_keys
+      exact ⟨g.objMap.keys, List.mem_map_of_mem g_in_stack, oid_in_g_keys⟩
     unfold L1 RuntimeConfig.objectIds at l1
     obtain ⟨_, _, helper⟩ := List.nodup_append.mp l1
     replace helper := helper oid oid_in_stack oid oid_in_heap
