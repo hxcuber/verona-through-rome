@@ -612,12 +612,122 @@ theorem enter_S1 : ValidConfig cfg →
 theorem enter_S2 : ValidConfig cfg →
   enter xf a cfg = some cfg' →
   S2 cfg' := by
-  sorry
+  intro vcfg h
+  have h' := h
+  unfold enter at h
+  cases resolvexf: resolveFA xf cfg with
+  | none =>
+    rw [resolvexf] at h
+    contradiction
+  | some xfRef =>
+    rw [resolvexf] at h
+    dsimp at h
+    cases xfRef with
+    | OId _ =>
+      contradiction
+    | RId rid0 =>
+      dsimp at h
+      cases heapLookup : cfg.heap.lookup rid0 with
+      | none =>
+        rw [heapLookup] at h
+        contradiction
+      | some region0 =>
+        rw [heapLookup] at h
+        dsimp at h
+        cases regionStatus : region0.status with
+        | Open =>
+          rw [regionStatus] at h
+          contradiction
+        | Closed =>
+          rw [regionStatus] at h
+          rw [if_pos (by rfl)] at h
+          rw [Option.some_inj] at h
+          subst h
+          unfold S2
+          intro frame hframe ref href fid' oid hrefeq hlocEq
+          have stackWithIndex_eq :
+              (RuntimeConfig.stackWithIndex
+                { stack := cfg.stack ++ [{ regionId := rid0, bridgeVar := a, objMap := ∅, varMap := ∅ }],
+                  heap :=
+                    AList.insert rid0
+                      { bridgeObjectId := region0.bridgeObjectId, objMap := region0.objMap, status := Status.Open }
+                      cfg.heap }) =
+              cfg.stackWithIndex ++
+                [({ regionId := rid0, bridgeVar := a, objMap := ∅, varMap := ∅, index := cfg.stack.length } :
+                  FrameWithIndex)] := by
+            unfold RuntimeConfig.stackWithIndex
+            dsimp
+            rw [List.mapIdx_concat]
+          rw [stackWithIndex_eq, List.mem_append, List.mem_singleton] at hframe
+          cases hframe with
+          | inl hframe_old =>
+            have hlocEq_cfg : ref.loc? cfg = some (Location.Stk fid') := (enter_corollary_7 ref vcfg h').mpr hlocEq
+            exact vcfg.s2 frame hframe_old ref href fid' oid hrefeq hlocEq_cfg
+          | inr hframe_new =>
+            subst hframe_new
+            simp [Frame.refs] at href
 
 theorem enter_S3 : ValidConfig cfg →
   enter xf a cfg = some cfg' →
   S3 cfg' := by
-  sorry
+  intro vcfg h
+  have h' := h
+  unfold enter at h
+  cases resolvexf: resolveFA xf cfg with
+  | none =>
+    rw [resolvexf] at h
+    contradiction
+  | some xfRef =>
+    rw [resolvexf] at h
+    dsimp at h
+    cases xfRef with
+    | OId _ =>
+      contradiction
+    | RId rid0 =>
+      dsimp at h
+      cases heapLookup : cfg.heap.lookup rid0 with
+      | none =>
+        rw [heapLookup] at h
+        contradiction
+      | some region0 =>
+        rw [heapLookup] at h
+        dsimp at h
+        cases regionStatus : region0.status with
+        | Open =>
+          rw [regionStatus] at h
+          contradiction
+        | Closed =>
+          rw [regionStatus] at h
+          rw [if_pos (by rfl)] at h
+          rw [Option.some_inj] at h
+          subst h
+          unfold S3
+          intro frame hframe ref href rid' oid hrefeq hlocEq
+          have stackWithIndex_eq :
+              (RuntimeConfig.stackWithIndex
+                { stack := cfg.stack ++ [{ regionId := rid0, bridgeVar := a, objMap := ∅, varMap := ∅ }],
+                  heap :=
+                    AList.insert rid0
+                      { bridgeObjectId := region0.bridgeObjectId, objMap := region0.objMap, status := Status.Open }
+                      cfg.heap }) =
+              cfg.stackWithIndex ++
+                [({ regionId := rid0, bridgeVar := a, objMap := ∅, varMap := ∅, index := cfg.stack.length } :
+                  FrameWithIndex)] := by
+            unfold RuntimeConfig.stackWithIndex
+            dsimp
+            rw [List.mapIdx_concat]
+          rw [stackWithIndex_eq, List.mem_append, List.mem_singleton] at hframe
+          cases hframe with
+          | inl hframe_old =>
+            have hlocEq_cfg : ref.loc? cfg = some (Location.Rgn rid') := (enter_corollary_7 ref vcfg h').mpr hlocEq
+            obtain ⟨frame', hframe'_mem, hframe'_regionId, hframe'_index⟩ :=
+              vcfg.s3 frame hframe_old ref href rid' oid hrefeq hlocEq_cfg
+            refine ⟨frame', ?_, hframe'_regionId, hframe'_index⟩
+            rw [stackWithIndex_eq]
+            exact List.mem_append_left _ hframe'_mem
+          | inr hframe_new =>
+            subst hframe_new
+            simp [Frame.refs] at href
 
 theorem enter_valid : ValidConfig cfg →
   enter xf a cfg = some cfg' →
