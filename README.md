@@ -9,3 +9,5 @@ Major changes from the report
 - `makeRegion` - regions have a completely separate counter to objects. this decoupling means that we dont run into the following case: object 99 and region 99 exists, object 99 gets dealloc'd, we create a new region, and then its new regionId is again 99, which already exists. this change also then introduces a couple of new helper functions for getting regionIds.
 
 - `HS2` - same as `HS1`, but for region references.
+
+- updated reachability semantic definitions to more accurately reflect what was said in the report - in particular generalising both region and frame reachability, and then truly matching stack reachability to its definition found in the report.
