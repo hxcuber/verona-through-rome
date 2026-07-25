@@ -133,10 +133,100 @@ theorem fieldAsgn_corollary_stack_eq {cfg : RuntimeConfig} {frame : FrameWithInd
     subst hframe
     exact ⟨stack_eq, rfl⟩
 
+-- Generic AList fact (no domain dependency): replacing the value at an already-present key
+-- reorders `entries` (moves it to the front via kerase+cons) but only *permutes* `.keys`, never
+-- changes the key set. Used at both nesting levels in this file (frame.objMap/region.objMap
+-- insert at the already-present `oid`, and cfg.heap insert at the already-present `rid`).
+theorem fieldAsgn_corollary_insert_keys_perm {α : Type*} {β : α → Type*} [DecidableEq α]
+    {l : AList β} {k : α} {v : β k} (hk : k ∈ l.keys) :
+    (l.insert k v).keys.Perm l.keys := by
+  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase hk
+  unfold AList.keys
+  rw [AList.entries_insert, hkerase]
+  conv_rhs => rw [heq]
+  rw [List.keys_cons, List.keys_append, List.keys_append, List.keys_cons]
+  exact List.perm_middle.symm
+
+-- Generic AList fact: a successful `lookup` means the key is already present.
+theorem fieldAsgn_corollary_mem_keys_of_lookup {α : Type*} {β : α → Type*} [DecidableEq α]
+    {l : AList β} {k : α} {v : β k} (hv : l.lookup k = some v) : k ∈ l.keys :=
+  AList.mem_keys.mp (AList.lookup_isSome.mp (by rw [hv]; rfl))
+
+-- FIELD-ASGN-REGION's heap.insert at an already-present key `rid`, where the newly-inserted region's
+-- objMap key set is only known up to a `Perm` of the old region's (rather than literal equality, as in
+-- VarAsgn.lean's bridge branch, since here the region's `objMap` genuinely changes, not just a scalar
+-- field), still only permutes `Heap.objectIds` overall -- composes the outer heap-entries reorder
+-- (mirroring varAsgn_corollary_bridge_heap_objectIds_perm) with the inner region-level permutation.
+theorem fieldAsgn_corollary_region_heap_objectIds_perm {cfg : RuntimeConfig} {rid : RegionId}
+    {region newRegion : Region} (hregion : cfg.heap.lookup rid = some region)
+    (hperm : newRegion.objMap.keys.Perm region.objMap.keys) :
+    (Heap.objectIds (cfg.heap.insert rid newRegion)).Perm cfg.heap.objectIds := by
+  obtain ⟨region2, l1e, l2e, hnotmem, heq, hkerase⟩ :=
+    List.exists_of_kerase (fieldAsgn_corollary_mem_keys_of_lookup hregion)
+  have region2_eq : region2 = region :=
+    List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys
+      (heq ▸ List.mem_append_right _ List.mem_cons_self) (AList.mem_lookup_iff.mp (by rw [hregion]; rfl))
+  have cfg_eq : Heap.objectIds cfg.heap =
+      List.flatten (l1e.map (fun e => e.2.objectIds)) ++
+        (region.objectIds ++ List.flatten (l2e.map (fun e => e.2.objectIds))) := by
+    unfold Heap.objectIds
+    rw [heq, ← region2_eq, List.map_append, List.map_cons, List.flatten_append, List.flatten_cons]
+  have cfg'_eq : Heap.objectIds (cfg.heap.insert rid newRegion) =
+      newRegion.objectIds ++
+        (List.flatten (l1e.map (fun e => e.2.objectIds)) ++ List.flatten (l2e.map (fun e => e.2.objectIds))) := by
+    unfold Heap.objectIds
+    rw [AList.entries_insert, hkerase, List.map_cons, List.flatten_cons, List.map_append, List.flatten_append]
+  rw [cfg_eq, cfg'_eq]
+  set LA := List.flatten (l1e.map (fun e => e.2.objectIds))
+  set LB := List.flatten (l2e.map (fun e => e.2.objectIds))
+  have swap_perm : (region.objectIds ++ (LA ++ LB)).Perm (LA ++ (region.objectIds ++ LB)) := by
+    rw [← List.append_assoc, ← List.append_assoc]
+    exact (List.perm_append_comm).append_right LB
+  exact (hperm.append_right (LA ++ LB)).trans swap_perm
+
 theorem fieldAsgn_L1 : ValidConfig cfg →
   fieldAsgn x yf cfg = some cfg' →
   L1 cfg' := by
-  sorry
+  intro vcfg h
+  have l1 := vcfg.l1
+  obtain ⟨frame, hframe, hcase⟩ := fieldAsgn_cases h
+  unfold L1
+  rcases hcase with
+    ⟨oid, oid_y, obj, hxr, hyr, hloc, hobj, hcfg'⟩ |
+    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hcfg'⟩
+  · subst hcfg'
+    obtain ⟨stack_eq, _⟩ := fieldAsgn_corollary_stack_eq hframe
+    have hoidmem : oid ∈ frame.objMap.keys := fieldAsgn_corollary_mem_keys_of_lookup hobj
+    have frame_perm := fieldAsgn_corollary_insert_keys_perm
+      (l := frame.objMap) (v := obj.insert x.field (Reference.OId oid_y)) hoidmem
+    have stack_objectIds_append : ∀ (l : Stack) (f : Frame),
+        Stack.objectIds (l ++ [f]) = Stack.objectIds l ++ f.objectIds := by
+      intro l f
+      unfold Stack.objectIds
+      rw [List.bind_eq_flatMap, List.bind_eq_flatMap, List.flatMap_id, List.flatMap_id,
+        List.map_append, List.flatten_append]
+      simp
+    unfold RuntimeConfig.objectIds
+    dsimp
+    rw [stack_objectIds_append]
+    have cfg_stack_eq : Stack.objectIds cfg.stack = Stack.objectIds cfg.stack.dropLast ++ frame.objMap.keys := by
+      conv_lhs => rw [stack_eq]
+      rw [stack_objectIds_append]
+      rfl
+    have perm2 :=
+      (List.Perm.append_left (Stack.objectIds cfg.stack.dropLast) frame_perm).append_right cfg.heap.objectIds
+    rw [← cfg_stack_eq] at perm2
+    exact l1.perm perm2.symm
+  · subst hcfg'
+    have hoidmem : oid ∈ region.objMap.keys := fieldAsgn_corollary_mem_keys_of_lookup hobj
+    have region_perm := fieldAsgn_corollary_insert_keys_perm
+      (l := region.objMap) (v := obj.insert x.field (Reference.OId oid_y)) hoidmem
+    have heap_perm := fieldAsgn_corollary_region_heap_objectIds_perm
+      (newRegion := { region with objMap := AList.insert oid (obj.insert x.field (Reference.OId oid_y)) region.objMap })
+      hregion region_perm
+    unfold RuntimeConfig.objectIds
+    dsimp
+    exact l1.perm (List.Perm.append_left cfg.stack.objectIds heap_perm).symm
 
 theorem fieldAsgn_L2 : ValidConfig cfg →
   fieldAsgn x yf cfg = some cfg' →
