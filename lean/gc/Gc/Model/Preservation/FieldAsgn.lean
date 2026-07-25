@@ -170,7 +170,33 @@ theorem fieldAsgn_S1 : ValidConfig cfg →
 theorem fieldAsgn_H1 : ValidConfig cfg →
   fieldAsgn x yf cfg = some cfg' →
   H1 cfg' := by
-  sorry
+  intro vcfg h
+  have h1 := vcfg.h1
+  obtain ⟨frame, hframe, hcase⟩ := fieldAsgn_cases h
+  unfold H1
+  rcases hcase with
+    ⟨oid, oid_y, obj, hxr, hyr, hloc, hobj, hcfg'⟩ |
+    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hcfg'⟩
+  · subst hcfg'
+    dsimp
+    exact h1
+  · subst hcfg'
+    dsimp
+    have region_mem : region ∈ cfg.heap.regions := by
+      unfold Heap.regions
+      exact List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hregion)
+    intro region0 hregion0
+    unfold Heap.regions at hregion0
+    rw [AList.entries_insert, List.map_cons, List.mem_cons] at hregion0
+    cases hregion0 with
+    | inl heqregion =>
+      subst heqregion
+      dsimp
+      exact (AList.mem_insert _).mpr (Or.inr (h1 region region_mem))
+    | inr hkeraseregion =>
+      apply h1
+      unfold Heap.regions
+      exact (List.Sublist.map _ (List.kerase_sublist rid cfg.heap.entries)).mem hkeraseregion
 
 theorem fieldAsgn_H2 : ValidConfig cfg →
   fieldAsgn x yf cfg = some cfg' →
