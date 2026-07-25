@@ -49,6 +49,11 @@ theorem swap_HS1 : ValidConfig cfg →
   HS1 cfg' := by
   sorry
 
+theorem swap_HS2 : ValidConfig cfg →
+  swap x yf cfg = some cfg' →
+  HS2 cfg' := by
+  sorry
+
 theorem swap_valid : ValidConfig cfg →
   swap x yf cfg = some cfg' →
   ValidConfig cfg' := by
@@ -62,5 +67,6 @@ theorem swap_valid : ValidConfig cfg →
     s1 := swap_S1 vcfg h,
     s2 := swap_S2 vcfg h,
     s3 := swap_S3 vcfg h,
-    hs1 := swap_HS1 vcfg h
+    hs1 := swap_HS1 vcfg h,
+    hs2 := swap_HS2 vcfg h
   }

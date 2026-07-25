@@ -1285,6 +1285,88 @@ theorem exit_HS1 : ValidConfig cfg →
   · rw [if_neg stack_length] at h
     contradiction
 
+theorem exit_HS2 : ValidConfig cfg →
+  exit cfg = some cfg' →
+  HS2 cfg' := by
+  intro vcfg h
+  have h' := h
+  unfold exit at h
+  by_cases stack_length : cfg.stack.length >= 2
+  · rw [if_pos stack_length] at h
+    cases stackGetLast : List.getLast? cfg.stack with
+    | none => rw [stackGetLast] at h; contradiction
+    | some frame' =>
+      rw [stackGetLast] at h
+      cases heapLookup : cfg.heap.lookup frame'.regionId with
+      | none => dsimp at h; rw [heapLookup] at h; dsimp at h; contradiction
+      | some region' =>
+        dsimp at h
+        rw [heapLookup] at h
+        dsimp at h
+        have helper : (region'.status == Status.Open) = true := by
+          have l2 : L2 cfg := vcfg.l2
+          rw [List.getLast?_eq_some_iff] at stackGetLast
+          obtain ⟨stack_last, stack_last_in_stack⟩ := stackGetLast
+          have frame'_in_stack : frame' ∈ cfg.stack := by
+            rw [stack_last_in_stack, List.mem_append]
+            right
+            exact List.mem_singleton_self frame'
+          obtain ⟨region'', region''_in_heap, region''_status⟩ := l2 frame' frame'_in_stack
+          rw [heapLookup, Option.some_inj] at region''_in_heap
+          rw [← region''_in_heap] at region''_status
+          rw [region''_status]
+          rfl
+        rw [if_pos helper, Option.some_inj] at h
+        subst h
+        unfold HS2
+        intro rid' hmem
+        have hs2 := vcfg.hs2
+        unfold HS2 at hs2
+        have stack_refs_sub : (Stack.refs (List.dropLast cfg.stack)).Sublist (Stack.refs cfg.stack) := by
+          have hsub : ((List.dropLast cfg.stack).map (fun f => Frame.refs f)).Sublist
+              (cfg.stack.map (fun f => Frame.refs f)) :=
+            List.Sublist.map (fun x => x.refs) (List.dropLast_sublist cfg.stack)
+          unfold Stack.refs Frame.refs
+          dsimp
+          rw [List.flatMap_id, List.flatMap_id]
+          exact List.Sublist.flatten_sublist hsub
+        have heap_refs_perm :
+            (Heap.refs (AList.insert frame'.regionId ({ region' with status := Status.Closed }) cfg.heap)).Perm
+              (Heap.refs cfg.heap) := by
+          apply List.Perm.flatten
+          unfold Region.refs AList.insert
+          dsimp
+          obtain ⟨a, b, c, d, e, f⟩ := List.exists_of_kerase (List.mem_map_of_mem (AList.lookup_mem_entries heapLookup))
+          have a_eq_region' : a = region' := by
+            have mem_a : ⟨frame'.regionId, a⟩ ∈ cfg.heap.entries := by
+              rw [e, List.mem_append, List.mem_cons]
+              right
+              left
+              dsimp
+            exact List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys mem_a (AList.lookup_mem_entries heapLookup)
+          subst a
+          rw [f, e, List.map_append, List.map_append, List.map_append, List.map_append, List.map_cons]
+          dsimp
+          exact List.perm_middle.symm
+        have hmem_cfg : Reference.RId rid' ∈ cfg.refs := by
+          unfold RuntimeConfig.refs at hmem ⊢
+          dsimp at hmem
+          rw [List.mem_append] at hmem
+          cases hmem with
+          | inl hs => exact List.mem_append_left _ (stack_refs_sub.subset hs)
+          | inr hh => exact List.mem_append_right _ (heap_refs_perm.mem_iff.mp hh)
+        have rid_mem_cfg := hs2 rid' hmem_cfg
+        rw [← AList.mem_keys, ← AList.lookup_isSome]
+        rw [← AList.mem_keys, ← AList.lookup_isSome] at rid_mem_cfg
+        by_cases hr : rid' = frame'.regionId
+        · subst hr
+          rw [AList.lookup_insert]
+          simp
+        · rw [AList.lookup_insert_ne hr]
+          exact rid_mem_cfg
+  · rw [if_neg stack_length] at h
+    contradiction
+
 theorem exit_valid : ValidConfig cfg → exit cfg = some cfg' → ValidConfig cfg' := by
   intro vcfg h
   exact {
@@ -1296,5 +1378,6 @@ theorem exit_valid : ValidConfig cfg → exit cfg = some cfg' → ValidConfig cf
     s1 := exit_S2 vcfg h,
     s2 := exit_S3 vcfg h,
     s3 := exit_S4 vcfg h,
-    hs1 := exit_HS1 vcfg h
+    hs1 := exit_HS1 vcfg h,
+    hs2 := exit_HS2 vcfg h
   }

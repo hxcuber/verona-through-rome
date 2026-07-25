@@ -805,6 +805,82 @@ theorem enter_HS1 : ValidConfig cfg →
             exact List.Perm.append_left cfg.stack.objectIds heap_objectIds_perm
           exact objectIds_perm.mem_iff.mpr (hs1 oid (refs_perm.mem_iff.mp hmem))
 
+theorem enter_HS2 : ValidConfig cfg →
+  enter xf a cfg = some cfg' →
+  HS2 cfg' := by
+  intro vcfg h
+  have h' := h
+  unfold enter at h
+  cases resolvexf: resolveFA xf cfg with
+  | none =>
+    rw [resolvexf] at h
+    contradiction
+  | some xfRef =>
+    rw [resolvexf] at h
+    dsimp at h
+    cases xfRef with
+    | OId _ =>
+      contradiction
+    | RId rid =>
+      dsimp at h
+      cases heapLookup : cfg.heap.lookup rid with
+      | none =>
+        rw [heapLookup] at h
+        contradiction
+      | some region =>
+        rw [heapLookup] at h
+        dsimp at h
+        cases regionStatus : region.status with
+        | Open =>
+          rw [regionStatus] at h
+          contradiction
+        | Closed =>
+          rw [regionStatus] at h
+          rw [if_pos (by rfl)] at h
+          rw [Option.some_inj] at h
+          unfold HS2
+          intro rid' hmem
+          have hs2 := vcfg.hs2
+          unfold HS2 at hs2
+          have stack_refs_eq : cfg'.stack.refs = cfg.stack.refs := by
+            rw [← h]
+            dsimp
+            unfold Stack.refs
+            simp [Frame.refs]
+          have heap_refs_perm : cfg'.heap.refs.Perm cfg.heap.refs := by
+            rw [← h]
+            dsimp
+            apply List.Perm.flatten
+            unfold Region.refs AList.insert
+            dsimp
+            obtain ⟨a', b, c, d, e, f⟩ := List.exists_of_kerase (List.mem_map_of_mem (AList.lookup_mem_entries heapLookup))
+            have a'_eq_region : a' = region := by
+              have mem_a : ⟨rid, a'⟩ ∈ cfg.heap.entries := by
+                rw [e, List.mem_append, List.mem_cons]
+                right
+                left
+                dsimp
+              exact List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys mem_a (AList.lookup_mem_entries heapLookup)
+            subst a'
+            rw [f, e, List.map_append, List.map_append, List.map_append, List.map_append, List.map_cons]
+            dsimp
+            exact List.perm_middle.symm
+          have refs_perm : cfg'.refs.Perm cfg.refs := by
+            unfold RuntimeConfig.refs
+            rw [stack_refs_eq]
+            exact List.Perm.append_left cfg.stack.refs heap_refs_perm
+          have heap_keys_iff : ∀ r, r ∈ cfg'.heap.keys ↔ r ∈ cfg.heap.keys := by
+            intro r
+            rw [← h]
+            dsimp
+            rw [← AList.mem_keys, ← AList.mem_keys, ← AList.lookup_isSome, ← AList.lookup_isSome]
+            by_cases hr : r = rid
+            · subst hr
+              rw [AList.lookup_insert, heapLookup]
+              simp
+            · rw [AList.lookup_insert_ne hr]
+          exact (heap_keys_iff rid').mpr (hs2 rid' (refs_perm.mem_iff.mp hmem))
+
 theorem enter_valid : ValidConfig cfg →
   enter xf a cfg = some cfg' →
   ValidConfig cfg' := by
@@ -818,5 +894,6 @@ theorem enter_valid : ValidConfig cfg →
     s1 := enter_S1 vcfg h,
     s2 := enter_S2 vcfg h,
     s3 := enter_S3 vcfg h,
-    hs1 := enter_HS1 vcfg h
+    hs1 := enter_HS1 vcfg h,
+    hs2 := enter_HS2 vcfg h
   }

@@ -50,6 +50,15 @@ def S3 (cfg : RuntimeConfig) : Prop :=
 def HS1 (cfg : RuntimeConfig) : Prop :=
   ∀ oid, Reference.OId oid ∈ cfg.refs → oid ∈ cfg.objectIds
 
+-- No dangling region pointers: every region reference stored anywhere (a stack frame's varMap/objMap,
+-- or a heap region's objMap) actually points at a currently allocated region id. Mirrors HS1 but for
+-- Reference.RId/RegionId instead of Reference.OId/ObjectId, and for exactly the same reason: after
+-- decoupling RuntimeConfig.freshRegionId from RuntimeConfig.freshObjectId, nothing else rules out a
+-- stale/dangling RId ref value coincidentally matching a not-yet-allocated freshRegionId, which would
+-- otherwise let a later makeRegion retroactively "resolve" a stale/unrelated reference.
+def HS2 (cfg : RuntimeConfig) : Prop :=
+  ∀ rid, Reference.RId rid ∈ cfg.refs → rid ∈ cfg.heap.keys
+
 structure ValidConfig (cfg : RuntimeConfig) where
   l1 : L1 cfg
   l2 : L2 cfg
@@ -60,6 +69,7 @@ structure ValidConfig (cfg : RuntimeConfig) where
   s2 : S2 cfg
   s3 : S3 cfg
   hs1 : HS1 cfg
+  hs2 : HS2 cfg
 
 theorem oid_in_stack_implies_not_in_heap : ValidConfig cfg →
   cfg.stackWithIndex.findRev? (λ frame => frame.objMap.keys.contains oid) = some frame →

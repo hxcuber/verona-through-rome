@@ -940,6 +940,11 @@ theorem makeObjStack_HS1 : ValidConfig cfg →
       · exact List.mem_append_left _ (hs1 oid (List.mem_append_right _ hheap))
     exact objectIds_perm.mem_iff.mpr target_mem
 
+theorem makeObjStack_HS2 : ValidConfig cfg →
+  makeObjStack x cfg = some cfg' →
+  HS2 cfg' := by
+  sorry
+
 theorem makeObjStack_valid : ValidConfig cfg →
   makeObjStack x cfg = some cfg' →
   ValidConfig cfg' := by
@@ -953,5 +958,6 @@ theorem makeObjStack_valid : ValidConfig cfg →
     s1 := makeObjStack_S1 vcfg h,
     s2 := makeObjStack_S2 vcfg h,
     s3 := makeObjStack_S3 vcfg h,
-    hs1 := makeObjStack_HS1 vcfg h
+    hs1 := makeObjStack_HS1 vcfg h,
+    hs2 := makeObjStack_HS2 vcfg h
   }

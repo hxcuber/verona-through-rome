@@ -1130,6 +1130,11 @@ theorem makeObjRegion_HS1 : ValidConfig cfg →
             exact List.mem_append_left _ (hs1 oid (List.mem_append_right _ href_in_cfg_heap_refs))
         exact objectIds_perm.mem_iff.mpr target_mem
 
+theorem makeObjRegion_HS2 : ValidConfig cfg →
+  makeObjRegion x cfg = some cfg' →
+  HS2 cfg' := by
+  sorry
+
 theorem makeObjRegion_valid : ValidConfig cfg →
   makeObjRegion x cfg = some cfg' →
   ValidConfig cfg' := by
@@ -1143,5 +1148,6 @@ theorem makeObjRegion_valid : ValidConfig cfg →
     s1 := makeObjRegion_S1 vcfg h,
     s2 := makeObjRegion_S2 vcfg h,
     s3 := makeObjRegion_S3 vcfg h,
-    hs1 := makeObjRegion_HS1 vcfg h
+    hs1 := makeObjRegion_HS1 vcfg h,
+    hs2 := makeObjRegion_HS2 vcfg h
   }

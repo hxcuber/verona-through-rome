@@ -49,6 +49,11 @@ theorem fieldAsgn_HS1 : ValidConfig cfg →
   HS1 cfg' := by
   sorry
 
+theorem fieldAsgn_HS2 : ValidConfig cfg →
+  fieldAsgn x yf cfg = some cfg' →
+  HS2 cfg' := by
+  sorry
+
 theorem fieldAsgn_valid : ValidConfig cfg →
   fieldAsgn x yf cfg = some cfg' →
   ValidConfig cfg' := by
@@ -62,5 +67,6 @@ theorem fieldAsgn_valid : ValidConfig cfg →
     s1 := fieldAsgn_S1 vcfg h,
     s2 := fieldAsgn_S2 vcfg h,
     s3 := fieldAsgn_S3 vcfg h,
-    hs1 := fieldAsgn_HS1 vcfg h
+    hs1 := fieldAsgn_HS1 vcfg h,
+    hs2 := fieldAsgn_HS2 vcfg h
   }
