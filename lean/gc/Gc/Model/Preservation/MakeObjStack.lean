@@ -943,7 +943,78 @@ theorem makeObjStack_HS1 : ValidConfig cfg →
 theorem makeObjStack_HS2 : ValidConfig cfg →
   makeObjStack x cfg = some cfg' →
   HS2 cfg' := by
-  sorry
+  intro vcfg h
+  have h' := h
+  unfold makeObjStack at h
+  cases stackGetLast : cfg.stack.getLast? with
+  | none => rw [stackGetLast] at h; contradiction
+  | some frame =>
+    rw [stackGetLast] at h
+    dsimp at h
+    rw [Option.some_inj] at h
+    unfold HS2
+    rw [← h]
+    intro rid' hmem
+    have hs2 := vcfg.hs2
+    have hfresh := RuntimeConfig.freshObjectId_not_mem cfg
+    have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame] :=
+      (List.dropLast_append_getLast? frame stackGetLast).symm
+    have frame_mem : frame ∈ cfg.stack := stack_eq ▸ List.mem_append_right _ (List.mem_singleton_self frame)
+    have fresh_not_in_frame : cfg.freshObjectId ∉ frame.objMap.keys := by
+      intro hc
+      apply hfresh
+      unfold RuntimeConfig.objectIds Stack.objectIds Frame.objectIds
+      rw [List.bind_eq_flatMap, List.flatMap_id, List.mem_append, List.mem_flatten]
+      exact Or.inl ⟨frame.objMap.keys, List.mem_map_of_mem frame_mem, hc⟩
+    set newFrame : Frame :=
+      { regionId := frame.regionId, bridgeVar := frame.bridgeVar,
+        objMap := AList.insert cfg.freshObjectId ∅ frame.objMap,
+        varMap := AList.insert x (Reference.OId cfg.freshObjectId) frame.varMap } with newFrame_def
+    have stack_refs_append : ∀ (l : Stack) (f : Frame), Stack.refs (l ++ [f]) = Stack.refs l ++ f.refs := by
+      intro l f
+      unfold Stack.refs
+      rw [List.bind_eq_flatMap, List.bind_eq_flatMap, List.flatMap_id, List.flatMap_id,
+        List.map_append, List.flatten_append]
+      simp
+    have frame_refs_to_cfg_refs : ∀ ref, ref ∈ frame.refs → ref ∈ cfg.refs := by
+      intro ref href
+      apply List.mem_append_left
+      rw [stack_eq, stack_refs_append]
+      exact List.mem_append_right _ href
+    have dropLast_refs_to_cfg_refs : ∀ ref, ref ∈ Stack.refs cfg.stack.dropLast → ref ∈ cfg.refs := by
+      intro ref href
+      apply List.mem_append_left
+      rw [stack_eq, stack_refs_append]
+      exact List.mem_append_left _ href
+    unfold RuntimeConfig.refs at hmem
+    dsimp at hmem
+    rw [List.mem_append] at hmem
+    have target_mem_cfg : Reference.RId rid' ∈ cfg.refs := by
+      rcases hmem with hstack | hheap
+      · rw [stack_refs_append, List.mem_append] at hstack
+        rcases hstack with hdrop | hnew
+        · exact dropLast_refs_to_cfg_refs _ hdrop
+        · rw [newFrame_def] at hnew
+          unfold Frame.refs at hnew
+          dsimp at hnew
+          rw [List.mem_append] at hnew
+          rcases hnew with hobjmap | hvarmap
+          · rw [List.kerase_of_notMem_keys fresh_not_in_frame] at hobjmap
+            have hframe : Reference.RId rid' ∈ frame.refs := by
+              unfold Frame.refs
+              apply List.mem_append_left
+              simpa [Object.refs] using hobjmap
+            exact frame_refs_to_cfg_refs _ hframe
+          · rw [List.mem_cons] at hvarmap
+            rcases hvarmap with heq | hker
+            · simp at heq
+            · have hframe : Reference.RId rid' ∈ frame.refs := by
+                unfold Frame.refs
+                apply List.mem_append_right
+                exact (List.kerase_sublist x frame.varMap.entries).map (·.2) |>.subset hker
+              exact frame_refs_to_cfg_refs _ hframe
+      · exact List.mem_append_right _ hheap
+    exact hs2 rid' target_mem_cfg
 
 theorem makeObjStack_valid : ValidConfig cfg →
   makeObjStack x cfg = some cfg' →
