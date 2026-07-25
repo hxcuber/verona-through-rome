@@ -299,6 +299,110 @@ not by reading file contents alone):
     newFrame`/`set cfgLit` fix, now needed in four separate proofs since the heap-changing shape means
     more of them embed the post-mutation record), and the `find?_cons_of_pos/neg` HOU failure (same fix —
     state the target `find?` equality as its own concrete `have` via term application first).
+- **`MakeRegion.lean`** — **fully proved, builds cleanly, zero `sorry`** (done in a prior session, not
+  fully documented here at the time). All 9 invariants (`makeRegion_L1` … `_S3`, `_HS1`, `_HS2`) plus
+  `makeRegion_valid` are real proofs; axiom check on `makeRegion_valid` confirms only
+  `propext`/`Classical.choice`/`Quot.sound`. The operation allocates *two* fresh ids at once —
+  `newRegionId := cfg.freshRegionId` and `newObjectId := cfg.freshObjectId` (the new region's bridge
+  object) — inserts `x ↦ RId newRegionId` into the last frame's `varMap`, and inserts a whole new
+  `Closed` region (`{bridgeObjectId := newObjectId, objMap := {newObjectId ↦ ∅}, status := Closed}`) at
+  the fresh heap key. Unlike `MakeObjStack`/`MakeObjRegion`, the new heap key is genuinely fresh (not an
+  existing region being mutated), so the heap-side insert is a straight cons via
+  `AList.entries_insert_of_notMem`/`List.kerase_of_notMem_keys` — no `List.exists_of_kerase`/
+  region-reordering machinery needed. Has its own local `makeRegion_corollary_loc_match_eq` and
+  `makeRegion_corollary_loc_eq` (same shape as `MakeObjRegion.lean`'s, conditioned on
+  `oid ≠ cfg.freshObjectId`, since this op — like `MakeObjStack`/`MakeObjRegion` and unlike `VarAsgn`
+  below — does allocate a fresh object id).
+- **`VarAsgn.lean`** — **fully proved, builds cleanly, zero `sorry`** (finished 2026-07-26, all 10
+  invariants in one session going easy-to-hard: `L1`, `HS2`, `S1`, `H1`, `L2`, `H2`, `HS1`, then `H3`,
+  `S2`, `S3`). Axiom check on `varAsgn_valid` confirms only `propext`/`Classical.choice`/`Quot.sound`.
+  - The operation: `varAsgn x yf cfg` resolves `yf` (a `FieldAccess`) to `yfRef := Reference.OId oid`
+    (fails on `RId`) and has two branches on `x == frame.bridgeVar` (`frame` = the stack's **last**
+    frame): (1) **bridge-var branch** — requires `yfRef.loc? cfg = some (Rgn rid)` with `rid ==
+    frame.regionId`, and reassigns that region's `bridgeObjectId := oid` (`heap := cfg.heap.insert rid
+    {region with bridgeObjectId := oid}`; stack untouched); (2) **fresh-var branch** — requires
+    `resolveV x cfg == none` (`x` not already bound in *any* frame), and inserts `x ↦ yfRef` into the
+    last frame's `varMap` (heap untouched, and — critically — the frame's `objMap` untouched too, only
+    `varMap` gains a key). **`varAsgn` never allocates a fresh id** (unlike every other op proved so
+    far except `Enter`/`Exit`) — the value it stores/reassigns is always a *pre-existing* reference
+    resolved via `resolveFA`/`resolveV`. This is what made the whole file structurally easier than
+    `MakeObjStack`/`MakeObjRegion`/`MakeRegion`: no `oid ≠ freshObjectId` case-split anywhere, and the
+    reusable `Reference.loc?` transport corollary (`varAsgn_corollary_loc_eq`) is **unconditional** in
+    `oid'` for both branches.
+  - **Proof scaffold**: `varAsgn_cases` (a case-split lemma proved once via direct `unfold`/`cases`/
+    `if_pos`/`if_neg` on the `do`-notation, elaborated form confirmed via `lean_goal` before writing the
+    proof) turns `varAsgn x yf cfg = some cfg'` into the two branches above as an explicit disjunction of
+    ∃-bundles (frame, oid, and — branch-dependent — rid/region/hridEq/hregion, or the
+    `resolveV x cfg = none` fact), used via `obtain`/`rcases` at the top of all 10 invariant proofs and
+    `varAsgn_corollary_loc_eq`. Building it hit the same "`cases h : e with` generalizes *every*
+    occurrence of `e`, including inside the goal's own ∃-conjuncts" gotcha documented under
+    `MakeObjStack.lean`/`MakeObjRegion.lean` (the `resolveFA y cfg = some (Reference.OId oid)` conjunct
+    got silently rewritten to `some (Reference.OId oid) = some (Reference.OId oid)` after `cases`-ing on
+    that exact term, so the tuple needed `rfl` there, not the `hyf` hypothesis).
+  - **`AList.insert` at an existing key reorders `entries`** (bridge-var branch, `cfg.heap.insert rid
+    {...}`, mirrors the `MakeObjRegion.lean` heap-reorder situation) — `varAsgn_corollary_bridge_heap_
+    objectIds_perm`/`_heap_refs_perm` build the permutation via `List.exists_of_kerase` +
+    `NodupKeys.eq_of_mk_mem` exactly as in `MakeObjRegion.lean`, but *simpler*: since only
+    `bridgeObjectId` changes (never `objMap`), the mutated entry's own `.objectIds`/`.refs` contribution
+    is *literally* unchanged (no freshness-conditioned equality needed), so these are proved once,
+    unconditionally, and reused by `L1`, `H2`, `HS1`, `HS2`. `varAsgn_corollary_bridge_heap_keys_mem`
+    (heap key *set* unchanged by an existing-key insert, via `AList.mem_insert` +
+    `or_iff_right_of_imp`) is the `HS2`/`H2` counterpart for `rid ∈ heap.keys`.
+  - **`varAsgn_corollary_fresh_not_in_frame`**: the fresh-var branch's `resolveV x cfg = none`
+    precondition implies specifically `x ∉ frame.varMap.keys` for the *last* frame — proved directly
+    (not by fully case-splitting `resolveV`'s generic `findRev?`-over-all-frames semantics) by observing
+    that if `x` *were* in the last frame's `varMap`, `findRev?` would hit that frame immediately (it's
+    the final/innermost element), forcing `resolveV x cfg ≠ none` by contradiction. Used everywhere the
+    `varMap` insert needs to be treated as a fresh cons via `List.kerase_of_notMem_keys`.
+  - **The hard part was `H3`/`S2`/`S3`, not id-freshness but *provenance*-tracing**: since neither
+    branch allocates a new id, `Reference.loc?` transport (`varAsgn_corollary_loc_eq`, built from
+    `varAsgn_corollary_bridge_loc_eq` + `varAsgn_corollary_fresh_loc_eq`, the latter needing *no*
+    exception at all since the fresh-var branch never touches any `objMap`) was actually **more direct**
+    than in `MakeObjStack.lean`/`MakeObjRegion.lean` — no `oid ≠ freshObjectId` case split anywhere.
+    `varAsgn_corollary_bridge_loc_eq`'s heap side reuses the same `region_unique` +
+    `loc_match_eq`-combinator + `List.find?_eq_some_of_unique` technique as `MakeObjRegion.lean`'s
+    `loc_eq` (own local copies of both helper lemmas, per this repo's per-file-self-contained
+    convention). The genuinely new difficulty was **`S3`'s fresh-var branch, "newly-inserted-value"
+    case**: the value being freshly stored in `newFrame.varMap` (`OId oid`, from `resolveFA`) is a
+    *pre-existing* reference, so if it resolves to a heap region `rid'`, `S3` requires some *already
+    on-stack* ancestor frame owning `rid'` — but nothing hands you that witness directly, since `oid`
+    wasn't previously *in the stack* at all (it could be purely heap-resident, e.g. a sibling field's
+    value read off a region object). Resolved by tracing `resolveFA`'s own resolution chain as a new
+    corollary, `varAsgn_corollary_yfRef_ancestor` (built on `varAsgn_corollary_resolveV_loc_ancestor` for
+    the root-reference sub-case): case-split on whether `yf`'s *root* variable resolved to a `Stk`- or
+    `Rgn`-located object — (a) root is `Stk`-located ⟹ the field's container object is `∈` that stack
+    frame's `refs`, so `vcfg.s3` applies directly to *that* frame; (b) root is `Rgn`-located ⟹ by `H3`,
+    the field *value* (`oid`) resolves into the *same* region as its container (regions don't hold
+    external-pointing refs), so it reduces to finding an ancestor for the *root* reference itself, via
+    `varAsgn_corollary_resolveV_loc_ancestor`, which further splits on *how* `resolveV` found the root:
+    (b-i) as an ordinary `frame.varMap` entry ⟹ `vcfg.s3` applies to that frame directly; (b-ii) as a
+    frame's *bridge var* (`frame.bridgeVar == var`, resolving via `Reference.OId <$> region.bridgeObjectId`
+    — confirmed via `lean_run_code` to reduce to `some (Reference.OId region.bridgeObjectId)`, i.e. the
+    do-block's `Id`-functor `<$>` gets `pure`-lifted, not an `Option`-functor `<$>` as the source syntax
+    might suggest) ⟹ `H1` (`region.bridgeObjectId ∈ region.objMap`) plus `oid_loc_rgn_iff_in_heap`
+    directly gives that *that* `frame` itself is the region's owner, no `s3` needed. All three leaves
+    give a witness with `.index < cfg.stack.length` (via `List.mem_mapIdx` on stack-membership, not via
+    `s3`'s own index bound, since `s3`'s witness for the *root* is a *different* frame than the outer
+    one `S3` quantifies over) — composed with a local `transport` lemma (same shape as
+    `MakeObjStack.lean`/`MakeObjRegion.lean`'s: maps a `cfg.stackWithIndex` member to its
+    regionId/index-preserving counterpart in `cfg'.stackWithIndex`) to land the final bound.
+  - **Recurring gotcha, worse than usual this session**: chaining `X ▸ h` to rewrite inside a hypothesis
+    whose type contains `n + 1` repeatedly failed with *"expected result type of cast is `n.succ`, but
+    the equality does not contain the expected result type on either side"* — `▸`'s unifier wants the
+    rewrite target to *literally* match up to reducible defeq, and `+ 1` vs `.succ` display forms aren't
+    always interchangeable for it. Fix used throughout: replace `X ▸ h` with an explicit `rw [X] at h`
+    (or `rw [X] at h ⊢` on the goal) followed by a separate closing tactic (`Nat.le_of_lt_succ h`), never
+    a one-shot `▸` term. Plain `omega` also intermittently failed to close goals that were trivially true
+    given the visible hypotheses (e.g. `fid' < n + 1 ⊢ fid' ≤ n` with both facts in context, verified via
+    `lean_goal`) despite the *same* goal succeeding instantly via `lean_multi_attempt` moments later —
+    treated as an omega/LSP-state flakiness rather than a real proof gap; switching to an explicit term
+    (`Nat.le_of_lt_succ`) sidestepped it reliably.
+  - Also recurring, same fix as documented under `MakeObjStack.lean`/`MakeObjRegion.lean`: `cases h :
+    e with` generalizing occurrences of `e` inside a *later* hypothesis (not just the goal) when that
+    hypothesis was introduced by an *earlier* `cases`/`obtain` — e.g. `subst`-ing an equation derived
+    from `Reference.OId.injEq` after `rcases newFrame_refs_mem _ href with hfreq | horig` silently
+    renamed a variable (`oid`) needed later out of scope; fixed by using `rw [hfreq] at ...` on the
+    specific hypothesis that needed the substitution instead of a blanket `subst`.
 
 Elsewhere:
 
@@ -322,18 +426,17 @@ Elsewhere:
 
 ## Next planned step
 
-`MakeObjRegion.lean` is now finished (see its bullet above for full context — the shared corollaries,
-the `match`-auxiliary rw/simp gotcha, the `getLast?`-in-conclusion `cases`-generalization gotcha, and the
-recurring record-literal/HOU gotchas). Together with `MakeObjStack.lean`, `Exit.lean`, `Validity.lean`,
-`Enter.lean`, and `Start.lean`, that's every proof-bearing file in `Gc/Model/` done except the five
-not-started `Preservation` files below (zero `sorry` anywhere in `Gc/Model/`, including the `HS1`
-invariant added mid-session on 2026-07-25 — see `Validity.lean`'s note above for why it was added).
+`VarAsgn.lean` is now finished (see its bullet above for full context — the two-branch case scaffold,
+the unconditional `loc_eq` transport since this op never allocates a fresh id, and the `S3`
+provenance-tracing corollaries). Together with `MakeObjStack.lean`, `MakeObjRegion.lean`,
+`MakeRegion.lean`, `Exit.lean`, `Validity.lean`, `Enter.lean`, and `Start.lean`, that's every
+proof-bearing file in `Gc/Model/` done except the three not-started `Preservation` files below (zero
+`sorry` anywhere in `Gc/Model/` outside them, including both the `HS1` and `HS2` invariants — see
+`Validity.lean`'s note above for why `HS1` was added; `HS2` mirrors it for `RId`/`RegionId`).
 
-The remaining **not-started** `Preservation/*.lean` files — `Merge.lean`, `Swap.lean`, `VarAsgn.lean`,
-`FieldAsgn.lean`, `MakeRegion.lean` — each have 9 bare-`sorry` invariant lemmas (the original 8 plus
-`<op>_HS1`, added so they'd keep compiling after `ValidConfig` gained the `hs1` field), with only the
-combining `<op>_valid` assembled. `MakeRegion` is the closest relative of `MakeObjStack`/`MakeObjRegion`
-(same "allocate a fresh id, mutate the last frame + insert a fresh heap entry" shape, but allocates a
-*region* — `RId newRegionId`, not `OId newObjId` — plus a whole new Closed region rather than reusing an
-existing one) and is probably the natural next target, but no specific one has been agreed on next —
-confirm with the user before diving into any of these.
+The remaining **not-started** `Preservation/*.lean` files — `Merge.lean`, `Swap.lean`, `FieldAsgn.lean`
+— each have 10 bare-`sorry` invariant lemmas (`L1`/`L2`/`H1`/`H2`/`H3`/`S1`/`S2`/`S3`/`HS1`/`HS2`), with
+only the combining `<op>_valid` assembled. `FieldAsgn` is probably the closest relative of `VarAsgn`
+(no fresh-id allocation, similar `Location.Stk`/`Location.Rgn` branch split) and so is probably the
+easiest next target, but no specific one has been agreed on next — confirm with the user before diving
+into any of these.
