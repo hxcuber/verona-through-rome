@@ -6,32 +6,152 @@ import Gc.Model.Mutation
 
 import Mathlib.Data.List.Infix
 
--- old refs keep their location: nothing that already resolved in cfg moves in cfg'.
-theorem makeObjStack_corollary_1 : ValidConfig cfg →
-  makeObjStack x cfg = some cfg' →
-  ∀ (ref : Reference) loc, ref.loc? cfg = some loc → ref.loc? cfg' = some loc := by
-  sorry
-
 -- heap objects keep their region location (both directions: heap is untouched by makeObjStack).
-theorem makeObjStack_corollary_2 : ValidConfig cfg →
+theorem makeObjStack_corollary_1 : ValidConfig cfg →
   makeObjStack x cfg = some cfg' →
   ∀ oid rid, (Reference.OId oid).loc? cfg = some (Location.Rgn rid) ↔
     (Reference.OId oid).loc? cfg' = some (Location.Rgn rid) := by
-  sorry
-
--- stack objects that already had a frame location in cfg keep that same location in cfg'
--- (forward only: the freshly created object resolves to Stk in cfg' but not in cfg).
-theorem makeObjStack_corollary_3 : ValidConfig cfg →
-  makeObjStack x cfg = some cfg' →
-  ∀ oid fid, (Reference.OId oid).loc? cfg = some (Location.Stk fid) →
-    (Reference.OId oid).loc? cfg' = some (Location.Stk fid) := by
-  sorry
-
--- regions keep their location (both directions: makeObjStack never touches the heap).
-theorem makeObjStack_corollary_4 : ValidConfig cfg →
-  makeObjStack x cfg = some cfg' →
-  ∀ rid, (Reference.RId rid).loc? cfg = (Reference.RId rid).loc? cfg' := by
-  sorry
+  intro vcfg h
+  have h' := h
+  unfold makeObjStack at h
+  cases stackGetLast : cfg.stack.getLast? with
+  | none => rw [stackGetLast] at h; contradiction
+  | some frame =>
+    rw [stackGetLast] at h
+    dsimp at h
+    rw [Option.some_inj] at h
+    have hfresh := RuntimeConfig.freshObjectId_not_mem cfg
+    have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame] :=
+      (List.dropLast_append_getLast? frame stackGetLast).symm
+    have frame_mem : frame ∈ cfg.stack := stack_eq ▸ List.mem_append_right _ (List.mem_singleton_self frame)
+    have fresh_not_in_frame : cfg.freshObjectId ∉ frame.objMap.keys := by
+      intro hc
+      apply hfresh
+      unfold RuntimeConfig.objectIds Stack.objectIds Frame.objectIds
+      rw [List.bind_eq_flatMap, List.flatMap_id, List.mem_append, List.mem_flatten]
+      exact Or.inl ⟨frame.objMap.keys, List.mem_map_of_mem frame_mem, hc⟩
+    set newFrame : Frame :=
+      { regionId := frame.regionId, bridgeVar := frame.bridgeVar,
+        objMap := AList.insert cfg.freshObjectId ∅ frame.objMap,
+        varMap := AList.insert x (Reference.OId cfg.freshObjectId) frame.varMap } with newFrame_def
+    intro oid rid
+    rw [← h]
+    by_cases hfe : oid = cfg.freshObjectId
+    · subst hfe
+      have fresh_not_in_heap : cfg.freshObjectId ∉ cfg.heap.objectIds := by
+        intro hc
+        apply hfresh
+        unfold RuntimeConfig.objectIds
+        exact List.mem_append_right _ hc
+      have h2_none :
+          List.find? (fun x => (AList.keys x.snd.objMap).contains cfg.freshObjectId) cfg.heap.entries = none := by
+        rw [List.find?_eq_none]
+        intro entry hentry
+        obtain ⟨rid0, region0⟩ := entry
+        dsimp
+        intro hcon
+        apply fresh_not_in_heap
+        unfold Heap.objectIds Region.objectIds
+        refine List.mem_flatten.mpr ⟨region0.objMap.keys, ?_, List.contains_iff_mem.mp hcon⟩
+        exact List.mem_map_of_mem (f := fun e => e.2.objectIds) hentry
+      have newFrame_contains_fresh : (AList.keys newFrame.objMap).contains cfg.freshObjectId = true := by
+        rw [newFrame_def]
+        dsimp
+        rw [AList.keys_insert, List.erase_of_not_mem fresh_not_in_frame]
+        simp
+      have h1_cfg' :
+          (RuntimeConfig.stackWithIndex { stack := cfg.stack.dropLast ++ [newFrame], heap := cfg.heap }).findRev?
+            (fun frame => (AList.keys frame.objMap).contains cfg.freshObjectId) =
+          some ({ newFrame with index := cfg.stack.dropLast.length } : FrameWithIndex) := by
+        unfold RuntimeConfig.stackWithIndex
+        dsimp
+        rw [List.mapIdx_concat, List.findRev?_eq_find?_reverse, List.reverse_append, List.reverse_singleton,
+          List.singleton_append]
+        exact List.find?_cons_of_pos newFrame_contains_fresh
+      have loc_fresh_cfg' :
+          (Reference.OId cfg.freshObjectId).loc? { stack := cfg.stack.dropLast ++ [newFrame], heap := cfg.heap } =
+            some (Location.Stk cfg.stack.dropLast.length) := by
+        unfold Reference.loc?
+        dsimp
+        rw [h1_cfg', h2_none]
+      constructor
+      · intro hcon
+        exact absurd ((oid_loc_rgn_iff_in_heap vcfg).mp hcon) (by
+          rintro ⟨region, hlookup, hmem⟩
+          apply hfresh
+          unfold RuntimeConfig.objectIds Heap.objectIds Region.objectIds
+          apply List.mem_append_right
+          refine List.mem_flatten.mpr ⟨region.objMap.keys, ?_, ?_⟩
+          · have := AList.lookup_mem_entries hlookup
+            exact List.mem_map_of_mem (f := fun e => e.2.objectIds) this
+          · rwa [AList.mem_keys] at hmem)
+      · intro hcon
+        rw [loc_fresh_cfg'] at hcon
+        simp at hcon
+    · have newFrame_keys_eq : (AList.keys newFrame.objMap).contains oid = (AList.keys frame.objMap).contains oid := by
+        rw [newFrame_def]
+        dsimp
+        rw [AList.keys_insert, List.erase_of_not_mem fresh_not_in_frame]
+        simp [hfe]
+      have loc_eq : (Reference.OId oid).loc? cfg =
+          (Reference.OId oid).loc? { stack := cfg.stack.dropLast ++ [newFrame], heap := cfg.heap } := by
+        unfold Reference.loc?
+        dsimp
+        by_cases hb : (AList.keys frame.objMap).contains oid
+        · have h1_cfg : cfg.stackWithIndex.findRev? (fun frame => (AList.keys frame.objMap).contains oid) =
+              some ({ frame with index := cfg.stack.dropLast.length } : FrameWithIndex) := by
+            unfold RuntimeConfig.stackWithIndex
+            conv_lhs => rw [stack_eq]
+            rw [List.mapIdx_concat, List.findRev?_eq_find?_reverse, List.reverse_append, List.reverse_singleton,
+              List.singleton_append]
+            exact List.find?_cons_of_pos hb
+          have h1_cfg' :
+              (RuntimeConfig.stackWithIndex { stack := cfg.stack.dropLast ++ [newFrame], heap := cfg.heap }).findRev?
+                (fun frame => (AList.keys frame.objMap).contains oid) =
+              some ({ newFrame with index := cfg.stack.dropLast.length } : FrameWithIndex) := by
+            unfold RuntimeConfig.stackWithIndex
+            dsimp
+            rw [List.mapIdx_concat, List.findRev?_eq_find?_reverse, List.reverse_append, List.reverse_singleton,
+              List.singleton_append]
+            apply List.find?_cons_of_pos
+            rw [newFrame_keys_eq]
+            exact hb
+          rw [h1_cfg, h1_cfg']
+          cases List.find? (fun z => (AList.keys z.snd.objMap).contains oid) cfg.heap.entries with
+          | none => rfl
+          | some _ => rfl
+        · have h1_eq : cfg.stackWithIndex.findRev? (fun frame => (AList.keys frame.objMap).contains oid) =
+              (RuntimeConfig.stackWithIndex { stack := cfg.stack.dropLast ++ [newFrame], heap := cfg.heap }).findRev?
+                (fun frame => (AList.keys frame.objMap).contains oid) := by
+            unfold RuntimeConfig.stackWithIndex
+            dsimp
+            conv_lhs => rw [stack_eq]
+            rw [List.mapIdx_concat, List.mapIdx_concat, List.findRev?_eq_find?_reverse,
+              List.findRev?_eq_find?_reverse, List.reverse_append, List.reverse_append, List.reverse_singleton,
+              List.reverse_singleton, List.singleton_append, List.singleton_append]
+            have hbL : ¬ (AList.keys ({ frame with index := cfg.stack.dropLast.length } : FrameWithIndex).objMap).contains
+                oid = true := hb
+            have hbR :
+                ¬ (AList.keys ({ newFrame with index := cfg.stack.dropLast.length } : FrameWithIndex).objMap).contains
+                  oid = true := by
+              rw [newFrame_keys_eq]; exact hb
+            have find_eqL :
+                List.find? (fun frame => (AList.keys frame.objMap).contains oid)
+                  (({ frame with index := cfg.stack.dropLast.length } : FrameWithIndex) ::
+                    (List.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) cfg.stack.dropLast).reverse) =
+                List.find? (fun frame => (AList.keys frame.objMap).contains oid)
+                  (List.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) cfg.stack.dropLast).reverse :=
+              List.find?_cons_of_neg hbL
+            have find_eqR :
+                List.find? (fun frame => (AList.keys frame.objMap).contains oid)
+                  (({ newFrame with index := cfg.stack.dropLast.length } : FrameWithIndex) ::
+                    (List.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) cfg.stack.dropLast).reverse) =
+                List.find? (fun frame => (AList.keys frame.objMap).contains oid)
+                  (List.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) cfg.stack.dropLast).reverse :=
+              List.find?_cons_of_neg hbR
+            rw [find_eqL, find_eqR]
+          rw [h1_eq]
+      rw [loc_eq]
 
 theorem makeObjStack_L1 : ValidConfig cfg →
   makeObjStack x cfg = some cfg' →
@@ -234,7 +354,7 @@ theorem makeObjStack_H3 : ValidConfig cfg →
     intro rid oid region hlookup href
     rw [heap_eq] at hlookup
     have h3 := vcfg.h3 rid oid region hlookup href
-    exact (makeObjStack_corollary_2 vcfg h' oid rid).mp h3
+    exact (makeObjStack_corollary_1 vcfg h' oid rid).mp h3
 
 theorem makeObjStack_S1 : ValidConfig cfg →
   makeObjStack x cfg = some cfg' →
