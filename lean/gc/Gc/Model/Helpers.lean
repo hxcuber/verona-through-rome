@@ -27,6 +27,11 @@ def Stack.objectIds (stack : Stack) : List ObjectId :=
 def RuntimeConfig.objectIds (cfg : RuntimeConfig) : List ObjectId :=
   cfg.stack.objectIds ++ cfg.heap.objectIds
 
+def RuntimeConfig.freshRegionId (cfg : RuntimeConfig) : RegionId :=
+  match cfg.heap.keys with
+  | [] => 0
+  | keys => keys.foldl max 0 + 1
+
 def RuntimeConfig.freshObjectId (cfg : RuntimeConfig) : ObjectId :=
   match cfg.objectIds with
   | [] => 0
@@ -36,6 +41,16 @@ theorem RuntimeConfig.freshObjectId_not_mem (cfg : RuntimeConfig) : cfg.freshObj
   intro hmem
   unfold RuntimeConfig.freshObjectId at hmem
   cases h : cfg.objectIds with
+  | nil => rw [h] at hmem; exact absurd hmem List.not_mem_nil
+  | cons a l =>
+    rw [h] at hmem
+    have hle := List.mem_le_foldl_max 0 (List.foldl max 0 (a :: l) + 1) hmem
+    omega
+
+theorem RuntimeConfig.freshRegionId_not_mem (cfg : RuntimeConfig) : cfg.freshRegionId ∉ cfg.heap.keys := by
+  intro hmem
+  unfold RuntimeConfig.freshRegionId at hmem
+  cases h : cfg.heap.keys with
   | nil => rw [h] at hmem; exact absurd hmem List.not_mem_nil
   | cons a l =>
     rw [h] at hmem

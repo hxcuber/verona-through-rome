@@ -201,15 +201,16 @@ def makeObjRegion (x : VarName) (cfg : RuntimeConfig) : Option (RuntimeConfig) :
 
 def makeRegion (x : VarName) (cfg : RuntimeConfig) : Option (RuntimeConfig) := do
   let frame ← cfg.stack.getLast?
-  let newRegionId := cfg.freshObjectId
+  let newRegionId := cfg.freshRegionId
+  let newObjectId := cfg.freshObjectId
   some { cfg with
     stack := cfg.stack.dropLast ++ [ { frame with
       varMap := frame.varMap.insert x (Reference.RId newRegionId)
     } ],
     heap := cfg.heap.insert newRegionId {
       status := Status.Closed,
-      objMap := (∅ : ObjMap).insert newRegionId ∅,
-      bridgeObjectId := newRegionId
+      objMap := (∅ : ObjMap).insert newObjectId ∅,
+      bridgeObjectId := newObjectId
     }
   }
 
