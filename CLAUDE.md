@@ -149,7 +149,7 @@ not by reading file contents alone):
   8 invariants — `enter_H2`'s proof already computes the same permutation facts inline via its own
   unnamed `have`s — and were deleted rather than left as dead `sorry` stubs. Axiom check confirms only
   `propext`/`Classical.choice`/`Quot.sound` throughout.
-- **`Merge.lean`, `Swap.lean`, `VarAsgn.lean`, `FieldAsgn.lean`, `MakeObjRegion.lean`,
+- **`Merge.lean`, `Swap.lean`, `VarAsgn.lean`, `FieldAsgn.lean`,
   `MakeRegion.lean`** — not started: all 8 original invariant lemmas are bare `sorry`, and each now also
   has a bare-`sorry` `<op>_HS1` (added 2026-07-25 purely to keep these files compiling after `ValidConfig`
   gained the `hs1` field — no real `HS1` proof content for these ops yet). Only the combining `<op>_valid`
@@ -228,6 +228,77 @@ not by reading file contents alone):
     `List.dropLast`'s return type is bare `List Frame`, not the `Stack` alias — always write these as
     prefix applications, `Stack.objectIds cfg.stack.dropLast`, whenever the receiver came from a `List`
     op like `dropLast`/`++`.
+- **`MakeObjRegion.lean`** — **fully proved, builds cleanly, zero `sorry`** (finished 2026-07-25, across
+  several checkpoints: `L1`+`L2`, then `S1`+`H1`, then `HS1`, then `H2`, then the shared `loc_eq`
+  corollary, then `H3`, then `loc_fresh`, then `S2`, then `S3`). All 9 invariants and `makeObjRegion_valid`
+  are real proofs; axiom check on `makeObjRegion_valid` confirms only
+  `propext`/`Classical.choice`/`Quot.sound`.
+  - The operation: `makeObjRegion x cfg` takes the stack's **last** frame's region (via `cfg.heap.lookup
+    frame.regionId`, requiring it to be `Open`), allocates `newObjId := cfg.freshObjectId`, and returns
+    `cfg` with that frame's `varMap` gaining `x ↦ OId newObjId` and the **region's** `objMap` (not the
+    frame's) gaining `newObjId ↦ ∅`. This is the mirror image of `makeObjStack`: the new object lives in
+    the *heap* this time, not the frame. That flip actually makes several invariants *simpler* than
+    `makeObjStack`'s: the frame's `objMap` is completely untouched (only `varMap` changes), so the stack
+    side of `Reference.loc?` is unconditionally unaffected — no freshness case-split needed there at all.
+    The genuine complexity moves to the heap side: `AList.insert` at the *already-present* region key
+    (`frame.regionId`) reorders `cfg.heap.entries` (moves that entry to the front via the underlying
+    `kinsert`/`kerase`), unlike the object-level insert into the region's `objMap` (a *fresh* key, so
+    `AList.entries_insert_of_notMem` applies and nothing reorders).
+  - **Three reusable corollaries, each pulled out because ≥2 invariants needed the exact same fact**:
+    `makeObjRegion_corollary_objectIds_perm` (`cfg'.objectIds ~ cfg.objectIds ++ [freshObjectId]`; used by
+    `L1` and `HS1`), `makeObjRegion_corollary_heap_refs_perm` (`cfg'.heap.refs ~ cfg.heap.refs`, since the
+    newly-inserted object is `∅` and contributes no refs; used by `H2` and — via its own local copy, not
+    reuse, see below — `HS1`), and `makeObjRegion_corollary_loc_eq` (`∀ oid ≠ freshObjectId, (OId
+    oid).loc? cfg = (OId oid).loc? cfg'`; used by `H3`, `S2`, `S3` — the single biggest corollary in the
+    file). Also a small non-`ValidConfig`-gated `makeObjRegion_corollary_fresh_not_in_region` (`cfg.heap.
+    lookup rid = some region → freshObjectId ∉ region.objMap.keys`, used everywhere a fresh-key insert
+    needs to be shown non-reordering) and `makeObjRegion_corollary_region_unique` (an oid appears in at
+    most one region's `objMap`, stated over bare `L1` so it's usable before `cfg'`'s own validity is
+    established — mirrors `Enter.lean`'s `enter_corollary_1`) and `makeObjRegion_corollary_loc_match_eq`
+    (a generic combinator, see gotcha below) and `makeObjRegion_corollary_loc_fresh` (`∃ frame, cfg.stack.
+    getLast? = some frame ∧ (OId freshObjectId).loc? cfg' = some (Rgn frame.regionId)` — the fresh object
+    always resolves into the heap, at the current top frame's region; used by `S2`, to derive a
+    contradiction since a `Stk` hypothesis can never match, and by `S3`, where it *is* the real content).
+    `HS1` and `H2` each still carry their own local copy of the heap-refs-permutation derivation rather
+    than calling the corollary in `HS1`'s case (written before the corollary existed; not worth the churn
+    to retrofit once it was already green).
+  - **Why `loc_eq` needs a case split at all on the stack side despite the frame's `objMap` being
+    literally unchanged**: `findRev?`'s *result* (an `Option FrameWithIndex`) still differs syntactically
+    between `cfg`/`cfg'` when the predicate matches the last frame — the returned record carries the
+    differing `varMap` even though only its (unread) `.index` matters downstream. So the proof still
+    needs `by_cases hb : frame.objMap.keys.contains oid`, but unlike `makeObjStack`'s version, `hb`'s
+    positive-case pairing (`{frame with index:=n}` vs `{newFrame with index:=n}`) needs no freshness
+    argument to justify `newFrame`'s predicate value equaling `frame`'s — it's `rfl`, since `newFrame.
+    objMap = frame.objMap` by construction, not by an `insert`-then-erase computation.
+  - **The heap side of `loc_eq`** reduces the whole `Reference.loc?` match to two `Option.map` facts
+    (`(stack findRev?).map index` and `(heap find?).map fst` agreeing between `cfg`/`cfg'`) via a small
+    generic combinator, `makeObjRegion_corollary_loc_match_eq : (match o1, o2 with | some f, none => ... |
+    none, some ⟨rid,_⟩ => ... | _,_ => none) = (match o1.map index, o2.map fst with ...)`, proved once by
+    `cases o1 <;> cases o2 <;> rfl`. The heap `find?` equality itself needs `makeObjRegion_corollary_
+    region_unique` (an oid can't be in two regions at once) fed into `List.find?_eq_some_of_unique` to show
+    `find?` still lands on the same region despite the `AList.insert`-induced reordering.
+  - **New gotcha this session, worse than the already-documented `find?_cons_of_pos/neg` HOU failure**:
+    using `makeObjRegion_corollary_loc_match_eq` via `rw` or `simp only` **fails outright** ("did not find
+    pattern" / "made no progress") even though the goal's `match` expression is alpha-equivalent to the
+    lemma's LHS — because each *occurrence* of `match ... with` syntax compiles to its own distinct
+    auxiliary `match_1`/`match_2` definition, and `rw`/`simp` match on that syntactic head, not up to
+    defeq. Fix: apply the combinator as a **term**, not a rewrite rule — build `step1 :=
+    loc_match_eq (h1 for cfg) (h2 for cfg)`, `step2 := loc_match_eq (h1 for cfg') (h2 for cfg')`, `rw` the
+    two `Option.map` equalities *inside* `step1` (safe — those are plain function applications, no `match`
+    involved), then close with `step1.trans step2.symm`. `exact`/term application checks by full defeq and
+    doesn't care that the two sides' match-auxiliaries have different names.
+  - **`makeObjRegion_corollary_loc_fresh`'s own gotcha**: its conclusion mentions `cfg.stack.getLast?`
+    literally (needed to name the region the fresh object lands in). Since `cases stackGetLast : cfg.
+    stack.getLast? with` generalizes *every* occurrence of that expression in the current goal — not just
+    hypotheses — the ∃'s own `cfg.stack.getLast? = some frame` conjunct gets rewritten too, so after
+    supplying `frame` as the witness the first component's goal becomes `some frame = some frame` (closed
+    by `rfl`), not `cfg.stack.getLast? = some frame` (which the `stackGetLast` hypothesis would have
+    proved, and which — confusingly — *type-mismatches* if you try to hand it over instead).
+  - Otherwise the recurring gotchas already documented under `MakeObjStack.lean` all resurfaced here
+    too, unchanged: the multi-line record-literal parser error inside a `have`'s type (same `set
+    newFrame`/`set cfgLit` fix, now needed in four separate proofs since the heap-changing shape means
+    more of them embed the post-mutation record), and the `find?_cons_of_pos/neg` HOU failure (same fix —
+    state the target `find?` equality as its own concrete `have` via term application first).
 
 Elsewhere:
 
@@ -251,15 +322,18 @@ Elsewhere:
 
 ## Next planned step
 
-`MakeObjStack.lean` is now finished (see its bullet above for full context — freshness helper, `set
-newFrame` gotcha, `calc`-with-`Perm` gotcha, the `find?_cons_of_pos/neg` HOU gotcha, and the
-corollary-pruning story). Together with `Exit.lean`, `Validity.lean`, `Enter.lean`, and `Start.lean`,
-that's every proof-bearing file in `Gc/Model/` done except the six not-started `Preservation` files below
-(zero `sorry` anywhere in `Gc/Model/`, including the `HS1` invariant added mid-session — see
-`Validity.lean`'s note above for why it was added).
+`MakeObjRegion.lean` is now finished (see its bullet above for full context — the shared corollaries,
+the `match`-auxiliary rw/simp gotcha, the `getLast?`-in-conclusion `cases`-generalization gotcha, and the
+recurring record-literal/HOU gotchas). Together with `MakeObjStack.lean`, `Exit.lean`, `Validity.lean`,
+`Enter.lean`, and `Start.lean`, that's every proof-bearing file in `Gc/Model/` done except the five
+not-started `Preservation` files below (zero `sorry` anywhere in `Gc/Model/`, including the `HS1`
+invariant added mid-session on 2026-07-25 — see `Validity.lean`'s note above for why it was added).
 
 The remaining **not-started** `Preservation/*.lean` files — `Merge.lean`, `Swap.lean`, `VarAsgn.lean`,
-`FieldAsgn.lean`, `MakeObjRegion.lean`, `MakeRegion.lean` — each have 9 bare-`sorry` invariant lemmas
-(the original 8 plus `<op>_HS1`, added so they'd keep compiling after `ValidConfig` gained the `hs1`
-field), with only the combining `<op>_valid` assembled. No specific one has been agreed on next — confirm
-with the user before diving into any of these.
+`FieldAsgn.lean`, `MakeRegion.lean` — each have 9 bare-`sorry` invariant lemmas (the original 8 plus
+`<op>_HS1`, added so they'd keep compiling after `ValidConfig` gained the `hs1` field), with only the
+combining `<op>_valid` assembled. `MakeRegion` is the closest relative of `MakeObjStack`/`MakeObjRegion`
+(same "allocate a fresh id, mutate the last frame + insert a fresh heap entry" shape, but allocates a
+*region* — `RId newRegionId`, not `OId newObjId` — plus a whole new Closed region rather than reusing an
+existing one) and is probably the natural next target, but no specific one has been agreed on next —
+confirm with the user before diving into any of these.
