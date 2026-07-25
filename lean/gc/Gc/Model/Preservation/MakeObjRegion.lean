@@ -215,10 +215,122 @@ theorem makeObjRegion_H1 : ValidConfig cfg →
           unfold Heap.regions
           exact (List.Sublist.map _ (List.kerase_sublist frame.regionId cfg.heap.entries)).mem hkeraseregion
 
+-- cfg'.heap.refs is a permutation of cfg.heap.refs: makeObjRegion only ever inserts an *empty*
+-- object into the mutated region's objMap, so no ref is gained or lost heap-side, only reordered
+-- by the kerase-based AList.insert at the (already-present) region key. Reused by H2 and HS1.
+theorem makeObjRegion_corollary_heap_refs_perm : ValidConfig cfg →
+  makeObjRegion x cfg = some cfg' →
+  cfg'.heap.refs.Perm cfg.heap.refs := by
+  intro vcfg h
+  have h' := h
+  unfold makeObjRegion at h
+  cases stackGetLast : cfg.stack.getLast? with
+  | none => rw [stackGetLast] at h; contradiction
+  | some frame =>
+    rw [stackGetLast] at h
+    dsimp at h
+    cases heapLookup : cfg.heap.lookup frame.regionId with
+    | none => rw [heapLookup] at h; contradiction
+    | some region =>
+      rw [heapLookup] at h
+      dsimp at h
+      cases regionStatus : region.status with
+      | Closed => rw [regionStatus] at h; contradiction
+      | Open =>
+        rw [regionStatus] at h
+        rw [if_pos (by rfl)] at h
+        rw [Option.some_inj] at h
+        have fresh_not_in_region := makeObjRegion_corollary_fresh_not_in_region heapLookup
+        set newRegion : Region :=
+          { bridgeObjectId := region.bridgeObjectId,
+            objMap := AList.insert cfg.freshObjectId ∅ region.objMap,
+            status := Status.Open } with newRegion_def
+        have newRegion_refs_eq : newRegion.refs = region.refs := by
+          show (AList.insert cfg.freshObjectId ∅ region.objMap).entries.map (·.2) >>= Object.refs = region.refs
+          rw [AList.entries_insert_of_notMem fresh_not_in_region]
+          simp [Object.refs, Region.refs, List.bind_eq_flatMap]
+        have heap'_refs_perm : (Heap.refs (AList.insert frame.regionId newRegion cfg.heap)).Perm cfg.heap.refs := by
+          apply List.Perm.flatten
+          obtain ⟨regionVal2, l1e2, l2e2, hnotmem2, heq2, hkerase2⟩ :=
+            List.exists_of_kerase (List.mem_keys_of_mem (AList.lookup_mem_entries heapLookup))
+          have regionVal2_eq_region : regionVal2 = region := by
+            have mem_regionVal2 : (⟨frame.regionId, regionVal2⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries := by
+              rw [heq2]
+              exact List.mem_append_right _ List.mem_cons_self
+            exact List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys mem_regionVal2 (AList.lookup_mem_entries heapLookup)
+          subst regionVal2
+          unfold AList.insert
+          dsimp
+          rw [hkerase2]
+          simp only [heq2, List.map_append, List.map_cons]
+          rw [newRegion_refs_eq]
+          exact List.perm_middle.symm
+        rw [← h]
+        exact heap'_refs_perm
+
 theorem makeObjRegion_H2 : ValidConfig cfg →
   makeObjRegion x cfg = some cfg' →
   H2 cfg' := by
-  sorry
+  intro vcfg h
+  have h' := h
+  have heap_refs_perm := makeObjRegion_corollary_heap_refs_perm vcfg h
+  unfold makeObjRegion at h
+  cases stackGetLast : cfg.stack.getLast? with
+  | none => rw [stackGetLast] at h; contradiction
+  | some frame =>
+    rw [stackGetLast] at h
+    dsimp at h
+    cases heapLookup : cfg.heap.lookup frame.regionId with
+    | none => rw [heapLookup] at h; contradiction
+    | some region =>
+      rw [heapLookup] at h
+      dsimp at h
+      cases regionStatus : region.status with
+      | Closed => rw [regionStatus] at h; contradiction
+      | Open =>
+        rw [regionStatus] at h
+        rw [if_pos (by rfl)] at h
+        rw [Option.some_inj] at h
+        unfold H2
+        intro rid
+        rw [heap_refs_perm.count_eq]
+        rw [← h]
+        dsimp
+        have h2 := vcfg.h2 rid
+        have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame] :=
+          (List.dropLast_append_getLast? frame stackGetLast).symm
+        have newFrame_refs_le : (Frame.refs { frame with
+            varMap := AList.insert x (Reference.OId cfg.freshObjectId) frame.varMap }).count
+              (Reference.RId rid) ≤ frame.refs.count (Reference.RId rid) := by
+          unfold Frame.refs
+          dsimp
+          rw [List.count_append, List.count_append]
+          apply Nat.add_le_add_left
+          rw [List.count_cons]
+          have hne : (Reference.OId cfg.freshObjectId == Reference.RId rid) = false := rfl
+          rw [hne]
+          dsimp
+          exact ((List.kerase_sublist x frame.varMap.entries).map (·.2)).count_le (Reference.RId rid)
+        have stack_refs_le : (Stack.refs (cfg.stack.dropLast ++ [{ frame with
+            varMap := AList.insert x (Reference.OId cfg.freshObjectId) frame.varMap }])).count
+              (Reference.RId rid) ≤ cfg.stack.refs.count (Reference.RId rid) := by
+          have split1 : Stack.refs (cfg.stack.dropLast ++ [{ frame with
+              varMap := AList.insert x (Reference.OId cfg.freshObjectId) frame.varMap }]) =
+              Stack.refs cfg.stack.dropLast ++ (Frame.refs { frame with
+                varMap := AList.insert x (Reference.OId cfg.freshObjectId) frame.varMap }) := by
+            unfold Stack.refs
+            rw [List.bind_eq_flatMap, List.bind_eq_flatMap, List.flatMap_id, List.flatMap_id,
+              List.map_append, List.flatten_append]
+            simp
+          have split2 : cfg.stack.refs = Stack.refs cfg.stack.dropLast ++ frame.refs := by
+            conv_lhs => rw [stack_eq]
+            unfold Stack.refs
+            rw [List.bind_eq_flatMap, List.bind_eq_flatMap, List.flatMap_id, List.flatMap_id,
+              List.map_append, List.flatten_append]
+            simp
+          rw [split1, split2, List.count_append, List.count_append]
+          exact Nat.add_le_add_left newFrame_refs_le _
+        exact Nat.le_trans (Nat.add_le_add_right stack_refs_le _) h2
 
 theorem makeObjRegion_H3 : ValidConfig cfg →
   makeObjRegion x cfg = some cfg' →
