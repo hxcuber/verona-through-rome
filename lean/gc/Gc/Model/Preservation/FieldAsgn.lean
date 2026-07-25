@@ -444,10 +444,150 @@ theorem fieldAsgn_corollary_heap_refs_mem_of_lookup {cfg : RuntimeConfig} {rid :
   rw [List.bind_eq_flatMap, List.mem_flatMap]
   exact ⟨region, List.mem_map_of_mem (f := (·.2)) hmem, hr⟩
 
+-- The count-level analogue of fieldAsgn_corollary_object_insert_refs_mem: since the newly-written
+-- value `v` is never equal to the target `t` we're counting (in this file, `v` is always
+-- `Reference.OId _` and `t` is always `Reference.RId _`), inserting/updating one field can only
+-- decrease-or-preserve the count of `t`, whether or not the field was already present.
+theorem fieldAsgn_corollary_object_insert_count_le {obj : Object} {field : FieldName} {v t : Reference}
+    (hne : (v == t) = false) :
+    (Object.refs (obj.insert field v)).count t ≤ (Object.refs obj).count t := by
+  unfold Object.refs
+  by_cases hfield : field ∈ obj
+  · obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase (AList.mem_keys.mp hfield)
+    have hnew : (AList.insert field v obj).entries.map (·.2) = v :: ((l1e ++ l2e).map (·.2)) := by
+      rw [AList.entries_insert, hkerase, List.map_cons]
+    have hold : obj.entries.map (·.2) = l1e.map (·.2) ++ v0 :: l2e.map (·.2) := by
+      rw [heq, List.map_append, List.map_cons]
+    rw [hnew, hold, List.count_cons, List.map_append, List.count_append, List.count_append,
+      List.count_cons, hne, if_neg (by decide)]
+    split_ifs <;> omega
+  · have hnew : (AList.insert field v obj).entries.map (·.2) = v :: obj.entries.map (·.2) := by
+      rw [AList.entries_insert_of_notMem hfield, List.map_cons]
+    rw [hnew, List.count_cons, hne, if_neg (by decide)]
+    omega
+
+-- ObjMap-level count propagation: given the mutated object's own count bound (from
+-- fieldAsgn_corollary_object_insert_count_le), the whole ObjMap-level bind-refs count is also
+-- bounded. `oid` is always already-present in this file (fieldAsgn never allocates a fresh id).
+theorem fieldAsgn_corollary_objMap_insert_bind_refs_count_le {m : ObjMap} {oid : ObjectId} {obj v : Object}
+    {t : Reference} (hobj : m.lookup oid = some obj) (hle : (Object.refs v).count t ≤ (Object.refs obj).count t) :
+    ((m.insert oid v).entries.map (·.2) >>= Object.refs).count t ≤ (m.entries.map (·.2) >>= Object.refs).count t := by
+  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase (fieldAsgn_corollary_mem_keys_of_lookup hobj)
+  have v0_eq : v0 = obj := by
+    have hmem_v0 : (⟨oid, v0⟩ : Sigma (fun _ : ObjectId => Object)) ∈ m.entries :=
+      heq ▸ List.mem_append_right _ List.mem_cons_self
+    have hmem_obj : (⟨oid, obj⟩ : Sigma (fun _ : ObjectId => Object)) ∈ m.entries :=
+      AList.mem_lookup_iff.mp (by rw [hobj]; rfl)
+    exact List.NodupKeys.eq_of_mk_mem (β := fun _ : ObjectId => Object) m.nodupKeys hmem_v0 hmem_obj
+  have hnewbind : (m.insert oid v).entries.map (·.2) >>= Object.refs =
+      Object.refs v ++ ((l1e ++ l2e).map (·.2) >>= Object.refs) := by
+    rw [AList.entries_insert, hkerase, List.map_cons, List.bind_eq_flatMap, List.flatMap_cons,
+      ← List.bind_eq_flatMap]
+  have holdbind : m.entries.map (·.2) >>= Object.refs =
+      (l1e.map (·.2) >>= Object.refs) ++ (Object.refs obj ++ (l2e.map (·.2) >>= Object.refs)) := by
+    rw [heq, v0_eq, List.map_append, List.map_cons, List.bind_eq_flatMap, List.flatMap_append,
+      List.flatMap_cons, ← List.bind_eq_flatMap, ← List.bind_eq_flatMap]
+  have splitbind : ((l1e ++ l2e).map (·.2) >>= Object.refs).count t =
+      (l1e.map (·.2) >>= Object.refs).count t + (l2e.map (·.2) >>= Object.refs).count t := by
+    rw [List.map_append, List.bind_eq_flatMap, List.flatMap_append, ← List.bind_eq_flatMap,
+      ← List.bind_eq_flatMap, List.count_append]
+  rw [hnewbind, holdbind, List.count_append, List.count_append, List.count_append, splitbind]
+  omega
+
+-- Wraps the ObjMap-level count bound for a whole Frame (varMap is untouched by fieldAsgn).
+theorem fieldAsgn_corollary_frame_insert_refs_count_le {frame : Frame} {oid : ObjectId} {obj v : Object}
+    {t : Reference} (hobj : frame.objMap.lookup oid = some obj)
+    (hle : (Object.refs v).count t ≤ (Object.refs obj).count t) :
+    (Frame.refs { frame with objMap := frame.objMap.insert oid v }).count t ≤ (Frame.refs frame).count t := by
+  unfold Frame.refs
+  dsimp only
+  rw [List.count_append, List.count_append]
+  have := fieldAsgn_corollary_objMap_insert_bind_refs_count_le hobj hle
+  omega
+
+-- Mirrors fieldAsgn_corollary_frame_insert_refs_count_le for Region.refs.
+theorem fieldAsgn_corollary_region_insert_refs_count_le {region : Region} {oid : ObjectId} {obj v : Object}
+    {t : Reference} (hobj : region.objMap.lookup oid = some obj)
+    (hle : (Object.refs v).count t ≤ (Object.refs obj).count t) :
+    (Region.refs { region with objMap := region.objMap.insert oid v }).count t ≤ (Region.refs region).count t := by
+  unfold Region.refs
+  dsimp
+  exact fieldAsgn_corollary_objMap_insert_bind_refs_count_le hobj hle
+
+-- Heap-level analogue of fieldAsgn_corollary_objMap_insert_bind_refs_count_le (one level up: Heap
+-- of Regions instead of ObjMap of Objects). Used by H2's region branch.
+theorem fieldAsgn_corollary_heap_insert_refs_count_le {cfg : RuntimeConfig} {rid : RegionId}
+    {region newRegion : Region} {t : Reference} (hregion : cfg.heap.lookup rid = some region)
+    (hle : (Region.refs newRegion).count t ≤ (Region.refs region).count t) :
+    (Heap.refs (cfg.heap.insert rid newRegion)).count t ≤ (Heap.refs cfg.heap).count t := by
+  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ :=
+    List.exists_of_kerase (fieldAsgn_corollary_mem_keys_of_lookup hregion)
+  have v0_eq : v0 = region := by
+    have hmem_v0 : (⟨rid, v0⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries :=
+      heq ▸ List.mem_append_right _ List.mem_cons_self
+    have hmem_region : (⟨rid, region⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries :=
+      AList.mem_lookup_iff.mp (by rw [hregion]; rfl)
+    exact List.NodupKeys.eq_of_mk_mem (β := fun _ : RegionId => Region) cfg.heap.nodupKeys hmem_v0 hmem_region
+  unfold Heap.refs
+  have hnewbind : (cfg.heap.insert rid newRegion).entries.map (·.2) >>= Region.refs =
+      Region.refs newRegion ++ ((l1e ++ l2e).map (·.2) >>= Region.refs) := by
+    rw [AList.entries_insert, hkerase, List.map_cons, List.bind_eq_flatMap, List.flatMap_cons,
+      ← List.bind_eq_flatMap]
+  have holdbind : cfg.heap.entries.map (·.2) >>= Region.refs =
+      (l1e.map (·.2) >>= Region.refs) ++ (Region.refs region ++ (l2e.map (·.2) >>= Region.refs)) := by
+    rw [heq, v0_eq, List.map_append, List.map_cons, List.bind_eq_flatMap, List.flatMap_append,
+      List.flatMap_cons, ← List.bind_eq_flatMap, ← List.bind_eq_flatMap]
+  have splitbind : ((l1e ++ l2e).map (·.2) >>= Region.refs).count t =
+      (l1e.map (·.2) >>= Region.refs).count t + (l2e.map (·.2) >>= Region.refs).count t := by
+    rw [List.map_append, List.bind_eq_flatMap, List.flatMap_append, ← List.bind_eq_flatMap,
+      ← List.bind_eq_flatMap, List.count_append]
+  rw [hnewbind, holdbind, List.count_append, List.count_append, List.count_append, splitbind]
+  omega
+
 theorem fieldAsgn_H2 : ValidConfig cfg →
   fieldAsgn x yf cfg = some cfg' →
   H2 cfg' := by
-  sorry
+  intro vcfg h
+  have h2 := vcfg.h2
+  obtain ⟨frame, hframe, hcase⟩ := fieldAsgn_cases h
+  unfold H2
+  rcases hcase with
+    ⟨oid, oid_y, obj, hxr, hyr, hloc, hobj, hcfg'⟩ |
+    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hcfg'⟩
+  · subst hcfg'
+    intro rid'
+    obtain ⟨stack_eq, _⟩ := fieldAsgn_corollary_stack_eq hframe
+    have stack_refs_append : ∀ (l : Stack) (f : Frame), Stack.refs (l ++ [f]) = Stack.refs l ++ f.refs := by
+      intro l f
+      unfold Stack.refs
+      rw [List.bind_eq_flatMap, List.bind_eq_flatMap, List.flatMap_id, List.flatMap_id,
+        List.map_append, List.flatten_append]
+      simp
+    have hle : (Object.refs (obj.insert x.field (Reference.OId oid_y))).count (Reference.RId rid') ≤
+        (Object.refs obj).count (Reference.RId rid') :=
+      fieldAsgn_corollary_object_insert_count_le rfl
+    have hframele := fieldAsgn_corollary_frame_insert_refs_count_le hobj hle
+    dsimp
+    rw [stack_refs_append, List.count_append]
+    have cfg_stack_eq : Stack.refs cfg.stack = Stack.refs cfg.stack.dropLast ++ frame.refs := by
+      conv_lhs => rw [stack_eq]
+      exact stack_refs_append _ _
+    have h2' := h2 rid'
+    rw [cfg_stack_eq, List.count_append] at h2'
+    omega
+  · subst hcfg'
+    dsimp
+    intro rid'
+    have hle : (Region.refs { region with
+        objMap := AList.insert oid (AList.insert x.field (Reference.OId oid_y) obj) region.objMap }).count
+        (Reference.RId rid') ≤ (Region.refs region).count (Reference.RId rid') := by
+      have hle0 : (Object.refs (obj.insert x.field (Reference.OId oid_y))).count (Reference.RId rid') ≤
+          (Object.refs obj).count (Reference.RId rid') :=
+        fieldAsgn_corollary_object_insert_count_le rfl
+      exact fieldAsgn_corollary_region_insert_refs_count_le hobj hle0
+    have hheaple := fieldAsgn_corollary_heap_insert_refs_count_le hregion hle
+    have h2' := h2 rid'
+    omega
 
 theorem fieldAsgn_H3 : ValidConfig cfg →
   fieldAsgn x yf cfg = some cfg' →
