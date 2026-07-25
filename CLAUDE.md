@@ -436,7 +436,10 @@ proof-bearing file in `Gc/Model/` done except the three not-started `Preservatio
 
 The remaining **not-started** `Preservation/*.lean` files — `Merge.lean`, `Swap.lean`, `FieldAsgn.lean`
 — each have 10 bare-`sorry` invariant lemmas (`L1`/`L2`/`H1`/`H2`/`H3`/`S1`/`S2`/`S3`/`HS1`/`HS2`), with
-only the combining `<op>_valid` assembled. `FieldAsgn` is probably the closest relative of `VarAsgn`
-(no fresh-id allocation, similar `Location.Stk`/`Location.Rgn` branch split) and so is probably the
-easiest next target, but no specific one has been agreed on next — confirm with the user before diving
-into any of these.
+only the combining `<op>_valid` assembled.
+
+**Confirmed next target: `FieldAsgn.lean`** (2026-07-26) — it's the closest relative of `VarAsgn`
+(no fresh-id allocation, similar `Location.Stk`/`Location.Rgn` branch split), so the proof scaffold and
+corollary shapes from `VarAsgn.lean`'s bullet above (`<op>_cases` case-split lemma, unconditional
+`loc_eq` transport, `S3` provenance-tracing via root-reference ancestor-tracing) are the expected
+starting point. `Swap.lean`/`Merge.lean` remain unstarted with no target order agreed yet.
