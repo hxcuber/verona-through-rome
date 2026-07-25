@@ -589,6 +589,65 @@ theorem fieldAsgn_H2 : ValidConfig cfg →
     have h2' := h2 rid'
     omega
 
+-- A successful `resolveV` retrieves an already-live object reference -- either directly from some
+-- frame's varMap (already ∈ cfg.refs, so vcfg.hs1 applies), or as a region's bridgeObjectId (already
+-- ∈ cfg.objectIds via H1). Mirrors varAsgn_corollary_resolveV_loc_ancestor's case split but concludes
+-- objectIds membership instead of a stack-ancestor witness. Used by HS1's newly-written field value.
+theorem fieldAsgn_corollary_resolveV_oid_mem_objectIds {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
+    {var : VarName} {oid : ObjectId} (hrv : resolveV var cfg = some (Reference.OId oid)) :
+    oid ∈ cfg.objectIds := by
+  have hs1 := vcfg.hs1
+  have h1 := vcfg.h1
+  unfold resolveV at hrv
+  cases hfV : cfg.stackWithIndex.findRev? (fun frame => frame.varMap.keys.contains var ∨ frame.bridgeVar == var) with
+  | none => rw [hfV] at hrv; contradiction
+  | some frameV =>
+    rw [hfV] at hrv
+    dsimp at hrv
+    cases hlookupV : frameV.varMap.lookup var with
+    | some refV =>
+      rw [hlookupV] at hrv
+      dsimp at hrv
+      rw [Option.some_inj] at hrv
+      apply hs1
+      have hmemV : refV ∈ frameV.refs := by
+        unfold Frame.refs
+        apply List.mem_append_right
+        exact List.mem_map_of_mem (f := (·.2)) (AList.mem_lookup_iff.mp (by rw [hlookupV]; rfl))
+      have hframeV_mem : frameV ∈ cfg.stackWithIndex := by
+        rw [List.findRev?_eq_find?_reverse] at hfV
+        exact List.mem_reverse.mp (List.mem_of_find?_eq_some hfV)
+      obtain ⟨n, hn, heqn⟩ := List.mem_mapIdx.mp hframeV_mem
+      unfold RuntimeConfig.refs
+      apply List.mem_append_left
+      unfold Stack.refs
+      rw [List.bind_eq_flatMap, List.flatMap_id, List.mem_flatten]
+      refine ⟨frameV.refs, ?_, hrv ▸ hmemV⟩
+      rw [List.mem_map]
+      exact ⟨cfg.stack[n], List.mem_iff_getElem.mpr ⟨n, hn, rfl⟩, by rw [← heqn]⟩
+    | none =>
+      rw [hlookupV] at hrv
+      dsimp at hrv
+      by_cases hbv : frameV.bridgeVar == var
+      · rw [if_pos hbv] at hrv
+        cases hregionV : cfg.heap.lookup frameV.regionId with
+        | none => rw [hregionV] at hrv; dsimp at hrv; contradiction
+        | some regionV =>
+          rw [hregionV] at hrv
+          dsimp at hrv
+          rw [Option.some_inj, Reference.OId.injEq] at hrv
+          have hmemBridge : regionV.bridgeObjectId ∈ regionV.objMap := h1 regionV
+            (List.mem_map_of_mem (f := (·.2)) (AList.mem_lookup_iff.mp (by rw [hregionV]; rfl)))
+          unfold RuntimeConfig.objectIds
+          apply List.mem_append_right
+          unfold Heap.objectIds
+          rw [List.mem_flatten]
+          refine ⟨regionV.objMap.keys, ?_, ?_⟩
+          · exact List.mem_map_of_mem (f := fun e : Sigma (fun _ : RegionId => Region) => e.2.objectIds)
+              (AList.mem_lookup_iff.mp (by rw [hregionV]; rfl))
+          · rw [← hrv]; exact AList.mem_keys.mp hmemBridge
+      · rw [if_neg hbv] at hrv; contradiction
+
 theorem fieldAsgn_H3 : ValidConfig cfg →
   fieldAsgn x yf cfg = some cfg' →
   H3 cfg' := by
@@ -607,7 +666,100 @@ theorem fieldAsgn_S3 : ValidConfig cfg →
 theorem fieldAsgn_HS1 : ValidConfig cfg →
   fieldAsgn x yf cfg = some cfg' →
   HS1 cfg' := by
-  sorry
+  intro vcfg h
+  have hs1 := vcfg.hs1
+  obtain ⟨frame, hframe, hcase⟩ := fieldAsgn_cases h
+  unfold HS1
+  rcases hcase with
+    ⟨oid, oid_y, obj, hxr, hyr, hloc, hobj, hcfg'⟩ |
+    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hcfg'⟩
+  · subst hcfg'
+    obtain ⟨stack_eq, _⟩ := fieldAsgn_corollary_stack_eq hframe
+    have hoidmem : oid ∈ frame.objMap.keys := fieldAsgn_corollary_mem_keys_of_lookup hobj
+    have frame_perm := fieldAsgn_corollary_insert_keys_perm
+      (l := frame.objMap) (v := obj.insert x.field (Reference.OId oid_y)) hoidmem
+    have stack_objectIds_append : ∀ (l : Stack) (f : Frame),
+        Stack.objectIds (l ++ [f]) = Stack.objectIds l ++ f.objectIds := by
+      intro l f
+      unfold Stack.objectIds
+      rw [List.bind_eq_flatMap, List.bind_eq_flatMap, List.flatMap_id, List.flatMap_id,
+        List.map_append, List.flatten_append]
+      simp
+    have stack_refs_append : ∀ (l : Stack) (f : Frame), Stack.refs (l ++ [f]) = Stack.refs l ++ f.refs := by
+      intro l f
+      unfold Stack.refs
+      rw [List.bind_eq_flatMap, List.bind_eq_flatMap, List.flatMap_id, List.flatMap_id,
+        List.map_append, List.flatten_append]
+      simp
+    have cfg_stack_eq : Stack.objectIds cfg.stack = Stack.objectIds cfg.stack.dropLast ++ frame.objMap.keys := by
+      conv_lhs => rw [stack_eq]
+      rw [stack_objectIds_append]
+      rfl
+    have relocate : ∀ oid'', oid'' ∈ cfg.objectIds →
+        oid'' ∈ Stack.objectIds (cfg.stack.dropLast ++
+          [({ frame with objMap := frame.objMap.insert oid (obj.insert x.field (Reference.OId oid_y)) } : Frame)]) ++
+          cfg.heap.objectIds := by
+      intro oid'' hmem
+      unfold RuntimeConfig.objectIds at hmem
+      rw [cfg_stack_eq, List.mem_append, List.mem_append] at hmem
+      rw [stack_objectIds_append, List.mem_append, List.mem_append]
+      rcases hmem with (h1 | h2) | h3
+      · exact Or.inl (Or.inl h1)
+      · exact Or.inl (Or.inr (frame_perm.symm.mem_iff.mp h2))
+      · exact Or.inr h3
+    intro oid'' hmem
+    unfold RuntimeConfig.objectIds
+    dsimp
+    apply relocate
+    unfold RuntimeConfig.refs at hmem
+    dsimp at hmem
+    rw [stack_refs_append, List.mem_append, List.mem_append] at hmem
+    rcases hmem with (hdrop | hnew) | hheap
+    · apply hs1
+      unfold RuntimeConfig.refs
+      apply List.mem_append_left
+      rw [stack_eq, stack_refs_append]
+      exact List.mem_append_left _ hdrop
+    · rcases fieldAsgn_corollary_frame_field_insert_refs_mem hobj hnew with heq | horig
+      · rw [Reference.OId.injEq] at heq
+        rw [heq]
+        exact fieldAsgn_corollary_resolveV_oid_mem_objectIds vcfg hyr
+      · apply hs1
+        unfold RuntimeConfig.refs
+        apply List.mem_append_left
+        rw [stack_eq, stack_refs_append]
+        exact List.mem_append_right _ horig
+    · exact hs1 oid'' (List.mem_append_right _ hheap)
+  · subst hcfg'
+    have region_perm := fieldAsgn_corollary_insert_keys_perm
+      (l := region.objMap) (v := obj.insert x.field (Reference.OId oid_y)) (fieldAsgn_corollary_mem_keys_of_lookup hobj)
+    have heap_perm := fieldAsgn_corollary_region_heap_objectIds_perm
+      (newRegion := { region with objMap := AList.insert oid (AList.insert x.field (Reference.OId oid_y) obj) region.objMap })
+      hregion region_perm
+    have relocate : ∀ oid'', oid'' ∈ cfg.objectIds → oid'' ∈ cfg.stack.objectIds ++
+        Heap.objectIds (cfg.heap.insert rid
+          { region with objMap := AList.insert oid (AList.insert x.field (Reference.OId oid_y) obj) region.objMap }) := by
+      intro oid'' hmem
+      unfold RuntimeConfig.objectIds at hmem
+      rw [List.mem_append] at hmem ⊢
+      rcases hmem with h1 | h2
+      · exact Or.inl h1
+      · exact Or.inr (heap_perm.symm.mem_iff.mp h2)
+    intro oid'' hmem
+    apply relocate
+    unfold RuntimeConfig.refs at hmem
+    dsimp at hmem
+    rw [List.mem_append] at hmem
+    rcases hmem with hstack | hheap
+    · exact hs1 oid'' (List.mem_append_left _ hstack)
+    · have hridmem : rid ∈ cfg.heap.keys := fieldAsgn_corollary_mem_keys_of_lookup hregion
+      rcases fieldAsgn_corollary_heap_insert_refs_mem hridmem hheap with hnewregion | hold
+      · rcases fieldAsgn_corollary_region_field_insert_refs_mem hobj hnewregion with heq | horig
+        · rw [Reference.OId.injEq] at heq
+          rw [heq]
+          exact fieldAsgn_corollary_resolveV_oid_mem_objectIds vcfg hyr
+        · exact hs1 oid'' (List.mem_append_right _ (fieldAsgn_corollary_heap_refs_mem_of_lookup hregion horig))
+      · exact hs1 oid'' (List.mem_append_right _ hold)
 
 theorem fieldAsgn_HS2 : ValidConfig cfg →
   fieldAsgn x yf cfg = some cfg' →
