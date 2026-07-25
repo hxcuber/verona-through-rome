@@ -220,7 +220,21 @@ theorem makeObjStack_H2 : ValidConfig cfg →
 theorem makeObjStack_H3 : ValidConfig cfg →
   makeObjStack x cfg = some cfg' →
   H3 cfg' := by
-  sorry
+  intro vcfg h
+  have h' := h
+  unfold makeObjStack at h
+  cases stackGetLast : cfg.stack.getLast? with
+  | none => rw [stackGetLast] at h; contradiction
+  | some frame =>
+    rw [stackGetLast] at h
+    dsimp at h
+    rw [Option.some_inj] at h
+    have heap_eq : cfg'.heap = cfg.heap := by rw [← h]
+    unfold H3
+    intro rid oid region hlookup href
+    rw [heap_eq] at hlookup
+    have h3 := vcfg.h3 rid oid region hlookup href
+    exact (makeObjStack_corollary_2 vcfg h' oid rid).mp h3
 
 theorem makeObjStack_S1 : ValidConfig cfg →
   makeObjStack x cfg = some cfg' →
