@@ -975,10 +975,143 @@ theorem fieldAsgn_S2 : ValidConfig cfg →
     rw [← fieldAsgn_corollary_region_loc_eq vcfg hregion hobj oid0] at hlocEq
     exact s2 frame' hframe' (Reference.OId oid0) href fid' oid0 rfl hlocEq
 
+-- If `resolveV` finds oid0 (as a variable value or a bridge value) and oid0 resolves into a heap
+-- region rid0, that region already has an owning ancestor frame currently on the stack. Mirrors
+-- varAsgn_corollary_resolveV_loc_ancestor (a fully general fact about resolveV, not specific to any
+-- one mutation). Needed for S3's stack branch: the value newly stored via fieldAsgn's `y : VarName`
+-- parameter is resolved directly via `resolveV` (no FieldAccess indirection, unlike VarAsgn's `yf`).
+theorem fieldAsgn_corollary_resolveV_loc_ancestor {cfg : RuntimeConfig} {var : VarName} {oid0 : ObjectId}
+    (vcfg : ValidConfig cfg) (hrv : resolveV var cfg = some (Reference.OId oid0)) (rid0 : RegionId)
+    (hloc0 : (Reference.OId oid0).loc? cfg = some (Location.Rgn rid0)) :
+    ∃ frame'' ∈ cfg.stackWithIndex, frame''.regionId = rid0 ∧ frame''.index < cfg.stack.length := by
+  unfold resolveV at hrv
+  cases hfV : cfg.stackWithIndex.findRev? (fun frame => frame.varMap.keys.contains var ∨ frame.bridgeVar == var) with
+  | none => rw [hfV] at hrv; contradiction
+  | some frameV =>
+    rw [hfV] at hrv
+    dsimp at hrv
+    have hframeV_mem : frameV ∈ cfg.stackWithIndex := by
+      rw [List.findRev?_eq_find?_reverse] at hfV
+      exact List.mem_reverse.mp (List.mem_of_find?_eq_some hfV)
+    have hframeV_lt : frameV.index < cfg.stack.length := by
+      unfold RuntimeConfig.stackWithIndex at hframeV_mem
+      obtain ⟨n, hn, heqn⟩ := List.mem_mapIdx.mp hframeV_mem
+      rw [← heqn]
+      exact hn
+    cases hlookupV : frameV.varMap.lookup var with
+    | some refV =>
+      rw [hlookupV] at hrv
+      dsimp at hrv
+      rw [Option.some_inj] at hrv
+      have hmemV : refV ∈ frameV.refs := by
+        unfold Frame.refs
+        exact List.mem_append_right _
+          (List.mem_map_of_mem (f := (·.2)) (AList.mem_lookup_iff.mp (by rw [hlookupV]; rfl)))
+      rw [hrv] at hmemV
+      obtain ⟨frame'', hmem'', hregion'', hidx''⟩ :=
+        vcfg.s3 frameV hframeV_mem (Reference.OId oid0) hmemV rid0 oid0 rfl hloc0
+      exact ⟨frame'', hmem'', hregion'', lt_of_le_of_lt hidx'' hframeV_lt⟩
+    | none =>
+      rw [hlookupV] at hrv
+      dsimp at hrv
+      by_cases hbv : frameV.bridgeVar == var
+      · rw [if_pos hbv] at hrv
+        cases hregionV : cfg.heap.lookup frameV.regionId with
+        | none => rw [hregionV] at hrv; dsimp at hrv; contradiction
+        | some regionV =>
+          rw [hregionV] at hrv
+          dsimp at hrv
+          rw [Option.some_inj, Reference.OId.injEq] at hrv
+          have h1 := vcfg.h1
+          have hmemBridge : regionV.bridgeObjectId ∈ regionV.objMap :=
+            h1 regionV (List.mem_map_of_mem (f := (·.2)) (AList.mem_lookup_iff.mp (by rw [hregionV]; rfl)))
+          have hlocBridge : (Reference.OId regionV.bridgeObjectId).loc? cfg = some (Location.Rgn frameV.regionId) :=
+            (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨regionV, hregionV, hmemBridge⟩
+          rw [hrv, hloc0, Option.some_inj, Location.Rgn.injEq] at hlocBridge
+          exact ⟨frameV, hframeV_mem, hlocBridge.symm, hframeV_lt⟩
+      · rw [if_neg hbv] at hrv; contradiction
+
 theorem fieldAsgn_S3 : ValidConfig cfg →
   fieldAsgn x yf cfg = some cfg' →
   S3 cfg' := by
-  sorry
+  intro vcfg h
+  have s3 := vcfg.s3
+  obtain ⟨frame, hframe, hcase⟩ := fieldAsgn_cases h
+  unfold S3
+  rcases hcase with
+    ⟨oid, oid_y, obj, hxr, hyr, hloc, hobj, hcfg'⟩ |
+    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hcfg'⟩
+  · subst hcfg'
+    obtain ⟨stack_eq, _⟩ := fieldAsgn_corollary_stack_eq hframe
+    set newFrame : Frame :=
+      { frame with objMap := frame.objMap.insert oid (obj.insert x.field (Reference.OId oid_y)) } with newFrame_def
+    have stackWithIndex_eq_cfg :
+        cfg.stackWithIndex =
+          cfg.stack.dropLast.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) ++
+            [({ frame with index := cfg.stack.dropLast.length } : FrameWithIndex)] := by
+      unfold RuntimeConfig.stackWithIndex
+      conv_lhs => rw [stack_eq]
+      rw [List.mapIdx_concat]
+    have stackWithIndex_eq :
+        (RuntimeConfig.stackWithIndex { stack := cfg.stack.dropLast ++ [newFrame], heap := cfg.heap }) =
+          cfg.stack.dropLast.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) ++
+            [({ newFrame with index := cfg.stack.dropLast.length } : FrameWithIndex)] := by
+      unfold RuntimeConfig.stackWithIndex
+      dsimp
+      rw [List.mapIdx_concat]
+    have transport : ∀ frame3 : FrameWithIndex, frame3 ∈ cfg.stackWithIndex →
+        ∃ frame4 ∈ (RuntimeConfig.stackWithIndex { stack := cfg.stack.dropLast ++ [newFrame], heap := cfg.heap }),
+          frame4.regionId = frame3.regionId ∧ frame4.index = frame3.index := by
+      intro frame3 hmem3
+      rw [stackWithIndex_eq_cfg, List.mem_append, List.mem_singleton] at hmem3
+      rcases hmem3 with hd | hl
+      · exact ⟨frame3, by rw [stackWithIndex_eq]; exact List.mem_append_left _ hd, rfl, rfl⟩
+      · refine ⟨{ newFrame with index := cfg.stack.dropLast.length }, ?_, ?_, ?_⟩
+        · rw [stackWithIndex_eq]; exact List.mem_append_right _ (List.mem_singleton_self _)
+        · rw [hl]
+        · rw [hl]
+    have hstacklen : cfg.stack.length = cfg.stack.dropLast.length + 1 := by
+      conv_lhs => rw [stack_eq]
+      rw [List.length_append, List.length_singleton]
+    intro frame' hframe' ref href rid' oid0 hrefeq hlocEq
+    subst hrefeq
+    have hlocEq_cfg : (Reference.OId oid0).loc? cfg = some (Location.Rgn rid') := by
+      rw [fieldAsgn_corollary_stack_loc_eq hframe hobj]; exact hlocEq
+    rw [stackWithIndex_eq, List.mem_append, List.mem_singleton] at hframe'
+    rcases hframe' with hold | hnew
+    · have hframe'_in_cfg : frame' ∈ cfg.stackWithIndex := by
+        rw [stackWithIndex_eq_cfg]
+        exact List.mem_append_left _ hold
+      obtain ⟨frame'', hmem'', hregion'', hidx''⟩ :=
+        s3 frame' hframe'_in_cfg (Reference.OId oid0) href rid' oid0 rfl hlocEq_cfg
+      obtain ⟨frame4, hmem4, hregion4, hidx4⟩ := transport frame'' hmem''
+      exact ⟨frame4, hmem4, hregion4.trans hregion'', (le_of_eq hidx4).trans hidx''⟩
+    · subst hnew
+      dsimp at href
+      rcases fieldAsgn_corollary_frame_field_insert_refs_mem hobj href with hfreq | horig
+      · rw [Reference.OId.injEq] at hfreq
+        rw [hfreq] at hlocEq_cfg
+        obtain ⟨frame'', hmem'', hregion'', hidx''⟩ :=
+          fieldAsgn_corollary_resolveV_loc_ancestor vcfg hyr rid' hlocEq_cfg
+        obtain ⟨frame4, hmem4, hregion4, hidx4⟩ := transport frame'' hmem''
+        refine ⟨frame4, hmem4, hregion4.trans hregion'', ?_⟩
+        dsimp
+        rw [hidx4]
+        rw [hstacklen] at hidx''
+        exact Nat.le_of_lt_succ hidx''
+      · have hframe_in_cfg :
+            ({ frame with index := cfg.stack.dropLast.length } : FrameWithIndex) ∈ cfg.stackWithIndex := by
+          rw [stackWithIndex_eq_cfg]
+          exact List.mem_append_right _ (List.mem_singleton_self _)
+        obtain ⟨frame'', hmem'', hregion'', hidx''⟩ :=
+          s3 _ hframe_in_cfg (Reference.OId oid0) horig rid' oid0 rfl hlocEq_cfg
+        obtain ⟨frame4, hmem4, hregion4, hidx4⟩ := transport frame'' hmem''
+        exact ⟨frame4, hmem4, hregion4.trans hregion'', (le_of_eq hidx4).trans hidx''⟩
+  · subst hcfg'
+    intro frame' hframe' ref href rid' oid0 hrefeq hlocEq
+    subst hrefeq
+    rw [← fieldAsgn_corollary_region_loc_eq vcfg hregion hobj oid0] at hlocEq
+    exact s3 frame' hframe' (Reference.OId oid0) href rid' oid0 rfl hlocEq
 
 theorem fieldAsgn_HS1 : ValidConfig cfg →
   fieldAsgn x yf cfg = some cfg' →
