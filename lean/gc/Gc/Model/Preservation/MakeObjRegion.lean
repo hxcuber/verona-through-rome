@@ -572,7 +572,66 @@ theorem makeObjRegion_corollary_loc_eq : ValidConfig cfg →
 theorem makeObjRegion_H3 : ValidConfig cfg →
   makeObjRegion x cfg = some cfg' →
   H3 cfg' := by
-  sorry
+  intro vcfg h
+  have h' := h
+  have hs1 := vcfg.hs1
+  have h3 := vcfg.h3
+  have loc_eq := makeObjRegion_corollary_loc_eq vcfg h
+  unfold makeObjRegion at h
+  cases stackGetLast : cfg.stack.getLast? with
+  | none => rw [stackGetLast] at h; contradiction
+  | some frame =>
+    rw [stackGetLast] at h
+    dsimp at h
+    cases heapLookup : cfg.heap.lookup frame.regionId with
+    | none => rw [heapLookup] at h; contradiction
+    | some region =>
+      rw [heapLookup] at h
+      dsimp at h
+      cases regionStatus : region.status with
+      | Closed => rw [regionStatus] at h; contradiction
+      | Open =>
+        rw [regionStatus] at h
+        rw [if_pos (by rfl)] at h
+        rw [Option.some_inj] at h
+        have fresh_not_in_region := makeObjRegion_corollary_fresh_not_in_region heapLookup
+        set newRegion : Region :=
+          { bridgeObjectId := region.bridgeObjectId,
+            objMap := AList.insert cfg.freshObjectId ∅ region.objMap,
+            status := Status.Open } with newRegion_def
+        have newRegion_refs_eq : newRegion.refs = region.refs := by
+          show (AList.insert cfg.freshObjectId ∅ region.objMap).entries.map (·.2) >>= Object.refs = region.refs
+          rw [AList.entries_insert_of_notMem fresh_not_in_region]
+          simp [Object.refs, Region.refs, List.bind_eq_flatMap]
+        have oid_ne_fresh_of_region_mem : ∀ oid1 rid1 region1, cfg.heap.lookup rid1 = some region1 →
+            Reference.OId oid1 ∈ region1.refs → oid1 ≠ cfg.freshObjectId := by
+          intro oid1 rid1 region1 hlookup1 hmem1 heq
+          apply RuntimeConfig.freshObjectId_not_mem cfg
+          rw [← heq]
+          apply hs1
+          apply List.mem_append_right
+          unfold Heap.refs
+          rw [List.bind_eq_flatMap, List.mem_flatMap]
+          exact ⟨region1, List.mem_map_of_mem (AList.lookup_mem_entries hlookup1), hmem1⟩
+        have heap_eq : cfg'.heap = AList.insert frame.regionId newRegion cfg.heap :=
+          (congrArg RuntimeConfig.heap h).symm
+        unfold H3
+        intro rid0 oid0 region0 hlookup0 href0
+        rw [heap_eq] at hlookup0
+        by_cases hrideq : rid0 = frame.regionId
+        · subst hrideq
+          rw [AList.lookup_insert, Option.some_inj] at hlookup0
+          subst hlookup0
+          rw [newRegion_refs_eq] at href0
+          have h3fact := h3 frame.regionId oid0 region heapLookup href0
+          have oid_ne_fresh := oid_ne_fresh_of_region_mem oid0 frame.regionId region heapLookup href0
+          rw [← loc_eq oid0 oid_ne_fresh]
+          exact h3fact
+        · rw [AList.lookup_insert_ne hrideq] at hlookup0
+          have h3fact := h3 rid0 oid0 region0 hlookup0 href0
+          have oid_ne_fresh := oid_ne_fresh_of_region_mem oid0 rid0 region0 hlookup0 href0
+          rw [← loc_eq oid0 oid_ne_fresh]
+          exact h3fact
 
 theorem makeObjRegion_S1 : ValidConfig cfg →
   makeObjRegion x cfg = some cfg' →
