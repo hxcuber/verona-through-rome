@@ -332,6 +332,243 @@ theorem makeObjRegion_H2 : ValidConfig cfg →
           exact Nat.add_le_add_left newFrame_refs_le _
         exact Nat.le_trans (Nat.add_le_add_right stack_refs_le _) h2
 
+-- An oid can be found in at most one region's objMap (stated over bare L1, so it's usable on cfg
+-- before cfg''s own validity is established).
+theorem makeObjRegion_corollary_region_unique
+    {cfg : RuntimeConfig} {rid1 rid2 : RegionId} {region1 region2 : Region} {oid : ObjectId} :
+  L1 cfg →
+  (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region1.objMap.keys →
+  (⟨rid2, region2⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region2.objMap.keys →
+  rid1 = rid2 := by
+  intro l1 mem1 in1 mem2 in2
+  by_contra hne
+  unfold L1 RuntimeConfig.objectIds at l1
+  obtain ⟨_, heap_nodup, _⟩ := List.nodup_append.mp l1
+  unfold Heap.objectIds at heap_nodup
+  rw [List.nodup_flatten, List.pairwise_map] at heap_nodup
+  obtain ⟨_, pairwise_disjoint⟩ := heap_nodup
+  have hneq : (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ≠ ⟨rid2, region2⟩ := by
+    intro heq
+    exact hne (congrArg Sigma.fst heq)
+  have disj := List.Pairwise.forall
+    (R := fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds)
+    (fun _ _ hd => List.disjoint_symm hd)
+    pairwise_disjoint mem1 mem2 hneq
+  unfold Region.objectIds at disj
+  exact disj in1 in2
+
+-- Reference.loc?'s (h1, h2)-match for OId factors through Option.map, so equal cfg's need only
+-- agree on the *projected* index/rid, not the full FrameWithIndex/heap-entry value.
+theorem makeObjRegion_corollary_loc_match_eq (o1 : Option FrameWithIndex)
+    (o2 : Option (Sigma (fun _ : RegionId => Region))) :
+    (match o1, o2 with
+      | some f, none => some (Location.Stk f.index)
+      | none, some ⟨rid, _⟩ => some (Location.Rgn rid)
+      | _, _ => none) =
+    (match o1.map FrameWithIndex.index, o2.map Sigma.fst with
+      | some n, none => some (Location.Stk n)
+      | none, some r => some (Location.Rgn r)
+      | _, _ => none) := by
+  cases o1 <;> cases o2 <;> rfl
+
+-- The heart of H3/S2/S3: for any oid other than the freshly-allocated one, an OId reference
+-- resolves to the exact same Location before and after makeObjRegion. The stack side is
+-- unconditionally unaffected (only the last frame's varMap changes, never any objMap), so it
+-- reduces to a case split on whether the frame's *own* objMap already contains oid. The heap side
+-- genuinely reorders (the mutated region's entry moves to the front via the AList.insert kerase),
+-- so it needs the region-uniqueness fact above to show find? still lands on the same region.
+theorem makeObjRegion_corollary_loc_eq : ValidConfig cfg →
+  makeObjRegion x cfg = some cfg' →
+  ∀ oid, oid ≠ cfg.freshObjectId →
+    (Reference.OId oid).loc? cfg = (Reference.OId oid).loc? cfg' := by
+  intro vcfg h oid hne
+  have h' := h
+  unfold makeObjRegion at h
+  cases stackGetLast : cfg.stack.getLast? with
+  | none => rw [stackGetLast] at h; contradiction
+  | some frame =>
+    rw [stackGetLast] at h
+    dsimp at h
+    cases heapLookup : cfg.heap.lookup frame.regionId with
+    | none => rw [heapLookup] at h; contradiction
+    | some region =>
+      rw [heapLookup] at h
+      dsimp at h
+      cases regionStatus : region.status with
+      | Closed => rw [regionStatus] at h; contradiction
+      | Open =>
+        rw [regionStatus] at h
+        rw [if_pos (by rfl)] at h
+        rw [Option.some_inj] at h
+        have l1 := vcfg.l1
+        have fresh_not_in_region := makeObjRegion_corollary_fresh_not_in_region heapLookup
+        rw [← h]
+        set newRegion : Region :=
+          { bridgeObjectId := region.bridgeObjectId,
+            objMap := AList.insert cfg.freshObjectId ∅ region.objMap,
+            status := Status.Open } with newRegion_def
+        have newRegion_keys_eq : newRegion.objMap.keys = cfg.freshObjectId :: region.objMap.keys := by
+          rw [newRegion_def]
+          dsimp only
+          rw [AList.keys_insert, List.erase_of_not_mem fresh_not_in_region]
+        have newRegion_contains_eq :
+            (newRegion.objMap.keys).contains oid = (region.objMap.keys).contains oid := by
+          rw [newRegion_keys_eq]
+          simp [hne]
+        set newFrame : Frame :=
+          { regionId := frame.regionId, bridgeVar := frame.bridgeVar, objMap := frame.objMap,
+            varMap := AList.insert x (Reference.OId cfg.freshObjectId) frame.varMap } with newFrame_def
+        set cfgLit : RuntimeConfig :=
+          { stack := cfg.stack.dropLast ++ [newFrame], heap := AList.insert frame.regionId newRegion cfg.heap }
+          with cfgLit_def
+        have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame] :=
+          (List.dropLast_append_getLast? frame stackGetLast).symm
+        have stack_h1_map_eq :
+            (cfg.stackWithIndex.findRev? (fun f => (AList.keys f.objMap).contains oid)).map
+              FrameWithIndex.index =
+            (cfgLit.stackWithIndex.findRev?
+                (fun f => (AList.keys f.objMap).contains oid)).map FrameWithIndex.index := by
+          rw [cfgLit_def]
+          unfold RuntimeConfig.stackWithIndex
+          dsimp
+          conv_lhs => rw [stack_eq]
+          rw [List.mapIdx_concat, List.mapIdx_concat, List.findRev?_eq_find?_reverse,
+            List.findRev?_eq_find?_reverse, List.reverse_append, List.reverse_append,
+            List.reverse_singleton, List.reverse_singleton, List.singleton_append, List.singleton_append]
+          by_cases hb : (AList.keys frame.objMap).contains oid
+          · have find_eqL :
+                List.find? (fun f => (AList.keys f.objMap).contains oid)
+                  (({ frame with index := cfg.stack.dropLast.length } : FrameWithIndex) ::
+                    (List.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex))
+                      cfg.stack.dropLast).reverse) =
+                some ({ frame with index := cfg.stack.dropLast.length } : FrameWithIndex) :=
+              List.find?_cons_of_pos hb
+            have find_eqR :
+                List.find? (fun f => (AList.keys f.objMap).contains oid)
+                  (({ newFrame with index := cfg.stack.dropLast.length } : FrameWithIndex) ::
+                    (List.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex))
+                      cfg.stack.dropLast).reverse) =
+                some ({ newFrame with index := cfg.stack.dropLast.length } : FrameWithIndex) :=
+              List.find?_cons_of_pos hb
+            rw [find_eqL, find_eqR]
+            rfl
+          · have hbL : ¬ (AList.keys ({ frame with index := cfg.stack.dropLast.length } :
+                FrameWithIndex).objMap).contains oid = true := hb
+            have hbR : ¬ (AList.keys ({ newFrame with
+                index := cfg.stack.dropLast.length } : FrameWithIndex).objMap).contains oid = true := hb
+            have find_eqL :
+                List.find? (fun f => (AList.keys f.objMap).contains oid)
+                  (({ frame with index := cfg.stack.dropLast.length } : FrameWithIndex) ::
+                    (List.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex))
+                      cfg.stack.dropLast).reverse) =
+                List.find? (fun f => (AList.keys f.objMap).contains oid)
+                  (List.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex))
+                    cfg.stack.dropLast).reverse :=
+              List.find?_cons_of_neg hbL
+            have find_eqR :
+                List.find? (fun f => (AList.keys f.objMap).contains oid)
+                  (({ newFrame with index := cfg.stack.dropLast.length } : FrameWithIndex) ::
+                    (List.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex))
+                      cfg.stack.dropLast).reverse) =
+                List.find? (fun f => (AList.keys f.objMap).contains oid)
+                  (List.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex))
+                    cfg.stack.dropLast).reverse :=
+              List.find?_cons_of_neg hbR
+            rw [find_eqL, find_eqR]
+        have heap_h2_map_eq :
+            (cfg.heap.entries.find? (fun p => (AList.keys p.snd.objMap).contains oid)).map Sigma.fst =
+            (cfgLit.heap.entries.find?
+              (fun p => (AList.keys p.snd.objMap).contains oid)).map Sigma.fst := by
+          rw [cfgLit_def]
+          obtain ⟨regionVal3, l1e3, l2e3, hnotmem3, heq3, hkerase3⟩ :=
+            List.exists_of_kerase (List.mem_keys_of_mem (AList.lookup_mem_entries heapLookup))
+          have regionVal3_eq_region : regionVal3 = region := by
+            have mem_regionVal3 : (⟨frame.regionId, regionVal3⟩ : Sigma (fun _ : RegionId => Region)) ∈
+                cfg.heap.entries := by
+              rw [heq3]
+              exact List.mem_append_right _ List.mem_cons_self
+            exact List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys mem_regionVal3
+              (AList.lookup_mem_entries heapLookup)
+          subst regionVal3
+          rw [AList.entries_insert, hkerase3]
+          have region_mem_cfg : (⟨frame.regionId, region⟩ : Sigma (fun _ : RegionId => Region)) ∈
+              cfg.heap.entries := heq3 ▸ List.mem_append_right _ List.mem_cons_self
+          by_cases hb2 : (AList.keys region.objMap).contains oid
+          · have hb2' : (AList.keys newRegion.objMap).contains oid := by
+              rw [newRegion_contains_eq]; exact hb2
+            have find_eqR2 :
+                List.find? (fun p => (AList.keys p.snd.objMap).contains oid)
+                  ((⟨frame.regionId, newRegion⟩ : Sigma (fun _ : RegionId => Region)) :: (l1e3 ++ l2e3)) =
+                some (⟨frame.regionId, newRegion⟩ : Sigma (fun _ : RegionId => Region)) :=
+              List.find?_cons_of_pos hb2'
+            rw [find_eqR2]
+            have find_eqL :
+                cfg.heap.entries.find? (fun p => (AList.keys p.snd.objMap).contains oid) =
+                some (⟨frame.regionId, region⟩ : Sigma (fun _ : RegionId => Region)) := by
+              apply List.find?_eq_some_of_unique region_mem_cfg hb2
+              intro y hy hpy
+              obtain ⟨rid_y, region_y⟩ := y
+              have rid_y_eq : rid_y = frame.regionId :=
+                makeObjRegion_corollary_region_unique l1 hy (List.contains_iff_mem.mp hpy)
+                  region_mem_cfg (List.contains_iff_mem.mp hb2)
+              subst rid_y_eq
+              have region_y_eq : region_y = region :=
+                List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys hy region_mem_cfg
+              rw [region_y_eq]
+            rw [find_eqL]
+            rfl
+          · have hb2' : ¬ (AList.keys newRegion.objMap).contains oid := by
+              rw [newRegion_contains_eq]; exact hb2
+            have find_eqR2 :
+                List.find? (fun p => (AList.keys p.snd.objMap).contains oid)
+                  ((⟨frame.regionId, newRegion⟩ : Sigma (fun _ : RegionId => Region)) :: (l1e3 ++ l2e3)) =
+                List.find? (fun p => (AList.keys p.snd.objMap).contains oid) (l1e3 ++ l2e3) :=
+              List.find?_cons_of_neg hb2'
+            rw [find_eqR2]
+            have find_eqL :
+                cfg.heap.entries.find? (fun p => (AList.keys p.snd.objMap).contains oid) =
+                List.find? (fun p => (AList.keys p.snd.objMap).contains oid) (l1e3 ++ l2e3) := by
+              rw [heq3]
+              clear hb2' region_mem_cfg heq3 hkerase3 find_eqR2 hnotmem3
+              induction l1e3 with
+              | nil =>
+                dsimp
+                exact List.find?_cons_of_neg hb2
+              | cons a as ih =>
+                dsimp
+                by_cases hpa : (AList.keys a.snd.objMap).contains oid
+                · have find_eqA :
+                      List.find? (fun p => (AList.keys p.snd.objMap).contains oid)
+                        (a :: (as ++ (⟨frame.regionId, region⟩ : Sigma (fun _ : RegionId => Region)) :: l2e3)) =
+                      some a := List.find?_cons_of_pos hpa
+                  have find_eqB :
+                      List.find? (fun p => (AList.keys p.snd.objMap).contains oid) (a :: (as ++ l2e3)) =
+                      some a := List.find?_cons_of_pos hpa
+                  rw [find_eqA, find_eqB]
+                · have find_eqA :
+                      List.find? (fun p => (AList.keys p.snd.objMap).contains oid)
+                        (a :: (as ++ (⟨frame.regionId, region⟩ : Sigma (fun _ : RegionId => Region)) :: l2e3)) =
+                      List.find? (fun p => (AList.keys p.snd.objMap).contains oid)
+                        (as ++ (⟨frame.regionId, region⟩ : Sigma (fun _ : RegionId => Region)) :: l2e3) :=
+                    List.find?_cons_of_neg hpa
+                  have find_eqB :
+                      List.find? (fun p => (AList.keys p.snd.objMap).contains oid) (a :: (as ++ l2e3)) =
+                      List.find? (fun p => (AList.keys p.snd.objMap).contains oid) (as ++ l2e3) :=
+                    List.find?_cons_of_neg hpa
+                  rw [find_eqA, find_eqB]
+                  exact ih
+            rw [find_eqL]
+        unfold Reference.loc?
+        dsimp
+        have step1 := makeObjRegion_corollary_loc_match_eq
+          (cfg.stackWithIndex.findRev? (fun f => (AList.keys f.objMap).contains oid))
+          (cfg.heap.entries.find? (fun p => (AList.keys p.snd.objMap).contains oid))
+        have step2 := makeObjRegion_corollary_loc_match_eq
+          (cfgLit.stackWithIndex.findRev? (fun f => (AList.keys f.objMap).contains oid))
+          (cfgLit.heap.entries.find? (fun p => (AList.keys p.snd.objMap).contains oid))
+        rw [stack_h1_map_eq, heap_h2_map_eq] at step1
+        exact step1.trans step2.symm
+
 theorem makeObjRegion_H3 : ValidConfig cfg →
   makeObjRegion x cfg = some cfg' →
   H3 cfg' := by
