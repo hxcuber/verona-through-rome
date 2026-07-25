@@ -777,7 +777,119 @@ theorem makeObjRegion_corollary_loc_fresh : ValidConfig cfg →
 theorem makeObjRegion_S2 : ValidConfig cfg →
   makeObjRegion x cfg = some cfg' →
   S2 cfg' := by
-  sorry
+  intro vcfg h
+  have h' := h
+  have hs1 := vcfg.hs1
+  have s2 := vcfg.s2
+  have loc_eq := makeObjRegion_corollary_loc_eq vcfg h
+  obtain ⟨frame0, hframe0getLast, loc_fresh0⟩ := makeObjRegion_corollary_loc_fresh vcfg h
+  unfold makeObjRegion at h
+  cases stackGetLast : cfg.stack.getLast? with
+  | none => rw [stackGetLast] at h; contradiction
+  | some frame =>
+    rw [stackGetLast] at h hframe0getLast
+    rw [Option.some_inj] at hframe0getLast
+    subst frame0
+    dsimp at h
+    cases heapLookup : cfg.heap.lookup frame.regionId with
+    | none => rw [heapLookup] at h; contradiction
+    | some region =>
+      rw [heapLookup] at h
+      dsimp at h
+      cases regionStatus : region.status with
+      | Closed => rw [regionStatus] at h; contradiction
+      | Open =>
+        rw [regionStatus] at h
+        rw [if_pos (by rfl)] at h
+        rw [Option.some_inj] at h
+        set newFrame : Frame :=
+          { regionId := frame.regionId, bridgeVar := frame.bridgeVar, objMap := frame.objMap,
+            varMap := AList.insert x (Reference.OId cfg.freshObjectId) frame.varMap } with newFrame_def
+        have newFrame_refs_mem : ∀ ref, ref ∈ newFrame.refs →
+            ref = Reference.OId cfg.freshObjectId ∨ ref ∈ frame.refs := by
+          intro ref href
+          rw [newFrame_def] at href
+          unfold Frame.refs at href
+          dsimp at href
+          rw [List.mem_append] at href
+          rcases href with hobjmap | hvarmap
+          · right
+            exact List.mem_append_left _ hobjmap
+          · rw [List.mem_cons] at hvarmap
+            rcases hvarmap with heqref | hker
+            · left; exact heqref
+            · right
+              unfold Frame.refs
+              apply List.mem_append_right
+              exact (List.kerase_sublist x frame.varMap.entries).map (·.2) |>.subset hker
+        have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame] :=
+          (List.dropLast_append_getLast? frame stackGetLast).symm
+        have frame_mem : frame ∈ cfg.stack := stack_eq ▸ List.mem_append_right _ (List.mem_singleton_self frame)
+        have stackWithIndex_eq_cfg :
+            cfg.stackWithIndex =
+              cfg.stack.dropLast.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) ++
+                [({ frame with index := cfg.stack.dropLast.length } : FrameWithIndex)] := by
+          unfold RuntimeConfig.stackWithIndex
+          conv_lhs => rw [stack_eq]
+          rw [List.mapIdx_concat]
+        have stack_eq' : cfg'.stack = cfg.stack.dropLast ++ [newFrame] := (congrArg RuntimeConfig.stack h).symm
+        have stackWithIndex_eq :
+            cfg'.stackWithIndex =
+              cfg.stack.dropLast.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) ++
+                [({ newFrame with index := cfg.stack.dropLast.length } : FrameWithIndex)] := by
+          unfold RuntimeConfig.stackWithIndex
+          rw [stack_eq', List.mapIdx_concat]
+        unfold S2
+        intro frame' hframe' ref href fid' oid hrefeq hlocEq
+        subst hrefeq
+        rw [stackWithIndex_eq, List.mem_append, List.mem_singleton] at hframe'
+        rcases hframe' with hold | hnew
+        · have hframe'_in_cfg : frame' ∈ cfg.stackWithIndex := by
+            rw [stackWithIndex_eq_cfg]
+            exact List.mem_append_left _ hold
+          have href_in_cfg_refs : Reference.OId oid ∈ cfg.refs := by
+            obtain ⟨n, n_lt_len, f_eq⟩ := List.mem_mapIdx.mp hframe'_in_cfg
+            apply List.mem_append_left
+            unfold Stack.refs
+            rw [List.bind_eq_flatMap, List.flatMap_id, List.mem_flatten]
+            refine ⟨frame'.refs, ?_, href⟩
+            rw [List.mem_map]
+            refine ⟨cfg.stack[n], List.mem_iff_getElem.mpr ⟨n, n_lt_len, rfl⟩, ?_⟩
+            rw [← f_eq]
+          have oid_ne_fresh : oid ≠ cfg.freshObjectId := by
+            intro heq
+            apply RuntimeConfig.freshObjectId_not_mem cfg
+            rw [← heq]
+            exact hs1 oid href_in_cfg_refs
+          have hlocEq_cfg : (Reference.OId oid).loc? cfg = some (Location.Stk fid') := by
+            rw [loc_eq oid oid_ne_fresh]
+            exact hlocEq
+          exact s2 frame' hframe'_in_cfg (Reference.OId oid) href fid' oid rfl hlocEq_cfg
+        · subst hnew
+          dsimp at href
+          rcases newFrame_refs_mem (Reference.OId oid) href with hfreq | horig
+          · rw [Reference.OId.injEq] at hfreq
+            subst hfreq
+            rw [loc_fresh0] at hlocEq
+            simp at hlocEq
+          · have href_in_cfg_refs : Reference.OId oid ∈ cfg.refs := by
+              apply List.mem_append_left
+              unfold Stack.refs
+              rw [List.bind_eq_flatMap, List.flatMap_id, List.mem_flatten]
+              exact ⟨frame.refs, List.mem_map_of_mem frame_mem, horig⟩
+            have oid_ne_fresh : oid ≠ cfg.freshObjectId := by
+              intro heq
+              apply RuntimeConfig.freshObjectId_not_mem cfg
+              rw [← heq]
+              exact hs1 oid href_in_cfg_refs
+            have hlocEq_cfg : (Reference.OId oid).loc? cfg = some (Location.Stk fid') := by
+              rw [loc_eq oid oid_ne_fresh]
+              exact hlocEq
+            have hframe_in_cfg :
+                ({ frame with index := cfg.stack.dropLast.length } : FrameWithIndex) ∈ cfg.stackWithIndex := by
+              rw [stackWithIndex_eq_cfg]
+              exact List.mem_append_right _ (List.mem_singleton_self _)
+            exact s2 _ hframe_in_cfg (Reference.OId oid) horig fid' oid rfl hlocEq_cfg
 
 theorem makeObjRegion_S3 : ValidConfig cfg →
   makeObjRegion x cfg = some cfg' →
