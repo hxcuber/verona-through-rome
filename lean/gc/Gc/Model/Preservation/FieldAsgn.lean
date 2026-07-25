@@ -319,6 +319,131 @@ theorem fieldAsgn_H1 : ValidConfig cfg →
       unfold Heap.regions
       exact (List.Sublist.map _ (List.kerase_sublist rid cfg.heap.entries)).mem hkeraseregion
 
+-- An Object's own refs after inserting/updating one field: every ref in the new refs is either the
+-- newly-written value, or was already present before (whether or not the field was already present).
+theorem fieldAsgn_corollary_object_insert_refs_mem {obj : Object} {field : FieldName} {v r : Reference}
+    (hr : r ∈ Object.refs (obj.insert field v)) : r = v ∨ r ∈ Object.refs obj := by
+  unfold Object.refs at hr ⊢
+  by_cases hfield : field ∈ obj
+  · obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase (AList.mem_keys.mp hfield)
+    rw [AList.entries_insert, hkerase, List.map_cons, List.map_append, List.mem_cons, List.mem_append] at hr
+    rw [heq, List.map_append, List.map_cons, List.mem_append, List.mem_cons]
+    tauto
+  · rw [AList.entries_insert_of_notMem hfield, List.map_cons, List.mem_cons] at hr
+    tauto
+
+-- Once an object is already stored at some key of an ObjMap, its own refs already contribute to the
+-- ObjMap-level bind-refs. Used to transport membership from the mutated object back up to the whole
+-- Frame/Region's refs (mirrors the reasoning already used for HS1-style corollaries elsewhere).
+theorem fieldAsgn_corollary_objMap_bind_refs_mem_of_lookup {m : ObjMap} {oid : ObjectId} {obj : Object}
+    {r : Reference} (hobj : m.lookup oid = some obj) (hr : r ∈ Object.refs obj) :
+    r ∈ (m.entries.map (·.2) >>= Object.refs) := by
+  have hmem : (⟨oid, obj⟩ : Sigma (fun _ : ObjectId => Object)) ∈ m.entries :=
+    AList.mem_lookup_iff.mp (by rw [hobj]; rfl)
+  rw [List.bind_eq_flatMap, List.mem_flatMap]
+  exact ⟨obj, List.mem_map_of_mem (f := (·.2)) hmem, hr⟩
+
+-- An ObjMap's own bind-refs after inserting/updating the value at one key (`oid`, whether or not it
+-- was already present): every ref in the new bind-refs is either from the newly-written object `v`,
+-- or was already present before. Used for both `frame.objMap` (stack branch) and `region.objMap`
+-- (region branch), since both share the `ObjMap` type.
+theorem fieldAsgn_corollary_objMap_insert_bind_refs_mem {m : ObjMap} {oid : ObjectId} {v : Object} {r : Reference}
+    (hr : r ∈ ((m.insert oid v).entries.map (·.2) >>= Object.refs)) :
+    r ∈ Object.refs v ∨ r ∈ (m.entries.map (·.2) >>= Object.refs) := by
+  by_cases hoid : oid ∈ m
+  · obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase (AList.mem_keys.mp hoid)
+    rw [AList.entries_insert, hkerase, List.map_cons, List.bind_eq_flatMap, List.flatMap_cons,
+      ← List.bind_eq_flatMap, List.mem_append, List.map_append, List.bind_eq_flatMap, List.flatMap_append,
+      ← List.bind_eq_flatMap, List.mem_append] at hr
+    rw [heq, List.map_append, List.map_cons, List.bind_eq_flatMap, List.flatMap_append, List.flatMap_cons,
+      ← List.bind_eq_flatMap, ← List.bind_eq_flatMap, List.mem_append, List.mem_append]
+    tauto
+  · rw [AList.entries_insert_of_notMem hoid, List.map_cons, List.bind_eq_flatMap, List.flatMap_cons,
+      ← List.bind_eq_flatMap, List.mem_append] at hr
+    tauto
+
+-- Wraps the ObjMap-level fact for a whole Frame: only the objMap-derived part of Frame.refs can
+-- possibly change (varMap is untouched by fieldAsgn).
+theorem fieldAsgn_corollary_frame_insert_refs_mem {frame : Frame} {oid : ObjectId} {v : Object} {r : Reference}
+    (hr : r ∈ Frame.refs { frame with objMap := frame.objMap.insert oid v }) :
+    r ∈ Object.refs v ∨ r ∈ frame.refs := by
+  unfold Frame.refs at hr ⊢
+  dsimp at hr
+  rw [List.mem_append] at hr ⊢
+  rcases hr with hr | hr
+  · rcases fieldAsgn_corollary_objMap_insert_bind_refs_mem hr with h | h
+    · exact Or.inl h
+    · exact Or.inr (Or.inl h)
+  · exact Or.inr (Or.inr hr)
+
+-- Mirrors fieldAsgn_corollary_frame_insert_refs_mem for Region.refs.
+theorem fieldAsgn_corollary_region_insert_refs_mem {region : Region} {oid : ObjectId} {v : Object} {r : Reference}
+    (hr : r ∈ Region.refs { region with objMap := region.objMap.insert oid v }) :
+    r ∈ Object.refs v ∨ r ∈ region.refs := by
+  unfold Region.refs at hr ⊢
+  dsimp at hr
+  exact fieldAsgn_corollary_objMap_insert_bind_refs_mem hr
+
+-- Combines the three ref-membership corollaries above into the single fact actually needed by
+-- HS2/H2's stack branch: every ref newly present in the mutated frame is either the newly-written
+-- field value `yRef`, or was already present in the frame before the mutation.
+theorem fieldAsgn_corollary_frame_field_insert_refs_mem {frame : Frame} {oid : ObjectId} {obj : Object}
+    {field : FieldName} {yRef r : Reference} (hobj : frame.objMap.lookup oid = some obj)
+    (hr : r ∈ Frame.refs { frame with objMap := frame.objMap.insert oid (obj.insert field yRef) }) :
+    r = yRef ∨ r ∈ frame.refs := by
+  rcases fieldAsgn_corollary_frame_insert_refs_mem hr with h | h
+  · rcases fieldAsgn_corollary_object_insert_refs_mem h with h' | h'
+    · exact Or.inl h'
+    · refine Or.inr ?_
+      unfold Frame.refs
+      exact List.mem_append_left _ (fieldAsgn_corollary_objMap_bind_refs_mem_of_lookup hobj h')
+  · exact Or.inr h
+
+-- Mirrors fieldAsgn_corollary_frame_field_insert_refs_mem for Region.refs (the region branch).
+theorem fieldAsgn_corollary_region_field_insert_refs_mem {region : Region} {oid : ObjectId} {obj : Object}
+    {field : FieldName} {yRef r : Reference} (hobj : region.objMap.lookup oid = some obj)
+    (hr : r ∈ Region.refs { region with objMap := region.objMap.insert oid (obj.insert field yRef) }) :
+    r = yRef ∨ r ∈ region.refs := by
+  rcases fieldAsgn_corollary_region_insert_refs_mem hr with h | h
+  · rcases fieldAsgn_corollary_object_insert_refs_mem h with h' | h'
+    · exact Or.inl h'
+    · exact Or.inr (fieldAsgn_corollary_objMap_bind_refs_mem_of_lookup hobj h')
+  · exact Or.inr h
+
+-- Heap key set is unchanged by inserting at an already-present key (mirrors
+-- varAsgn_corollary_bridge_heap_keys_mem).
+theorem fieldAsgn_corollary_heap_insert_keys_mem {cfg : RuntimeConfig} {rid : RegionId} {newRegion : Region}
+    (hridmem : rid ∈ cfg.heap.keys) (rid' : RegionId) :
+    rid' ∈ (cfg.heap.insert rid newRegion).keys ↔ rid' ∈ cfg.heap.keys := by
+  rw [← AList.mem_keys, AList.mem_insert, AList.mem_keys]
+  exact or_iff_right_of_imp (fun heq => heq ▸ hridmem)
+
+-- Heap-level analogue of fieldAsgn_corollary_objMap_insert_bind_refs_mem: every ref in
+-- Heap.refs after inserting at an already-present region key is either from the newly-inserted
+-- region, or was already present.
+theorem fieldAsgn_corollary_heap_insert_refs_mem {cfg : RuntimeConfig} {rid : RegionId} {newRegion : Region}
+    {r : Reference} (hrid : rid ∈ cfg.heap.keys) (hr : r ∈ Heap.refs (cfg.heap.insert rid newRegion)) :
+    r ∈ Region.refs newRegion ∨ r ∈ Heap.refs cfg.heap := by
+  unfold Heap.refs at hr ⊢
+  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase hrid
+  rw [AList.entries_insert, hkerase, List.map_cons, List.bind_eq_flatMap, List.flatMap_cons,
+    ← List.bind_eq_flatMap, List.mem_append, List.map_append, List.bind_eq_flatMap, List.flatMap_append,
+    ← List.bind_eq_flatMap, List.mem_append] at hr
+  rw [heq, List.map_append, List.map_cons, List.bind_eq_flatMap, List.flatMap_append, List.flatMap_cons,
+    ← List.bind_eq_flatMap, ← List.bind_eq_flatMap, List.mem_append, List.mem_append]
+  tauto
+
+-- Once a region is already stored at some key of a heap, its own refs already contribute to
+-- Heap.refs (mirrors fieldAsgn_corollary_objMap_bind_refs_mem_of_lookup one level up).
+theorem fieldAsgn_corollary_heap_refs_mem_of_lookup {cfg : RuntimeConfig} {rid : RegionId} {region : Region}
+    {r : Reference} (hregion : cfg.heap.lookup rid = some region) (hr : r ∈ Region.refs region) :
+    r ∈ Heap.refs cfg.heap := by
+  have hmem : (⟨rid, region⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries :=
+    AList.mem_lookup_iff.mp (by rw [hregion]; rfl)
+  unfold Heap.refs
+  rw [List.bind_eq_flatMap, List.mem_flatMap]
+  exact ⟨region, List.mem_map_of_mem (f := (·.2)) hmem, hr⟩
+
 theorem fieldAsgn_H2 : ValidConfig cfg →
   fieldAsgn x yf cfg = some cfg' →
   H2 cfg' := by
@@ -347,7 +472,55 @@ theorem fieldAsgn_HS1 : ValidConfig cfg →
 theorem fieldAsgn_HS2 : ValidConfig cfg →
   fieldAsgn x yf cfg = some cfg' →
   HS2 cfg' := by
-  sorry
+  intro vcfg h
+  have hs2 := vcfg.hs2
+  obtain ⟨frame, hframe, hcase⟩ := fieldAsgn_cases h
+  unfold HS2
+  rcases hcase with
+    ⟨oid, oid_y, obj, hxr, hyr, hloc, hobj, hcfg'⟩ |
+    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hcfg'⟩
+  · subst hcfg'
+    obtain ⟨stack_eq, _⟩ := fieldAsgn_corollary_stack_eq hframe
+    have stack_refs_append : ∀ (l : Stack) (f : Frame), Stack.refs (l ++ [f]) = Stack.refs l ++ f.refs := by
+      intro l f
+      unfold Stack.refs
+      rw [List.bind_eq_flatMap, List.bind_eq_flatMap, List.flatMap_id, List.flatMap_id,
+        List.map_append, List.flatten_append]
+      simp
+    intro rid'' hmem
+    dsimp at hmem ⊢
+    unfold RuntimeConfig.refs at hmem
+    dsimp at hmem
+    rw [stack_refs_append, List.mem_append, List.mem_append] at hmem
+    rcases hmem with (hdrop | hnew) | hheap
+    · apply hs2 rid''
+      unfold RuntimeConfig.refs
+      apply List.mem_append_left
+      rw [stack_eq, stack_refs_append]
+      exact List.mem_append_left _ hdrop
+    · rcases fieldAsgn_corollary_frame_field_insert_refs_mem hobj hnew with heq | horig
+      · exact absurd heq (by simp)
+      · apply hs2 rid''
+        unfold RuntimeConfig.refs
+        apply List.mem_append_left
+        rw [stack_eq, stack_refs_append]
+        exact List.mem_append_right _ horig
+    · exact hs2 rid'' (List.mem_append_right _ hheap)
+  · subst hcfg'
+    dsimp
+    have hridmem : rid ∈ cfg.heap.keys := fieldAsgn_corollary_mem_keys_of_lookup hregion
+    intro rid'' hmem
+    rw [fieldAsgn_corollary_heap_insert_keys_mem hridmem]
+    unfold RuntimeConfig.refs at hmem
+    dsimp at hmem
+    rw [List.mem_append] at hmem
+    rcases hmem with hstack | hheap
+    · exact hs2 rid'' (List.mem_append_left _ hstack)
+    · rcases fieldAsgn_corollary_heap_insert_refs_mem hridmem hheap with hnewregion | hold
+      · rcases fieldAsgn_corollary_region_field_insert_refs_mem hobj hnewregion with heq | horig
+        · exact absurd heq (by simp)
+        · exact hs2 rid'' (List.mem_append_right _ (fieldAsgn_corollary_heap_refs_mem_of_lookup hregion horig))
+      · exact hs2 rid'' (List.mem_append_right _ hold)
 
 theorem fieldAsgn_valid : ValidConfig cfg →
   fieldAsgn x yf cfg = some cfg' →
