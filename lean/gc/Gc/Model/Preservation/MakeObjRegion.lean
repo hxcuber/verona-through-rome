@@ -162,7 +162,49 @@ theorem makeObjRegion_L2 : ValidConfig cfg →
 theorem makeObjRegion_H1 : ValidConfig cfg →
   makeObjRegion x cfg = some cfg' →
   H1 cfg' := by
-  sorry
+  intro vcfg h
+  have h' := h
+  unfold makeObjRegion at h
+  cases stackGetLast : cfg.stack.getLast? with
+  | none => rw [stackGetLast] at h; contradiction
+  | some frame =>
+    rw [stackGetLast] at h
+    dsimp at h
+    cases heapLookup : cfg.heap.lookup frame.regionId with
+    | none => rw [heapLookup] at h; contradiction
+    | some region =>
+      rw [heapLookup] at h
+      dsimp at h
+      cases regionStatus : region.status with
+      | Closed => rw [regionStatus] at h; contradiction
+      | Open =>
+        rw [regionStatus] at h
+        rw [if_pos (by rfl)] at h
+        rw [Option.some_inj] at h
+        unfold H1
+        rw [← h]
+        dsimp
+        have h1 := vcfg.h1
+        set newRegion : Region :=
+          { bridgeObjectId := region.bridgeObjectId,
+            objMap := AList.insert cfg.freshObjectId ∅ region.objMap,
+            status := Status.Open } with newRegion_def
+        have region_mem : region ∈ cfg.heap.regions := List.mem_map_of_mem (AList.lookup_mem_entries heapLookup)
+        intro region' hregion'
+        unfold Heap.regions at hregion'
+        rw [AList.entries_insert, List.map_cons] at hregion'
+        rw [List.mem_cons] at hregion'
+        cases hregion' with
+        | inl heqregion =>
+          subst heqregion
+          rw [newRegion_def]
+          dsimp
+          rw [AList.mem_insert]
+          exact Or.inr (h1 region region_mem)
+        | inr hkeraseregion =>
+          apply h1
+          unfold Heap.regions
+          exact (List.Sublist.map _ (List.kerase_sublist frame.regionId cfg.heap.entries)).mem hkeraseregion
 
 theorem makeObjRegion_H2 : ValidConfig cfg →
   makeObjRegion x cfg = some cfg' →
@@ -177,7 +219,38 @@ theorem makeObjRegion_H3 : ValidConfig cfg →
 theorem makeObjRegion_S1 : ValidConfig cfg →
   makeObjRegion x cfg = some cfg' →
   S1 cfg' := by
-  sorry
+  intro vcfg h
+  have h' := h
+  unfold makeObjRegion at h
+  cases stackGetLast : cfg.stack.getLast? with
+  | none => rw [stackGetLast] at h; contradiction
+  | some frame =>
+    rw [stackGetLast] at h
+    dsimp at h
+    cases heapLookup : cfg.heap.lookup frame.regionId with
+    | none => rw [heapLookup] at h; contradiction
+    | some region =>
+      rw [heapLookup] at h
+      dsimp at h
+      cases regionStatus : region.status with
+      | Closed => rw [regionStatus] at h; contradiction
+      | Open =>
+        rw [regionStatus] at h
+        rw [if_pos (by rfl)] at h
+        rw [Option.some_inj] at h
+        unfold S1
+        rw [← h]
+        dsimp
+        have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame] :=
+          (List.dropLast_append_getLast? frame stackGetLast).symm
+        have regionId_eq : (cfg.stack.dropLast ++ [{ frame with
+            varMap := AList.insert x (Reference.OId cfg.freshObjectId) frame.varMap }]).map
+              (fun f : Frame => f.regionId) = cfg.stack.map (fun f : Frame => f.regionId) := by
+          conv_rhs => rw [stack_eq]
+          rw [List.map_append, List.map_append]
+          rfl
+        rw [regionId_eq]
+        exact vcfg.s1
 
 theorem makeObjRegion_S2 : ValidConfig cfg →
   makeObjRegion x cfg = some cfg' →
