@@ -139,7 +139,122 @@ theorem makeRegion_H1 : ValidConfig cfg →
 theorem makeRegion_H2 : ValidConfig cfg →
   makeRegion x cfg = some cfg' →
   H2 cfg' := by
-  sorry
+  intro vcfg h
+  have h' := h
+  have h2 := vcfg.h2
+  have hs2 := vcfg.hs2
+  unfold makeRegion at h
+  cases stackGetLast : cfg.stack.getLast? with
+  | none => rw [stackGetLast] at h; contradiction
+  | some frame =>
+    rw [stackGetLast] at h
+    dsimp at h
+    rw [Option.some_inj] at h
+    set newFrame : Frame :=
+      { regionId := frame.regionId, bridgeVar := frame.bridgeVar, objMap := frame.objMap,
+        varMap := AList.insert x (Reference.RId cfg.freshRegionId) frame.varMap } with newFrame_def
+    have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame] :=
+      (List.dropLast_append_getLast? frame stackGetLast).symm
+    have stack_refs_append : ∀ (l : Stack) (f : Frame), Stack.refs (l ++ [f]) = Stack.refs l ++ f.refs := by
+      intro l f
+      unfold Stack.refs
+      rw [List.bind_eq_flatMap, List.bind_eq_flatMap, List.flatMap_id, List.flatMap_id,
+        List.map_append, List.flatten_append]
+      simp
+    have heap_refs_eq :
+        Heap.refs (AList.insert cfg.freshRegionId
+          { bridgeObjectId := cfg.freshObjectId, objMap := AList.singleton cfg.freshObjectId ∅, status := Status.Closed }
+          cfg.heap) =
+        cfg.heap.refs := by
+      unfold Heap.refs
+      dsimp
+      rw [List.kerase_of_notMem_keys (RuntimeConfig.freshRegionId_not_mem cfg)]
+      unfold Region.refs
+      dsimp
+      simp [Object.refs]
+    have fresh_not_in_refs : Reference.RId cfg.freshRegionId ∉ cfg.refs :=
+      fun hmem => RuntimeConfig.freshRegionId_not_mem cfg (hs2 cfg.freshRegionId hmem)
+    have frame_refs_to_cfg_refs : ∀ ref, ref ∈ frame.refs → ref ∈ cfg.refs := by
+      intro ref href
+      apply List.mem_append_left
+      rw [stack_eq, stack_refs_append]
+      exact List.mem_append_right _ href
+    have varMap_kerase_le : ∀ rid,
+        List.count (Reference.RId rid) ((List.kerase x frame.varMap.entries).map (·.2)) ≤
+        List.count (Reference.RId rid) (frame.varMap.entries.map (·.2)) := by
+      intro rid
+      exact List.Sublist.count_le _ ((List.kerase_sublist x frame.varMap.entries).map (·.2))
+    have newFrame_refs_count_le : ∀ rid, rid ≠ cfg.freshRegionId →
+        newFrame.refs.count (Reference.RId rid) ≤ frame.refs.count (Reference.RId rid) := by
+      intro rid hrid
+      unfold Frame.refs
+      rw [newFrame_def]
+      dsimp
+      rw [List.count_append, List.count_append]
+      apply Nat.add_le_add_left
+      rw [List.count_cons]
+      have hle := varMap_kerase_le rid
+      simp only [beq_iff_eq, Reference.RId.injEq]
+      simp only [Ne.symm hrid, if_false]
+      omega
+    have hvarmap_fresh_zero :
+        List.count (Reference.RId cfg.freshRegionId) (frame.varMap.entries.map (·.2)) = 0 := by
+      apply List.count_eq_zero.mpr
+      intro hmem
+      apply fresh_not_in_refs
+      apply frame_refs_to_cfg_refs
+      unfold Frame.refs
+      exact List.mem_append_right _ hmem
+    have hobjmap_fresh_zero :
+        List.count (Reference.RId cfg.freshRegionId)
+          (List.flatMap Object.refs (frame.objMap.entries.map (·.2))) = 0 := by
+      apply List.count_eq_zero.mpr
+      intro hmem
+      apply fresh_not_in_refs
+      apply frame_refs_to_cfg_refs
+      unfold Frame.refs
+      apply List.mem_append_left
+      rw [List.bind_eq_flatMap]
+      exact hmem
+    have newFrame_refs_count_fresh_le :
+        newFrame.refs.count (Reference.RId cfg.freshRegionId) ≤ 1 := by
+      unfold Frame.refs
+      rw [newFrame_def]
+      dsimp
+      rw [List.count_append, hobjmap_fresh_zero, List.count_cons]
+      simp only [BEq.rfl, if_true]
+      have hker_le := varMap_kerase_le cfg.freshRegionId
+      rw [hvarmap_fresh_zero] at hker_le
+      omega
+    have stack_count_eq : ∀ rid, cfg.stack.refs.count (Reference.RId rid) =
+        (Stack.refs cfg.stack.dropLast).count (Reference.RId rid) + frame.refs.count (Reference.RId rid) := by
+      intro rid
+      conv_lhs => rw [stack_eq, stack_refs_append]
+      rw [List.count_append]
+    have dropLast_fresh_count_zero :
+        (Stack.refs cfg.stack.dropLast).count (Reference.RId cfg.freshRegionId) = 0 := by
+      apply List.count_eq_zero.mpr
+      intro hmem
+      apply fresh_not_in_refs
+      apply List.mem_append_left
+      rw [stack_eq, stack_refs_append]
+      exact List.mem_append_left _ hmem
+    have heap_fresh_count_zero :
+        cfg.heap.refs.count (Reference.RId cfg.freshRegionId) = 0 :=
+      List.count_eq_zero.mpr (fun hmem => fresh_not_in_refs (List.mem_append_right _ hmem))
+    unfold H2
+    intro rid
+    rw [← h]
+    dsimp
+    rw [stack_refs_append, heap_refs_eq, List.count_append]
+    by_cases hrideq : rid = cfg.freshRegionId
+    · subst hrideq
+      rw [dropLast_fresh_count_zero, heap_fresh_count_zero]
+      omega
+    · have hle := newFrame_refs_count_le rid hrideq
+      have h2rid := h2 rid
+      rw [stack_count_eq rid] at h2rid
+      omega
 
 theorem makeRegion_corollary_loc_match_eq (o1 : Option FrameWithIndex)
     (o2 : Option (Sigma (fun _ : RegionId => Region))) :

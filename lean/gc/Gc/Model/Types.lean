@@ -9,7 +9,11 @@ abbrev FieldName := String
 
 inductive Reference where
 | RId (rid : RegionId)
-| OId (oid : ObjectId) deriving BEq, DecidableEq
+| OId (oid : ObjectId) deriving DecidableEq
+
+instance : BEq Reference := instBEqOfDecidableEq
+instance : LawfulBEq Reference := instLawfulBEq
+
 abbrev VarMap := AList (λ _ : VarName => Reference)
 abbrev Object := VarMap
 abbrev ObjMap := AList (λ _ : ObjectId => Object)
