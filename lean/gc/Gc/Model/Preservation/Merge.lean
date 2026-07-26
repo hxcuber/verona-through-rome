@@ -116,7 +116,29 @@ theorem merge_L2 : ValidConfig cfg →
 theorem merge_H1 : ValidConfig cfg →
   merge x cfg = some cfg' →
   H1 cfg' := by
-  sorry
+  intro vcfg h
+  have h1 := vcfg.h1
+  obtain ⟨frame, rid', region, region', hframe, hxref, hregion, hregion', hclosed, hopen, hcfg'⟩ :=
+    merge_cases h
+  subst hcfg'
+  unfold H1
+  dsimp
+  intro region0 hregion0
+  unfold Heap.regions at hregion0
+  rw [AList.entries_insert, List.map_cons, List.mem_cons] at hregion0
+  rcases hregion0 with heq | hmem
+  · subst heq
+    dsimp only
+    have hbmem : region.bridgeObjectId ∈ region.objMap :=
+      h1 region (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hregion))
+    exact AList.mem_union.mpr (Or.inl hbmem)
+  · apply h1
+    have hsub1 : List.Sublist (List.kerase frame.regionId (AList.erase rid' cfg.heap).entries)
+        (AList.erase rid' cfg.heap).entries :=
+      List.kerase_sublist frame.regionId (AList.erase rid' cfg.heap).entries
+    have hsub2 : List.Sublist (AList.erase rid' cfg.heap).entries cfg.heap.entries :=
+      List.kerase_sublist rid' cfg.heap.entries
+    exact ((hsub1.trans hsub2).map (·.2)).mem hmem
 
 theorem merge_H2 : ValidConfig cfg →
   merge x cfg = some cfg' →
