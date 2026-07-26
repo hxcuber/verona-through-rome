@@ -4,6 +4,105 @@ import Gc.Model.Validity
 import Gc.Model.Theorems
 import Gc.Model.Mutation
 
+theorem merge_cases (h : merge x cfg = some cfg') :
+    ∃ frame rid' region region',
+      cfg.stack.getLast? = some frame ∧
+      frame.varMap.lookup x = some (Reference.RId rid') ∧
+      cfg.heap.lookup frame.regionId = some region ∧
+      cfg.heap.lookup rid' = some region' ∧
+      region'.status = Status.Closed ∧ region.status = Status.Open ∧
+      cfg' = { cfg with
+        heap := (cfg.heap.erase rid').insert frame.regionId { region with
+          objMap := region.objMap.union region'.objMap },
+        stack := cfg.stack.dropLast ++
+          [ { frame with varMap := frame.varMap.insert x (Reference.OId region'.bridgeObjectId) } ]
+      } := by
+  unfold merge at h
+  cases hframe : cfg.stack.getLast? with
+  | none => rw [hframe] at h; contradiction
+  | some frame =>
+    rw [hframe] at h
+    dsimp at h
+    cases hxref : frame.varMap.lookup x with
+    | none => rw [hxref] at h; contradiction
+    | some xRef =>
+      rw [hxref] at h
+      dsimp at h
+      cases xRef with
+      | OId oid0 => dsimp at h; contradiction
+      | RId rid' =>
+        dsimp at h
+        cases hregion : cfg.heap.lookup frame.regionId with
+        | none => rw [hregion] at h; contradiction
+        | some region =>
+          rw [hregion] at h
+          dsimp at h
+          cases hregion' : cfg.heap.lookup rid' with
+          | none => rw [hregion'] at h; contradiction
+          | some region' =>
+            rw [hregion'] at h
+            dsimp at h
+            by_cases hcond : region'.status = Status.Closed ∧ region.status = Status.Open
+            · rw [if_pos hcond] at h
+              rw [Option.some_inj] at h
+              exact ⟨frame, rid', region, region', rfl, hxref, hregion, hregion', hcond.1, hcond.2, h.symm⟩
+            · rw [if_neg hcond] at h; contradiction
+
+-- `region`/`region'` can't be the same heap entry: the operation's own precondition requires
+-- `region.status = Open` and `region'.status = Closed`, which are mutually exclusive.
+theorem merge_corollary_rid_ne_regionId {cfg : RuntimeConfig} {frame : Frame} {rid' : RegionId}
+    {region region' : Region} (hregion : cfg.heap.lookup frame.regionId = some region)
+    (hregion' : cfg.heap.lookup rid' = some region')
+    (hclosed : region'.status = Status.Closed) (hopen : region.status = Status.Open) :
+    rid' ≠ frame.regionId := by
+  intro heq
+  rw [heq, hregion] at hregion'
+  rw [Option.some_inj] at hregion'
+  rw [hregion'] at hopen
+  exact absurd (hopen.symm.trans hclosed) (by decide)
+
+-- An object id can belong to at most one heap region's `objMap` (from `L1`'s global uniqueness).
+theorem merge_corollary_region_unique
+    {cfg : RuntimeConfig} {rid1 rid2 : RegionId} {region1 region2 : Region} {oid : ObjectId} :
+  L1 cfg →
+  (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region1.objMap.keys →
+  (⟨rid2, region2⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region2.objMap.keys →
+  rid1 = rid2 := by
+  intro l1 mem1 in1 mem2 in2
+  by_contra hne
+  unfold L1 RuntimeConfig.objectIds at l1
+  obtain ⟨_, heap_nodup, _⟩ := List.nodup_append.mp l1
+  unfold Heap.objectIds at heap_nodup
+  rw [List.nodup_flatten, List.pairwise_map] at heap_nodup
+  obtain ⟨_, pairwise_disjoint⟩ := heap_nodup
+  have hneq : (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ≠ ⟨rid2, region2⟩ := by
+    intro heq
+    exact hne (congrArg Sigma.fst heq)
+  have disj := List.Pairwise.forall
+    (R := fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds)
+    (fun _ _ hd => List.disjoint_symm hd)
+    pairwise_disjoint mem1 mem2 hneq
+  unfold Region.objectIds at disj
+  exact disj in1 in2
+
+-- `region`'s and `region'`'s object ids are disjoint: both are distinct heap entries (via
+-- `merge_corollary_rid_ne_regionId`), so `merge_corollary_region_unique` rules out any shared oid.
+theorem merge_corollary_disjoint_keys {cfg : RuntimeConfig} {frame : Frame} {rid' : RegionId}
+    {region region' : Region} (l1 : L1 cfg) (hregion : cfg.heap.lookup frame.regionId = some region)
+    (hregion' : cfg.heap.lookup rid' = some region') (hne : rid' ≠ frame.regionId) :
+    ∀ oid ∈ region.objMap.keys, oid ∉ region'.objMap.keys := by
+  intro oid hoid hoid'
+  exact hne.symm (merge_corollary_region_unique l1 (AList.lookup_mem_entries hregion) hoid
+    (AList.lookup_mem_entries hregion') hoid')
+
+-- Since `region`/`region'`'s objMap keys are disjoint, unioning them is a plain append at the
+-- `entries` level (no `kunion`-induced reordering/erasure).
+theorem merge_corollary_union_append {cfg : RuntimeConfig} {frame : Frame} {rid' : RegionId}
+    {region region' : Region} (l1 : L1 cfg) (hregion : cfg.heap.lookup frame.regionId = some region)
+    (hregion' : cfg.heap.lookup rid' = some region') (hne : rid' ≠ frame.regionId) :
+    (region.objMap ∪ region'.objMap).entries = region.objMap.entries ++ region'.objMap.entries :=
+  AList.union_eq_append_of_disjoint_keys (merge_corollary_disjoint_keys l1 hregion hregion' hne)
+
 theorem merge_L1 : ValidConfig cfg →
   merge x cfg = some cfg' →
   L1 cfg' := by
