@@ -63,6 +63,32 @@ theorem merge_corollary_rid_ne_regionId {cfg : RuntimeConfig} {frame : Frame} {r
   rw [hregion'] at hopen
   exact absurd (hopen.symm.trans hclosed) (by decide)
 
+-- Generic AList fact: a successful `lookup` means the key is already present.
+theorem merge_corollary_mem_keys_of_lookup {α : Type*} {β : α → Type*} [DecidableEq α]
+    {l : AList β} {k : α} {v : β k} (hv : l.lookup k = some v) : k ∈ l.keys :=
+  AList.mem_keys.mp (AList.lookup_isSome.mp (by rw [hv]; rfl))
+
+-- Generic fact: replacing the value at an already-present `AList` key changes the refs-count by
+-- exactly the delta of the one changed entry -- stated additively (rather than with subtraction) so
+-- it holds unconditionally regardless of what the old/new values actually are.
+theorem merge_corollary_alist_insert_count_eq {α : Type*} [DecidableEq α] {l : AList (fun _ : α => Reference)}
+    {k : α} {v_old v_new t : Reference} (hlookup : l.lookup k = some v_old) :
+    ((l.insert k v_new).entries.map (·.2)).count t + (if (v_old == t) = true then 1 else 0) =
+    (l.entries.map (·.2)).count t + (if (v_new == t) = true then 1 else 0) := by
+  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase (merge_corollary_mem_keys_of_lookup hlookup)
+  have v0_eq : v0 = v_old := by
+    have hmem_v0 : (⟨k, v0⟩ : Sigma (fun _ : α => Reference)) ∈ l.entries :=
+      heq ▸ List.mem_append_right _ List.mem_cons_self
+    have hmem_vold : (⟨k, v_old⟩ : Sigma (fun _ : α => Reference)) ∈ l.entries :=
+      AList.mem_lookup_iff.mp (by rw [hlookup]; rfl)
+    exact List.NodupKeys.eq_of_mk_mem (β := fun _ : α => Reference) l.nodupKeys hmem_v0 hmem_vold
+  have hnew : (l.insert k v_new).entries.map (·.2) = v_new :: (l1e ++ l2e).map (·.2) := by
+    rw [AList.entries_insert, hkerase, List.map_cons]
+  have hold : l.entries.map (·.2) = l1e.map (·.2) ++ v_old :: l2e.map (·.2) := by
+    rw [heq, v0_eq, List.map_append, List.map_cons]
+  rw [hnew, hold, List.count_cons, List.map_append, List.count_append, List.count_append, List.count_cons]
+  omega
+
 -- An object id can belong to at most one heap region's `objMap` (from `L1`'s global uniqueness).
 theorem merge_corollary_region_unique
     {cfg : RuntimeConfig} {rid1 rid2 : RegionId} {region1 region2 : Region} {oid : ObjectId} :
@@ -289,7 +315,56 @@ theorem merge_H1 : ValidConfig cfg →
 theorem merge_H2 : ValidConfig cfg →
   merge x cfg = some cfg' →
   H2 cfg' := by
-  sorry
+  intro vcfg h
+  have l1 := vcfg.l1
+  have h2 := vcfg.h2
+  obtain ⟨frame, rid', region, region', hframe, hxref, hregion, hregion', hclosed, hopen, hcfg'⟩ :=
+    merge_cases h
+  subst hcfg'
+  unfold H2
+  dsimp
+  have hne := merge_corollary_rid_ne_regionId hregion hregion' hclosed hopen
+  have heap_perm' : (Heap.refs ((cfg.heap.erase rid').insert frame.regionId { region with
+      objMap := AList.union region.objMap region'.objMap })).Perm cfg.heap.refs :=
+    merge_corollary_heap_refs_perm l1 hregion hregion' hne
+  have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame] :=
+    (List.dropLast_append_getLast? frame hframe).symm
+  intro rid
+  rw [heap_perm'.count_eq]
+  have hOId_ne : (Reference.OId region'.bridgeObjectId == Reference.RId rid) = false := rfl
+  have varmap_le : ((frame.varMap.insert x (Reference.OId region'.bridgeObjectId)).entries.map (·.2)).count
+      (Reference.RId rid) ≤ (frame.varMap.entries.map (·.2)).count (Reference.RId rid) := by
+    have hcount := merge_corollary_alist_insert_count_eq
+      (v_old := Reference.RId rid') (v_new := Reference.OId region'.bridgeObjectId) (t := Reference.RId rid) hxref
+    rw [hOId_ne] at hcount
+    simp only [Bool.false_eq_true, if_false, Nat.add_zero] at hcount
+    omega
+  have newFrame_refs_le : (Frame.refs { frame with
+      varMap := frame.varMap.insert x (Reference.OId region'.bridgeObjectId) }).count (Reference.RId rid) ≤
+      frame.refs.count (Reference.RId rid) := by
+    unfold Frame.refs
+    dsimp
+    rw [List.count_append, List.count_append]
+    exact Nat.add_le_add_left varmap_le _
+  have stack_refs_le : (Stack.refs (cfg.stack.dropLast ++
+      [{ frame with varMap := frame.varMap.insert x (Reference.OId region'.bridgeObjectId) }])).count
+      (Reference.RId rid) ≤ cfg.stack.refs.count (Reference.RId rid) := by
+    have split1 : Stack.refs (cfg.stack.dropLast ++
+        [{ frame with varMap := frame.varMap.insert x (Reference.OId region'.bridgeObjectId) }]) =
+        Stack.refs cfg.stack.dropLast ++ Frame.refs { frame with
+          varMap := frame.varMap.insert x (Reference.OId region'.bridgeObjectId) } := by
+      unfold Stack.refs
+      rw [List.bind_eq_flatMap, List.bind_eq_flatMap, List.flatMap_id, List.flatMap_id,
+        List.map_append, List.flatten_append, List.map_singleton, List.flatten_singleton]
+    have split2 : Stack.refs cfg.stack = Stack.refs cfg.stack.dropLast ++ Frame.refs frame := by
+      conv_lhs => rw [stack_eq]
+      unfold Stack.refs
+      rw [List.bind_eq_flatMap, List.bind_eq_flatMap, List.flatMap_id, List.flatMap_id,
+        List.map_append, List.flatten_append, List.map_singleton, List.flatten_singleton]
+    rw [split1, split2, List.count_append, List.count_append]
+    exact Nat.add_le_add_left newFrame_refs_le _
+  have h2rid := h2 rid
+  omega
 
 theorem merge_H3 : ValidConfig cfg →
   merge x cfg = some cfg' →
