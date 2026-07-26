@@ -724,6 +724,13 @@ theorem swap_corollary_stack_refs_append (l : Stack) (f : Frame) :
     List.map_append, List.flatten_append]
   simp
 
+-- A reference already present in some frame's own refs is already present in the whole stack's refs.
+theorem swap_corollary_frame_refs_mem_stack {stack : Stack} {frame : Frame} {r : Reference}
+    (hmem : frame ∈ stack) (hr : r ∈ Frame.refs frame) : r ∈ Stack.refs stack := by
+  unfold Stack.refs
+  rw [List.bind_eq_flatMap, List.flatMap_id, List.mem_flatten]
+  exact ⟨Frame.refs frame, List.mem_map_of_mem hmem, hr⟩
+
 theorem swap_H2 : ValidConfig cfg →
   swap x yf cfg = some cfg' →
   H2 cfg' := by
@@ -752,7 +759,189 @@ theorem swap_HS1 : ValidConfig cfg →
 theorem swap_HS2 : ValidConfig cfg →
   swap x yf cfg = some cfg' →
   HS2 cfg' := by
-  sorry
+  intro vcfg h
+  have hs2 := vcfg.hs2
+  obtain ⟨frame, hframe, yRef, hyr, yRefLoc, hyrl, yfRef, hyf, yfRefLoc, hyfl, hcase⟩ := swap_cases h
+  have frame_mem : frame ∈ cfg.stackWithIndex := List.mem_of_getLast? hframe
+  unfold HS2
+  rcases hcase with
+    ⟨yoid, xRef, obj, hxb, hyoid, hyrloc, hxr, hobj, hcfg'⟩ |
+    ⟨yoid, rid, region, obj, xoid, xrid, hxb, hyoid, hyrloc, hrid, hregion, hobj, hxr, hxrl, hxrid, hstatus, hcfg'⟩ |
+    ⟨yoid, rid, region, obj, xrid, hxb, hyoid, hyrloc, hrid, hregion, hobj, hxr, hstatus, hcfg'⟩ |
+    ⟨yoid, yrid, yfoid, yfrid, region, obj, hxb, hyoid, hyrloc, hyfoid, hyfrloc, hyrid, hyfrid, hregion, hobj, hcfg'⟩
+  · -- SWAP-STACK: heap untouched, transport refs through the mutated last frame
+    subst hcfg'
+    have hfield : obj.lookup yf.field = some yfRef :=
+      swap_corollary_stack_field_eq_yfRef frame_mem (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hobj hyf
+    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    have frame_toFrame_mem : frame.toFrame ∈ cfg.stack :=
+      stack_eq ▸ List.mem_append_right _ (List.mem_singleton_self _)
+    have hxRef_mem : xRef ∈ cfg.refs := List.mem_append_left _
+      (swap_corollary_frame_refs_mem_stack frame_toFrame_mem
+        (List.mem_append_right _ (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hxr))))
+    have hyfRef_mem : yfRef ∈ cfg.refs := List.mem_append_left _
+      (swap_corollary_frame_refs_mem_stack frame_toFrame_mem
+        (List.mem_append_left _ (swap_corollary_objMap_bind_refs_mem_of_lookup hobj
+          (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hfield)))))
+    have hdrop_refs : ∀ r, r ∈ Stack.refs cfg.stack.dropLast → r ∈ cfg.refs := by
+      intro r hr
+      apply List.mem_append_left
+      rw [stack_eq, swap_corollary_stack_refs_append]
+      exact List.mem_append_left _ hr
+    have hframe_refs : ∀ r, r ∈ Frame.refs frame.toFrame → r ∈ cfg.refs := by
+      intro r hr
+      apply List.mem_append_left
+      rw [stack_eq, swap_corollary_stack_refs_append]
+      exact List.mem_append_right _ hr
+    intro rid' hr
+    dsimp at hr ⊢
+    unfold RuntimeConfig.refs at hr
+    dsimp at hr
+    rw [swap_corollary_stack_refs_append, List.mem_append, List.mem_append] at hr
+    rcases hr with (hr | hr) | hr
+    · exact hs2 rid' (hdrop_refs _ hr)
+    · unfold Frame.refs at hr
+      dsimp at hr
+      rw [List.mem_append] at hr
+      rcases hr with hr | hr
+      · rcases swap_corollary_objMap_insert_bind_refs_mem hr with hr' | hr'
+        · rcases swap_corollary_alist_insert_refs_mem hr' with hr'' | hr''
+          · exact hs2 rid' (hr'' ▸ hxRef_mem)
+          · exact hs2 rid' (hframe_refs _ (List.mem_append_left _
+              (swap_corollary_objMap_bind_refs_mem_of_lookup hobj hr'')))
+        · exact hs2 rid' (hframe_refs _ (List.mem_append_left _ hr'))
+      · rcases swap_corollary_alist_insert_refs_mem hr with hr' | hr'
+        · exact hs2 rid' (hr' ▸ hyfRef_mem)
+        · exact hs2 rid' (hframe_refs _ (List.mem_append_right _ hr'))
+    · exact hs2 rid' (List.mem_append_right _ hr)
+  · -- SWAP-REGION-OBJECT
+    subst hcfg'
+    have hfield : obj.lookup yf.field = some yfRef :=
+      swap_corollary_region_field_eq_yfRef (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hregion hobj hyf
+    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    have frame_toFrame_mem : frame.toFrame ∈ cfg.stack :=
+      stack_eq ▸ List.mem_append_right _ (List.mem_singleton_self _)
+    have hridmem : rid ∈ cfg.heap.keys := swap_corollary_mem_keys_of_lookup hregion
+    have hxoidRef_mem : Reference.OId xoid ∈ cfg.refs := List.mem_append_left _
+      (swap_corollary_frame_refs_mem_stack frame_toFrame_mem
+        (List.mem_append_right _ (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hxr))))
+    have hyfRef_mem : yfRef ∈ cfg.refs := List.mem_append_right _
+      (swap_corollary_heap_refs_mem_of_lookup hregion
+        (swap_corollary_objMap_bind_refs_mem_of_lookup hobj
+          (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hfield))))
+    have hdrop_refs : ∀ r, r ∈ Stack.refs cfg.stack.dropLast → r ∈ cfg.refs := by
+      intro r hr
+      apply List.mem_append_left
+      rw [stack_eq, swap_corollary_stack_refs_append]
+      exact List.mem_append_left _ hr
+    have hframe_refs : ∀ r, r ∈ Frame.refs frame.toFrame → r ∈ cfg.refs := by
+      intro r hr
+      apply List.mem_append_left
+      rw [stack_eq, swap_corollary_stack_refs_append]
+      exact List.mem_append_right _ hr
+    intro rid' hr
+    dsimp at hr ⊢
+    rw [swap_corollary_heap_insert_keys_mem hridmem]
+    unfold RuntimeConfig.refs at hr
+    dsimp at hr
+    rw [swap_corollary_stack_refs_append, List.mem_append, List.mem_append] at hr
+    rcases hr with (hr | hr) | hr
+    · exact hs2 rid' (hdrop_refs _ hr)
+    · unfold Frame.refs at hr
+      dsimp at hr
+      rw [List.mem_append] at hr
+      rcases hr with hr | hr
+      · exact hs2 rid' (hframe_refs _ (List.mem_append_left _ hr))
+      · rcases swap_corollary_alist_insert_refs_mem hr with hr' | hr'
+        · exact hs2 rid' (hr' ▸ hyfRef_mem)
+        · exact hs2 rid' (hframe_refs _ (List.mem_append_right _ hr'))
+    · rcases swap_corollary_heap_insert_refs_mem hridmem hr with hr' | hr'
+      · unfold Region.refs at hr'
+        dsimp at hr'
+        rcases swap_corollary_objMap_insert_bind_refs_mem hr' with hr'' | hr''
+        · rcases swap_corollary_alist_insert_refs_mem hr'' with hr''' | hr'''
+          · exact hs2 rid' (hr''' ▸ hxoidRef_mem)
+          · exact hs2 rid' (List.mem_append_right _
+              (swap_corollary_heap_refs_mem_of_lookup hregion
+                (swap_corollary_objMap_bind_refs_mem_of_lookup hobj hr''')))
+        · exact hs2 rid' (List.mem_append_right _ (swap_corollary_heap_refs_mem_of_lookup hregion hr''))
+      · exact hs2 rid' (List.mem_append_right _ hr')
+  · -- SWAP-REGION-REGION
+    subst hcfg'
+    have hfield : obj.lookup yf.field = some yfRef :=
+      swap_corollary_region_field_eq_yfRef (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hregion hobj hyf
+    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    have frame_toFrame_mem : frame.toFrame ∈ cfg.stack :=
+      stack_eq ▸ List.mem_append_right _ (List.mem_singleton_self _)
+    have hridmem : rid ∈ cfg.heap.keys := swap_corollary_mem_keys_of_lookup hregion
+    have hxridRef_mem : Reference.RId xrid ∈ cfg.refs := List.mem_append_left _
+      (swap_corollary_frame_refs_mem_stack frame_toFrame_mem
+        (List.mem_append_right _ (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hxr))))
+    have hyfRef_mem : yfRef ∈ cfg.refs := List.mem_append_right _
+      (swap_corollary_heap_refs_mem_of_lookup hregion
+        (swap_corollary_objMap_bind_refs_mem_of_lookup hobj
+          (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hfield))))
+    have hdrop_refs : ∀ r, r ∈ Stack.refs cfg.stack.dropLast → r ∈ cfg.refs := by
+      intro r hr
+      apply List.mem_append_left
+      rw [stack_eq, swap_corollary_stack_refs_append]
+      exact List.mem_append_left _ hr
+    have hframe_refs : ∀ r, r ∈ Frame.refs frame.toFrame → r ∈ cfg.refs := by
+      intro r hr
+      apply List.mem_append_left
+      rw [stack_eq, swap_corollary_stack_refs_append]
+      exact List.mem_append_right _ hr
+    intro rid' hr
+    dsimp at hr ⊢
+    rw [swap_corollary_heap_insert_keys_mem hridmem]
+    unfold RuntimeConfig.refs at hr
+    dsimp at hr
+    rw [swap_corollary_stack_refs_append, List.mem_append, List.mem_append] at hr
+    rcases hr with (hr | hr) | hr
+    · exact hs2 rid' (hdrop_refs _ hr)
+    · unfold Frame.refs at hr
+      dsimp at hr
+      rw [List.mem_append] at hr
+      rcases hr with hr | hr
+      · exact hs2 rid' (hframe_refs _ (List.mem_append_left _ hr))
+      · rcases swap_corollary_alist_insert_refs_mem hr with hr' | hr'
+        · exact hs2 rid' (hr' ▸ hyfRef_mem)
+        · exact hs2 rid' (hframe_refs _ (List.mem_append_right _ hr'))
+    · rcases swap_corollary_heap_insert_refs_mem hridmem hr with hr' | hr'
+      · unfold Region.refs at hr'
+        dsimp at hr'
+        rcases swap_corollary_objMap_insert_bind_refs_mem hr' with hr'' | hr''
+        · rcases swap_corollary_alist_insert_refs_mem hr'' with hr''' | hr'''
+          · exact hs2 rid' (hr''' ▸ hxridRef_mem)
+          · exact hs2 rid' (List.mem_append_right _
+              (swap_corollary_heap_refs_mem_of_lookup hregion
+                (swap_corollary_objMap_bind_refs_mem_of_lookup hobj hr''')))
+        · exact hs2 rid' (List.mem_append_right _ (swap_corollary_heap_refs_mem_of_lookup hregion hr''))
+      · exact hs2 rid' (List.mem_append_right _ hr')
+  · -- SWAP-REGION-BRIDGE: stack untouched, only the heap's region at yrid changes
+    subst hcfg'
+    have hfield : obj.lookup yf.field = some yfRef :=
+      swap_corollary_region_field_eq_yfRef (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hregion hobj hyf
+    have hridmem : yrid ∈ cfg.heap.keys := swap_corollary_mem_keys_of_lookup hregion
+    intro rid' hr
+    dsimp at hr ⊢
+    rw [swap_corollary_heap_insert_keys_mem hridmem]
+    unfold RuntimeConfig.refs at hr
+    dsimp at hr
+    rw [List.mem_append] at hr
+    rcases hr with hr | hr
+    · exact hs2 rid' (List.mem_append_left _ hr)
+    · rcases swap_corollary_heap_insert_refs_mem hridmem hr with hr' | hr'
+      · unfold Region.refs at hr'
+        dsimp at hr'
+        rcases swap_corollary_objMap_insert_bind_refs_mem hr' with hr'' | hr''
+        · rcases swap_corollary_alist_insert_refs_mem hr'' with hr''' | hr'''
+          · exact absurd hr''' (by simp)
+          · exact hs2 rid' (List.mem_append_right _
+              (swap_corollary_heap_refs_mem_of_lookup hregion
+                (swap_corollary_objMap_bind_refs_mem_of_lookup hobj hr''')))
+        · exact hs2 rid' (List.mem_append_right _ (swap_corollary_heap_refs_mem_of_lookup hregion hr''))
+      · exact hs2 rid' (List.mem_append_right _ hr')
 
 theorem swap_valid : ValidConfig cfg →
   swap x yf cfg = some cfg' →
