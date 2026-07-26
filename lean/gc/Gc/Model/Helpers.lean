@@ -69,6 +69,21 @@ def Reference.loc? (ref : Reference) (cfg : RuntimeConfig) : Option Location :=
     | none, some ⟨rid, _⟩ => some (Location.Rgn rid)
     | _, _ => none
 
+def Reference.objAt? (cfg : RuntimeConfig) : Reference → Option Object
+  | Reference.RId _ => none
+  | Reference.OId oid =>
+    match (Reference.OId oid).loc? cfg with
+    | some (Location.Rgn rid) =>
+      (cfg.heap.lookup rid).bind (fun region => region.objMap.lookup oid)
+    | some (Location.Stk fid) =>
+      (cfg.stackWithIndex.find? (fun frame => frame.index == fid)).bind
+        (fun frame => frame.objMap.lookup oid)
+    | none => none
+
+-- can be simplified: the `if frame.bridgeVar == var then ... else none` re-checks a fact
+-- already guaranteed by the `findRev?` predicate above (if `varMap.lookup var` fails, the
+-- disjunction forces `bridgeVar == var`), and `Reference.OId <$> region.bridgeObjectId` can
+-- just be `some (Reference.OId region.bridgeObjectId)`.
 def resolveV (var : VarName) (cfg : RuntimeConfig) : Option Reference := do
   let frame ← cfg.stackWithIndex.findRev? (λ frame => frame.varMap.keys.contains var ∨ frame.bridgeVar == var)
   let ref ← frame.varMap.lookup var <|>
@@ -79,6 +94,8 @@ def resolveV (var : VarName) (cfg : RuntimeConfig) : Option Reference := do
       none)
   some ref
 
+-- can be simplified using `Reference.objAt?`: everything from `ref.loc? cfg` down to
+-- `obj.lookup fieldAccess.field` in each branch is exactly `ref.objAt? cfg`.
 def resolveFA (fieldAccess : FieldAccess) (cfg : RuntimeConfig) : Option Reference := do
   let ref ← resolveV fieldAccess.root cfg
   match ref with
