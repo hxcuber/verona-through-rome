@@ -829,10 +829,210 @@ theorem merge_S2 : ValidConfig cfg →
             (by unfold Frame.refs; exact List.mem_append_right _ ((hsub.map (·.2)).mem href))
             fid' oid rfl hlocEq_cfg
 
+-- Extracts the witness from a known `Rgn` resolution: the heap side must have hit some region at
+-- exactly that key, containing the oid. (No `L1`/uniqueness needed -- purely reading off the match.)
+theorem merge_corollary_loc_rgn_elim {cfg : RuntimeConfig} {oid : ObjectId} {rid0 : RegionId}
+    (hloc : (Reference.OId oid).loc? cfg = some (Location.Rgn rid0)) :
+    ∃ region0, cfg.heap.lookup rid0 = some region0 ∧ oid ∈ region0.objMap.keys := by
+  unfold Reference.loc? at hloc
+  dsimp at hloc
+  cases h1 : cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid) with
+  | none =>
+    rw [h1] at hloc
+    cases h2 : cfg.heap.entries.find? (fun e => e.2.objMap.keys.contains oid) with
+    | none => rw [h2] at hloc; dsimp at hloc; contradiction
+    | some val =>
+      rw [h2] at hloc
+      dsimp at hloc
+      rw [Option.some_inj, Location.Rgn.injEq] at hloc
+      obtain ⟨rid1, region1⟩ := val
+      subst hloc
+      have hcontains := List.find?_some h2
+      dsimp at hcontains
+      refine ⟨region1, ?_, ?_⟩
+      · exact AList.mem_lookup_iff.mpr (List.mem_of_find?_eq_some h2)
+      · exact List.contains_iff_mem.mp hcontains
+  | some frameX =>
+    rw [h1] at hloc
+    cases h2 : cfg.heap.entries.find? (fun e => e.2.objMap.keys.contains oid) with
+    | none =>
+      rw [h2] at hloc
+      dsimp at hloc
+      injection hloc with hloc
+      injection hloc
+    | some _ => rw [h2] at hloc; dsimp at hloc; contradiction
+
+-- `S1`'s regionId-uniqueness at the `FrameWithIndex` level: two stack frames sharing a `regionId`
+-- must be the *same* frame (same index).
+theorem merge_corollary_regionId_unique_index {cfg : RuntimeConfig} (s1 : S1 cfg)
+    {frameZ frameW : FrameWithIndex} (hZ : frameZ ∈ cfg.stackWithIndex) (hW : frameW ∈ cfg.stackWithIndex)
+    (heq : frameZ.regionId = frameW.regionId) : frameZ.index = frameW.index := by
+  unfold RuntimeConfig.stackWithIndex at hZ hW
+  obtain ⟨nZ, hnZ, hZeq⟩ := List.mem_mapIdx.mp hZ
+  obtain ⟨nW, hnW, hWeq⟩ := List.mem_mapIdx.mp hW
+  have hZidx : frameZ.index = nZ := by rw [← hZeq]
+  have hWidx : frameW.index = nW := by rw [← hWeq]
+  have hZregion : frameZ.regionId = cfg.stack[nZ].regionId := by rw [← hZeq]
+  have hWregion : frameW.regionId = cfg.stack[nW].regionId := by rw [← hWeq]
+  unfold S1 at s1
+  have hnZ' : nZ < (cfg.stack.map (fun f => f.regionId)).length := by rwa [List.length_map]
+  have hnW' : nW < (cfg.stack.map (fun f => f.regionId)).length := by rwa [List.length_map]
+  have hgetZ : (cfg.stack.map (fun f => f.regionId))[nZ] = frameZ.regionId := by
+    rw [List.getElem_map]; rw [hZregion]
+  have hgetW : (cfg.stack.map (fun f => f.regionId))[nW] = frameW.regionId := by
+    rw [List.getElem_map]; rw [hWregion]
+  have : nZ = nW := by
+    apply (List.Nodup.getElem_inj_iff s1 (hi := hnZ') (hj := hnW')).mp
+    rw [hgetZ, hgetW, heq]
+  rw [hZidx, hWidx, this]
+
 theorem merge_S3 : ValidConfig cfg →
   merge x cfg = some cfg' →
   S3 cfg' := by
-  sorry
+  intro vcfg h
+  have l1 := vcfg.l1
+  have h1v := vcfg.h1
+  have s1v := vcfg.s1
+  have l2v := vcfg.l2
+  have s3 := vcfg.s3
+  obtain ⟨frame, rid', region, region', hframe, hxref, hregion, hregion', hclosed, hopen, hcfg'⟩ :=
+    merge_cases h
+  subst hcfg'
+  have hne := merge_corollary_rid_ne_regionId hregion hregion' hclosed hopen
+  have hobjeq : ({ frame with varMap := frame.varMap.insert x (Reference.OId region'.bridgeObjectId) } :
+      Frame).objMap = frame.objMap := rfl
+  have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame] :=
+    (List.dropLast_append_getLast? frame hframe).symm
+  set dropIdx := (cfg.stack.dropLast.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)))
+    with dropIdx_def
+  have cfg_split : cfg.stack.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) =
+      dropIdx ++ [({ frame with index := cfg.stack.dropLast.length } : FrameWithIndex)] := by
+    conv_lhs => rw [stack_eq]
+    rw [List.mapIdx_append, List.mapIdx_cons, List.mapIdx_nil, Nat.zero_add]
+  set newFrame : Frame := { frame with varMap := frame.varMap.insert x (Reference.OId region'.bridgeObjectId) }
+    with newFrame_def
+  have cfg'_split : (cfg.stack.dropLast ++ [newFrame]).mapIdx
+      (fun idx f => ({ f with index := idx } : FrameWithIndex)) =
+      dropIdx ++ [({ newFrame with index := cfg.stack.dropLast.length } : FrameWithIndex)] := by
+    rw [List.mapIdx_append, List.mapIdx_cons, List.mapIdx_nil, Nat.zero_add]
+  have hbridge_mem : region'.bridgeObjectId ∈ (region.objMap ∪ region'.objMap).keys := by
+    have hbmem : region'.bridgeObjectId ∈ region'.objMap :=
+      h1v region' (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hregion'))
+    rw [AList.mem_keys] at hbmem
+    exact AList.mem_union.mpr (Or.inr hbmem)
+  have hframe_mem : ({ frame with index := cfg.stack.dropLast.length } : FrameWithIndex) ∈
+      cfg.stack.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) := by
+    rw [cfg_split, List.mem_append]
+    exact Or.inr (List.mem_singleton_self _)
+  have hmerged_mem : (⟨frame.regionId, { region with objMap := region.objMap ∪ region'.objMap }⟩ :
+      Sigma (fun _ : RegionId => Region)) ∈
+      ((cfg.heap.erase rid').insert frame.regionId { region with
+        objMap := region.objMap ∪ region'.objMap }).entries :=
+    AList.lookup_mem_entries (AList.lookup_insert (a := frame.regionId)
+      (b := { region with objMap := region.objMap ∪ region'.objMap }) (s := cfg.heap.erase rid'))
+  unfold S3
+  intro frame' hframe' ref href rid0 oid hrefeq hlocEq
+  subst hrefeq
+  unfold RuntimeConfig.stackWithIndex at hframe'
+  dsimp only at hframe'
+  obtain ⟨region0, hlookup0, hoid0⟩ := merge_corollary_loc_rgn_elim hlocEq
+  by_cases heqr : rid0 = frame.regionId
+  · subst heqr
+    rw [cfg'_split, List.mem_append] at hframe'
+    rw [AList.lookup_insert, Option.some_inj] at hlookup0
+    subst hlookup0
+    rcases hframe' with hframe' | hframe'
+    · exfalso
+      rcases AList.mem_union.mp hoid0 with hoid0' | hoid0'
+      · have hloc_cfg : (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId) :=
+          (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region, hregion, hoid0'⟩
+        have hframe'_cfg : frame' ∈ cfg.stackWithIndex := by
+          unfold RuntimeConfig.stackWithIndex
+          rw [cfg_split, List.mem_append]; exact Or.inl hframe'
+        obtain ⟨frameA, hframeA_mem, hframeA_rid, hframeA_idx⟩ :=
+          s3 frame' hframe'_cfg (Reference.OId oid) href frame.regionId oid rfl hloc_cfg
+        have hidxeq := merge_corollary_regionId_unique_index s1v hframeA_mem
+          (by unfold RuntimeConfig.stackWithIndex; exact hframe_mem) hframeA_rid
+        dsimp at hidxeq
+        have hdrop_lt : frame'.index < cfg.stack.dropLast.length := by
+          have := List.mem_mapIdx.mp hframe'
+          obtain ⟨n, hn, hfeq⟩ := this
+          rw [← hfeq]
+          dsimp
+          exact hn
+        rw [hidxeq] at hframeA_idx
+        exact absurd hframeA_idx (Nat.not_le.mpr hdrop_lt)
+      · have hloc_cfg : (Reference.OId oid).loc? cfg = some (Location.Rgn rid') :=
+          (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region', hregion', hoid0'⟩
+        have hframe'_cfg : frame' ∈ cfg.stackWithIndex := by
+          unfold RuntimeConfig.stackWithIndex
+          rw [cfg_split, List.mem_append]; exact Or.inl hframe'
+        obtain ⟨frameA, hframeA_mem, hframeA_rid, hframeA_idx⟩ :=
+          s3 frame' hframe'_cfg (Reference.OId oid) href rid' oid rfl hloc_cfg
+        obtain ⟨region2, hlookup2, hopen2⟩ := l2v frameA.toFrame (by
+          unfold RuntimeConfig.stackWithIndex at hframeA_mem
+          obtain ⟨nA, hnA, hAeq⟩ := List.mem_mapIdx.mp hframeA_mem
+          rw [← hAeq]
+          exact List.getElem_mem hnA)
+        rw [hframeA_rid, hregion', Option.some_inj] at hlookup2
+        rw [← hlookup2] at hopen2
+        exact absurd (hopen2.symm.trans hclosed) (by decide)
+    · rw [List.mem_singleton] at hframe'
+      refine ⟨frame', ?_, ?_, le_refl _⟩
+      · unfold RuntimeConfig.stackWithIndex
+        dsimp only
+        rw [hframe', cfg'_split]
+        exact List.mem_append_right _ (List.mem_singleton_self _)
+      · rw [hframe']
+  · have hner' : rid0 ≠ rid' := by
+      intro heq
+      subst heq
+      rw [AList.lookup_insert_ne heqr, AList.lookup_erase] at hlookup0
+      contradiction
+    have hlookup_cfg : cfg.heap.lookup rid0 = some region0 := by
+      rwa [AList.lookup_insert_ne heqr, AList.lookup_erase_ne hner'] at hlookup0
+    have hloc_cfg : (Reference.OId oid).loc? cfg = some (Location.Rgn rid0) :=
+      (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region0, hlookup_cfg, hoid0⟩
+    have hancestor : ∃ frameB ∈ dropIdx, frameB.regionId = rid0 ∧ frameB.index ≤ frame'.index := by
+      have key : ∃ frameZ ∈ cfg.stackWithIndex, Reference.OId oid ∈ frameZ.refs ∧ frameZ.index ≤ frame'.index := by
+        rw [cfg'_split, List.mem_append] at hframe'
+        rcases hframe' with hframe' | hframe'
+        · exact ⟨frame', by unfold RuntimeConfig.stackWithIndex; rw [cfg_split, List.mem_append]; exact Or.inl hframe',
+            href, le_refl _⟩
+        · rw [List.mem_singleton] at hframe'
+          subst hframe'
+          unfold Frame.refs at href
+          dsimp at href
+          rw [List.mem_append] at href
+          rcases href with href | href
+          · exact ⟨({ frame with index := cfg.stack.dropLast.length } : FrameWithIndex), hframe_mem,
+              (by unfold Frame.refs; exact List.mem_append_left _ href), le_refl _⟩
+          · rcases List.mem_cons.mp href with heq | href
+            · exfalso
+              rw [Reference.OId.injEq] at heq
+              subst heq
+              have hridfr := merge_corollary_heap'_unique l1 hregion hregion' hne hmerged_mem hbridge_mem
+                (AList.lookup_mem_entries hlookup0) hoid0
+              exact heqr hridfr.symm
+            · have hsub : List.Sublist (List.kerase x frame.varMap.entries) frame.varMap.entries :=
+                List.kerase_sublist x frame.varMap.entries
+              exact ⟨({ frame with index := cfg.stack.dropLast.length } : FrameWithIndex), hframe_mem,
+                (by unfold Frame.refs; exact List.mem_append_right _ ((hsub.map (·.2)).mem href)), le_refl _⟩
+      obtain ⟨frameZ, hZmem, hZref, hZidx⟩ := key
+      obtain ⟨frameA, hAmem, hArid, hAidx⟩ := s3 frameZ hZmem (Reference.OId oid) hZref rid0 oid rfl hloc_cfg
+      unfold RuntimeConfig.stackWithIndex at hAmem
+      rw [cfg_split, List.mem_append, List.mem_singleton] at hAmem
+      rcases hAmem with hAmem | hAeq
+      · exact ⟨frameA, hAmem, hArid, le_trans hAidx hZidx⟩
+      · exfalso
+        subst hAeq
+        exact heqr hArid.symm
+    obtain ⟨frameB, hBmem, hBrid, hBidx⟩ := hancestor
+    refine ⟨frameB, ?_, hBrid, hBidx⟩
+    unfold RuntimeConfig.stackWithIndex
+    dsimp only
+    rw [cfg'_split, List.mem_append]
+    exact Or.inl hBmem
 
 theorem merge_HS1 : ValidConfig cfg →
   merge x cfg = some cfg' →
