@@ -149,10 +149,11 @@ not by reading file contents alone):
   8 invariants — `enter_H2`'s proof already computes the same permutation facts inline via its own
   unnamed `have`s — and were deleted rather than left as dead `sorry` stubs. Axiom check confirms only
   `propext`/`Classical.choice`/`Quot.sound` throughout.
-- **`Merge.lean`, `Swap.lean`** — not started: all 10 invariant lemmas (`L1`/`L2`/`H1`/`H2`/`H3`/`S1`/`S2`/
-  `S3`/`HS1`/`HS2`) are bare `sorry`. Only the combining `<op>_valid` theorem (which just assembles the 10
-  sorry'd lemmas) is written. These build successfully (a `sorry` doesn't fail compilation) but contain no
-  real proof content yet.
+- **`Merge.lean`** — not started: all 10 invariant lemmas (`L1`/`L2`/`H1`/`H2`/`H3`/`S1`/`S2`/`S3`/`HS1`/
+  `HS2`) are bare `sorry`. Only the combining `merge_valid` theorem (which just assembles the 10 sorry'd
+  lemmas) is written. This builds successfully (a `sorry` doesn't fail compilation) but contains no real
+  proof content yet — the sole remaining not-started `Preservation` file now that `Swap.lean` is done
+  (see its bullet further below).
 - **`MakeObjStack.lean`** — **fully proved, builds cleanly, zero `sorry`** (finished 2026-07-26, across
   several checkpoints: `H3` first, then `S2`, then `S3`, then the corollaries). All 9 invariants
   (`makeObjStack_L1` … `_S3`, plus `_HS1`) and `makeObjStack_valid` are real proofs. Axiom check confirms
@@ -444,6 +445,58 @@ not by reading file contents alone):
     separately-named `have`s per side instead. A record literal `{ x with ... }` inside a *standalone*
     `have`'s type elaborates at `x`'s own declared type rather than the context's expected type (e.g.
     `FrameWithIndex` instead of `Frame`) — fix with an explicit ascription, `({ x with ... } : Frame)`.
+- **`Swap.lean`** — **fully proved, builds cleanly, zero `sorry`, zero warnings** (finished 2026-07-26,
+  in one session across the four sub-cases: `swap_cases` scaffold, then `S1`, `H1`, `L2`, `L1`, `HS2`,
+  `HS1`, `H2`, then `H3`, `S2`, `S3`). Axiom check on `swap_valid` confirms only
+  `propext`/`Classical.choice`/`Quot.sound`.
+  - The operation: `swap x yf cfg` genuinely **exchanges** two live reference values — the value at
+    variable `x` in the last frame and the value at field access `yf` — rather than overwriting one
+    with a copy, which is what every other `Preservation` file so far actually did. Four sub-cases on
+    where `yf` (and, when `x` isn't the bridge var, where `x`'s own value) live: **SWAP-STACK** (both in
+    the last frame's own `objMap`/`varMap`), **SWAP-REGION-OBJECT** (`yf` in the frame's own region,
+    `x`'s value an `OId` also in that region), **SWAP-REGION-REGION** (same as `-OBJECT` but `x`'s value
+    is an `RId`, no location check needed), **SWAP-REGION-BRIDGE** (`x` *is* the bridge var, swapping the
+    region's `bridgeObjectId` with a field value). `swap` never allocates a fresh id.
+  - **The exchange-ness matters for `H2`**: since a value moves rather than being copied-then-discarded,
+    proving `RId`-count preservation needed a genuine equality (not the `≤`-bound every prior file's `H2`
+    got away with, since those only ever discarded an old value for a *new* one that was OId-shaped —
+    never a two-way trade). `swap_corollary_alist_insert_count_eq` states this additively (`new_count t +
+    (if v_old==t then 1 else 0) = old_count t + (if v_new==t then 1 else 0)`) to dodge `Nat` subtraction;
+    applying it once per swapped slot and feeding both instances to `omega` makes the two `if`-terms
+    cancel algebraically regardless of what the two exchanged values actually are. Composing container
+    levels (`ObjMap`→`Region`/`Frame`, `Heap`) needed the same-shaped `swap_corollary_objMap_insert_bind_
+    count_eq`/`_heap_insert_bind_count_eq`, each a genuine *identity* for **any** replacement value (no
+    relationship between old/new required at that level — the identity is just "other entries' count +
+    old's own count = other entries' count + new's own count" restated two ways). Recurring gotcha:
+    `omega` treats `X.entries.map (·.2)` (raw) and `Object.refs X` (named) as unrelated opaque atoms
+    despite being definitionally equal — needed an explicit `Object.refs`-wrapped restatement of the raw
+    lemma's conclusion (via a term-mode type ascription, checked by defeq) wherever it had to combine with
+    a lemma stated in the wrapped form.
+  - **`H3`/`S2`/`S3`'s `loc?`-transport turned out unconditional for every object id** — sharper than
+    every prior file (`MakeObjStack`/`MakeObjRegion`/`MakeRegion` all needed an `oid ≠ freshObjectId`
+    exception): `Reference.loc?` never reads `varMap` or `bridgeObjectId`, only `objMap` keys, and `swap`
+    never adds or removes an `objMap`/heap key anywhere (every insert replaces a value at an
+    already-present key). So one pair of corollaries — `swap_corollary_stack_loc_eq` (frame-side, folds
+    the simultaneous `varMap` change into an unused parameter) and `swap_corollary_region_loc_eq`
+    (heap-side, folds `bridgeObjectId` changes into a generic `newRegion` parameter) — covers all four
+    branches, composed via `.trans` for the two branches that touch both stack and heap (a third small
+    corollary, `swap_corollary_stack_varmap_loc_eq`, handles a *pure* `varMap`-only change with no `Perm`
+    argument at all, since the key set there is literally unchanged, not just `Perm`-equal).
+  - **`S3` turned out simpler than `VarAsgn`/`FieldAsgn`'s**, which both needed genuine `resolveV`/
+    `resolveFA` provenance-tracing corollaries to find an ancestor frame for a newly-written value.
+    `swap`'s region-touching branches require the touched region to be the *current* frame's own region
+    (`hrid : rid = frame.regionId` is part of the operation's own precondition), so any region-internal
+    ref newly placed into scope already has `frame` itself as a valid ancestor witness — fixed via `H3`
+    (the swapped-in value was already in `region.refs`) plus a trivial `le_refl` bound, no provenance
+    chain needed. `SWAP-STACK`'s same-frame exchange means *every* ref in the mutated frame (old or
+    newly-swapped-in) was already in `frame.refs` before the mutation, so plain self-reference against
+    `vcfg.s3` always suffices there too; a small `transport` lemma then carries the resulting ancestor
+    witness from `cfg.stackWithIndex` over to `cfg'.stackWithIndex` (regionId/index preserved, dropLast
+    frames literally unchanged).
+  - Recurring gotchas from prior files resurfaced: the multi-line record-literal parser error inside a
+    `have`'s type (`set newFrame`/`set newRegion` fix), and `cases h : e with` silently generalizing a
+    goal's own `∃`-conjunct when its LHS syntactically matches `e` independent of the existential witness
+    (fixed with `rfl` in place of the naively-expected hypothesis at three sites in `swap_cases`).
 
 Elsewhere:
 
@@ -467,19 +520,18 @@ Elsewhere:
 
 ## Next planned step
 
-`FieldAsgn.lean` is now finished (see its bullet above for full context — the two-branch case scaffold,
-the `AList.insert`-at-existing-key `Perm` machinery needed at two nesting levels, the count-based
-`H2`/`HS2` argument, and the `loc?`-transport corollaries for `H3`/`S2`/`S3`). Together with
-`VarAsgn.lean`, `MakeObjStack.lean`, `MakeObjRegion.lean`, `MakeRegion.lean`, `Exit.lean`,
-`Validity.lean`, `Enter.lean`, and `Start.lean`, that's every proof-bearing file in `Gc/Model/` done
-except the two not-started `Preservation` files below (zero `sorry` anywhere in `Gc/Model/` outside
-them, including both the `HS1` and `HS2` invariants — see `Validity.lean`'s note above for why `HS1`
-was added; `HS2` mirrors it for `RId`/`RegionId`).
+`Swap.lean` is now finished (see its bullet above for full context — the four-branch case scaffold,
+the genuine-exchange `H2` count argument, the unconditional `loc?`-transport corollaries for
+`H3`/`S2`/`S3`, and why its `S3` needed no `resolveV`/`resolveFA` provenance-tracing unlike
+`VarAsgn`/`FieldAsgn`'s). Together with `FieldAsgn.lean`, `VarAsgn.lean`, `MakeObjStack.lean`,
+`MakeObjRegion.lean`, `MakeRegion.lean`, `Exit.lean`, `Validity.lean`, `Enter.lean`, and `Start.lean`,
+that's every proof-bearing file in `Gc/Model/` done except the one not-started `Preservation` file below
+(zero `sorry` anywhere in `Gc/Model/` outside it, including both the `HS1` and `HS2` invariants — see
+`Validity.lean`'s note above for why `HS1` was added; `HS2` mirrors it for `RId`/`RegionId`).
 
-The remaining **not-started** `Preservation/*.lean` files — `Merge.lean`, `Swap.lean` — each have 10
-bare-`sorry` invariant lemmas (`L1`/`L2`/`H1`/`H2`/`H3`/`S1`/`S2`/`S3`/`HS1`/`HS2`), with only the
-combining `<op>_valid` assembled. **No target order agreed yet between the two.** `Swap.lean` is
-structurally the more complex of the two `Mutation.lean` operations overall (four sub-cases —
-`SWAP-STACK`, `SWAP-REGION-OBJECT`, `SWAP-REGION-REGION`, `SWAP-REGION-BRIDGE` — vs. `Merge.lean`'s
-single case), so `Merge.lean` is the more likely easier starting point, but this hasn't been confirmed
-against the actual proof obligations the way `FieldAsgn.lean` was scoped out in advance.
+The remaining **not-started** file, `Merge.lean`, has all 10 invariant lemmas
+(`L1`/`L2`/`H1`/`H2`/`H3`/`S1`/`S2`/`S3`/`HS1`/`HS2`) as bare `sorry`, with only the combining
+`merge_valid` assembled. It's the sole `Mutation.lean` operation with a single case (no branching on
+where values live, unlike every `Preservation` file proved so far), which should make it the simplest
+file yet to scope out — but this hasn't been confirmed against its actual proof obligations the way
+`FieldAsgn.lean`/`Swap.lean` were scoped out in advance.
