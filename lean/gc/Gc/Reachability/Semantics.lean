@@ -37,7 +37,7 @@ inductive FrameReachable : RuntimeConfig → Index → Reference → Prop where
     FrameReachable cfg fid (Reference.OId oid) →
     FrameReachable cfg fid ref
 -- the object is referenced by a reachable object from the stack
-| stack_step : frame ∈ cfg.stackWithIndex →
+| frame_step : frame ∈ cfg.stackWithIndex →
     frame.objMap.lookup oid = some obj →
     obj.refs.contains ref →
     FrameReachable cfg fid (Reference.OId oid) →
