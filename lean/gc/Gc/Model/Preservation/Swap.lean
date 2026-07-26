@@ -731,6 +731,88 @@ theorem swap_corollary_frame_refs_mem_stack {stack : Stack} {frame : Frame} {r :
   rw [List.bind_eq_flatMap, List.flatMap_id, List.mem_flatten]
   exact ⟨Frame.refs frame, List.mem_map_of_mem hmem, hr⟩
 
+-- Generic AList fact (Reference-valued): replacing the value at an already-present key changes
+-- the count of any target `t` by exactly (v_new==t?1:0) - (v_old==t?1:0), captured additively (to
+-- avoid Nat subtraction) as an equation relating the two counts via the two `==` conditions. This
+-- is what makes `swap` provably an *exchange* rather than a plain overwrite: applying this once
+-- for each of the two slots being swapped, the two `if`-terms cancel out exactly when combined.
+theorem swap_corollary_alist_insert_count_eq {α : Type*} [DecidableEq α] {l : AList (fun _ : α => Reference)}
+    {k : α} {v_old v_new t : Reference} (hlookup : l.lookup k = some v_old) :
+    ((l.insert k v_new).entries.map (·.2)).count t + (if (v_old == t) = true then 1 else 0) =
+    (l.entries.map (·.2)).count t + (if (v_new == t) = true then 1 else 0) := by
+  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase (swap_corollary_mem_keys_of_lookup hlookup)
+  have v0_eq : v0 = v_old := by
+    have hmem_v0 : (⟨k, v0⟩ : Sigma (fun _ : α => Reference)) ∈ l.entries :=
+      heq ▸ List.mem_append_right _ List.mem_cons_self
+    have hmem_vold : (⟨k, v_old⟩ : Sigma (fun _ : α => Reference)) ∈ l.entries :=
+      AList.mem_lookup_iff.mp (by rw [hlookup]; rfl)
+    exact List.NodupKeys.eq_of_mk_mem (β := fun _ : α => Reference) l.nodupKeys hmem_v0 hmem_vold
+  have hnew : (l.insert k v_new).entries.map (·.2) = v_new :: (l1e ++ l2e).map (·.2) := by
+    rw [AList.entries_insert, hkerase, List.map_cons]
+  have hold : l.entries.map (·.2) = l1e.map (·.2) ++ v_old :: l2e.map (·.2) := by
+    rw [heq, v0_eq, List.map_append, List.map_cons]
+  rw [hnew, hold, List.count_cons, List.map_append, List.count_append, List.count_append, List.count_cons]
+  omega
+
+-- Container-level analogue, one level up: replacing the value at an already-present ObjMap key
+-- changes the whole bind-refs count by exactly the delta of the object's own count -- a genuine
+-- identity for *any* replacement value (not just ones related to the old one), since both sides
+-- reduce to "other objects' count + old/new object's own count".
+theorem swap_corollary_objMap_insert_bind_count_eq {m : ObjMap} {oid : ObjectId} {obj v : Object} {t : Reference}
+    (hobj : m.lookup oid = some obj) :
+    ((m.insert oid v).entries.map (·.2) >>= Object.refs).count t + (Object.refs obj).count t =
+    (m.entries.map (·.2) >>= Object.refs).count t + (Object.refs v).count t := by
+  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase (swap_corollary_mem_keys_of_lookup hobj)
+  have v0_eq : v0 = obj := by
+    have hmem_v0 : (⟨oid, v0⟩ : Sigma (fun _ : ObjectId => Object)) ∈ m.entries :=
+      heq ▸ List.mem_append_right _ List.mem_cons_self
+    have hmem_obj : (⟨oid, obj⟩ : Sigma (fun _ : ObjectId => Object)) ∈ m.entries :=
+      AList.mem_lookup_iff.mp (by rw [hobj]; rfl)
+    exact List.NodupKeys.eq_of_mk_mem (β := fun _ : ObjectId => Object) m.nodupKeys hmem_v0 hmem_obj
+  have hnewbind : (m.insert oid v).entries.map (·.2) >>= Object.refs =
+      Object.refs v ++ ((l1e ++ l2e).map (·.2) >>= Object.refs) := by
+    rw [AList.entries_insert, hkerase, List.map_cons, List.bind_eq_flatMap, List.flatMap_cons,
+      ← List.bind_eq_flatMap]
+  have holdbind : m.entries.map (·.2) >>= Object.refs =
+      (l1e.map (·.2) >>= Object.refs) ++ (Object.refs obj ++ (l2e.map (·.2) >>= Object.refs)) := by
+    rw [heq, v0_eq, List.map_append, List.map_cons, List.bind_eq_flatMap, List.flatMap_append,
+      List.flatMap_cons, ← List.bind_eq_flatMap, ← List.bind_eq_flatMap]
+  have splitbind : ((l1e ++ l2e).map (·.2) >>= Object.refs).count t =
+      (l1e.map (·.2) >>= Object.refs).count t + (l2e.map (·.2) >>= Object.refs).count t := by
+    rw [List.map_append, List.bind_eq_flatMap, List.flatMap_append, ← List.bind_eq_flatMap,
+      ← List.bind_eq_flatMap, List.count_append]
+  rw [hnewbind, holdbind, List.count_append, List.count_append, List.count_append]
+  omega
+
+-- Heap-level analogue of the above (Heap of Regions instead of ObjMap of Objects).
+theorem swap_corollary_heap_insert_bind_count_eq {cfg : RuntimeConfig} {rid : RegionId}
+    {region newRegion : Region} {t : Reference} (hregion : cfg.heap.lookup rid = some region) :
+    (Heap.refs (cfg.heap.insert rid newRegion)).count t + (Region.refs region).count t =
+    (Heap.refs cfg.heap).count t + (Region.refs newRegion).count t := by
+  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ :=
+    List.exists_of_kerase (swap_corollary_mem_keys_of_lookup hregion)
+  have v0_eq : v0 = region := by
+    have hmem_v0 : (⟨rid, v0⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries :=
+      heq ▸ List.mem_append_right _ List.mem_cons_self
+    have hmem_region : (⟨rid, region⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries :=
+      AList.mem_lookup_iff.mp (by rw [hregion]; rfl)
+    exact List.NodupKeys.eq_of_mk_mem (β := fun _ : RegionId => Region) cfg.heap.nodupKeys hmem_v0 hmem_region
+  unfold Heap.refs
+  have hnewbind : (cfg.heap.insert rid newRegion).entries.map (·.2) >>= Region.refs =
+      Region.refs newRegion ++ ((l1e ++ l2e).map (·.2) >>= Region.refs) := by
+    rw [AList.entries_insert, hkerase, List.map_cons, List.bind_eq_flatMap, List.flatMap_cons,
+      ← List.bind_eq_flatMap]
+  have holdbind : cfg.heap.entries.map (·.2) >>= Region.refs =
+      (l1e.map (·.2) >>= Region.refs) ++ (Region.refs region ++ (l2e.map (·.2) >>= Region.refs)) := by
+    rw [heq, v0_eq, List.map_append, List.map_cons, List.bind_eq_flatMap, List.flatMap_append,
+      List.flatMap_cons, ← List.bind_eq_flatMap, ← List.bind_eq_flatMap]
+  have splitbind : ((l1e ++ l2e).map (·.2) >>= Region.refs).count t =
+      (l1e.map (·.2) >>= Region.refs).count t + (l2e.map (·.2) >>= Region.refs).count t := by
+    rw [List.map_append, List.bind_eq_flatMap, List.flatMap_append, ← List.bind_eq_flatMap,
+      ← List.bind_eq_flatMap, List.count_append]
+  rw [hnewbind, holdbind, List.count_append, List.count_append, List.count_append]
+  omega
+
 theorem swap_H2 : ValidConfig cfg →
   swap x yf cfg = some cfg' →
   H2 cfg' := by
