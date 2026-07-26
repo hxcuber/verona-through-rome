@@ -996,6 +996,231 @@ theorem swap_H2 : ValidConfig cfg →
     rw [hheap_eq]
     exact h2'
 
+-- A List.Perm doesn't change what `.contains` reports (order-independent).
+theorem swap_corollary_perm_contains_eq {α : Type*} [BEq α] [LawfulBEq α] {l l' : List α}
+    (hperm : l.Perm l') (a : α) : l.contains a = l'.contains a := by
+  rw [Bool.eq_iff_iff, List.contains_iff_mem, List.contains_iff_mem]
+  exact hperm.mem_iff
+
+-- swap never changes any frame's or region's objMap *key set* (only replaces values at
+-- already-present keys, and varMap changes are irrelevant since Reference.loc? never reads
+-- varMap at all) -- so `Reference.loc?` transports unconditionally across the mutation for every
+-- object id, unlike MakeObjStack/MakeObjRegion which had to exclude a freshly-allocated id. This
+-- covers SWAP-STACK: the last frame's varMap can be replaced by anything (`newVarMap`, unused by
+-- the proof) since only the objMap-side insert (at the already-present `yoid`) matters.
+theorem swap_corollary_stack_loc_eq {cfg : RuntimeConfig} {frame : FrameWithIndex} {yoid : ObjectId}
+    {obj : Object} {field : FieldName} {newVal : Reference} {newVarMap : VarMap}
+    (hframe : cfg.stackWithIndex.getLast? = some frame) (hobj : frame.objMap.lookup yoid = some obj)
+    (oid' : ObjectId) :
+    (Reference.OId oid').loc? cfg =
+      (Reference.OId oid').loc? { cfg with stack := cfg.stack.dropLast ++
+        [({ frame with varMap := newVarMap, objMap := frame.objMap.insert yoid (obj.insert field newVal) } :
+          Frame)] } := by
+  obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+  set newFrame : Frame :=
+    { frame with varMap := newVarMap, objMap := frame.objMap.insert yoid (obj.insert field newVal) } with newFrame_def
+  have keys_perm : newFrame.objMap.keys.Perm frame.objMap.keys :=
+    swap_corollary_insert_keys_perm (swap_corollary_mem_keys_of_lookup hobj)
+  unfold Reference.loc?
+  dsimp
+  by_cases hb : frame.objMap.keys.contains oid'
+  · have hb' : newFrame.objMap.keys.contains oid' := by
+      rw [swap_corollary_perm_contains_eq keys_perm]; exact hb
+    have h1_cfg : cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid') =
+        some ({ frame with index := cfg.stack.dropLast.length } : FrameWithIndex) := by
+      unfold RuntimeConfig.stackWithIndex
+      conv_lhs => rw [stack_eq]
+      rw [List.mapIdx_concat, List.findRev?_eq_find?_reverse, List.reverse_append, List.reverse_singleton,
+        List.singleton_append]
+      exact List.find?_cons_of_pos hb
+    have h1_cfg' :
+        (RuntimeConfig.stackWithIndex { stack := cfg.stack.dropLast ++ [newFrame], heap := cfg.heap }).findRev?
+          (fun f => f.objMap.keys.contains oid') =
+        some ({ newFrame with index := cfg.stack.dropLast.length } : FrameWithIndex) := by
+      unfold RuntimeConfig.stackWithIndex
+      dsimp
+      rw [List.mapIdx_concat, List.findRev?_eq_find?_reverse, List.reverse_append, List.reverse_singleton,
+        List.singleton_append]
+      exact List.find?_cons_of_pos hb'
+    rw [h1_cfg, h1_cfg']
+    cases cfg.heap.entries.find? (fun x => x.snd.objMap.keys.contains oid') with
+    | none => rfl
+    | some _ => rfl
+  · have hb' : ¬ newFrame.objMap.keys.contains oid' := by
+      rw [swap_corollary_perm_contains_eq keys_perm]; exact hb
+    have h1_eq : cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid') =
+        (RuntimeConfig.stackWithIndex { stack := cfg.stack.dropLast ++ [newFrame], heap := cfg.heap }).findRev?
+          (fun f => f.objMap.keys.contains oid') := by
+      unfold RuntimeConfig.stackWithIndex
+      dsimp
+      conv_lhs => rw [stack_eq]
+      rw [List.mapIdx_concat, List.mapIdx_concat, List.findRev?_eq_find?_reverse, List.findRev?_eq_find?_reverse,
+        List.reverse_append, List.reverse_append, List.reverse_singleton, List.reverse_singleton,
+        List.singleton_append, List.singleton_append]
+      have hbL : ¬ ({ frame with index := cfg.stack.dropLast.length } : FrameWithIndex).objMap.keys.contains
+          oid' = true := hb
+      have hbR : ¬ ({ newFrame with index := cfg.stack.dropLast.length } : FrameWithIndex).objMap.keys.contains
+          oid' = true := hb'
+      have find_eqL :
+          List.find? (fun f => f.objMap.keys.contains oid')
+            (({ frame with index := cfg.stack.dropLast.length } : FrameWithIndex) ::
+              (List.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) cfg.stack.dropLast).reverse) =
+          List.find? (fun f => f.objMap.keys.contains oid')
+            (List.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) cfg.stack.dropLast).reverse :=
+        List.find?_cons_of_neg hbL
+      have find_eqR :
+          List.find? (fun f => f.objMap.keys.contains oid')
+            (({ newFrame with index := cfg.stack.dropLast.length } : FrameWithIndex) ::
+              (List.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) cfg.stack.dropLast).reverse) =
+          List.find? (fun f => f.objMap.keys.contains oid')
+            (List.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) cfg.stack.dropLast).reverse :=
+        List.find?_cons_of_neg hbR
+      rw [find_eqL, find_eqR]
+    rw [h1_eq]
+
+-- An oid can be found in at most one region's objMap (stated over bare L1, so it's usable on cfg
+-- before cfg''s own validity is established). Mirrors fieldAsgn_corollary_region_unique.
+theorem swap_corollary_region_unique
+    {cfg : RuntimeConfig} {rid1 rid2 : RegionId} {region1 region2 : Region} {oid : ObjectId} :
+  L1 cfg →
+  (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region1.objMap.keys →
+  (⟨rid2, region2⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region2.objMap.keys →
+  rid1 = rid2 := by
+  intro l1 mem1 in1 mem2 in2
+  by_contra hne
+  unfold L1 RuntimeConfig.objectIds at l1
+  obtain ⟨_, heap_nodup, _⟩ := List.nodup_append.mp l1
+  unfold Heap.objectIds at heap_nodup
+  rw [List.nodup_flatten, List.pairwise_map] at heap_nodup
+  obtain ⟨_, pairwise_disjoint⟩ := heap_nodup
+  have hneq : (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ≠ ⟨rid2, region2⟩ := by
+    intro heq
+    exact hne (congrArg Sigma.fst heq)
+  have disj := List.Pairwise.forall
+    (R := fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds)
+    (fun _ _ hd => List.disjoint_symm hd)
+    pairwise_disjoint mem1 mem2 hneq
+  unfold Region.objectIds at disj
+  exact disj in1 in2
+
+-- Reference.loc?'s (h1, h2)-match for OId factors through Option.map, so equal cfg's need only
+-- agree on the *projected* index/rid, not the full FrameWithIndex/heap-entry value.
+theorem swap_corollary_loc_match_eq (o1 : Option FrameWithIndex)
+    (o2 : Option (Sigma (fun _ : RegionId => Region))) :
+    (match o1, o2 with
+      | some f, none => some (Location.Stk f.index)
+      | none, some ⟨rid, _⟩ => some (Location.Rgn rid)
+      | _, _ => none) =
+    (match o1.map FrameWithIndex.index, o2.map Sigma.fst with
+      | some n, none => some (Location.Stk n)
+      | none, some r => some (Location.Rgn r)
+      | _, _ => none) := by
+  cases o1 <;> cases o2 <;> rfl
+
+-- The region-touching branches' `heap.insert` at an already-present key `rid` reorders `entries`;
+-- the mutated region's own key set is only Perm-related to the original (`newRegion`'s objMap is
+-- an insert at the already-present `yoid`, whatever else about `newRegion` differs -- e.g.
+-- SWAP-REGION-BRIDGE also changes `bridgeObjectId`, which `Reference.loc?` never reads).
+theorem swap_corollary_region_loc_eq {cfg : RuntimeConfig} {rid yoid : ObjectId} {region newRegion : Region}
+    {obj v : Object} (vcfg : ValidConfig cfg)
+    (hregion : cfg.heap.lookup rid = some region) (hobj : region.objMap.lookup yoid = some obj)
+    (hnewRegion : newRegion.objMap = region.objMap.insert yoid v)
+    (oid' : ObjectId) :
+    (Reference.OId oid').loc? cfg =
+      (Reference.OId oid').loc? { cfg with heap := cfg.heap.insert rid newRegion } := by
+  have l1 := vcfg.l1
+  have keys_perm : newRegion.objMap.keys.Perm region.objMap.keys := by
+    rw [hnewRegion]
+    exact swap_corollary_insert_keys_perm (swap_corollary_mem_keys_of_lookup hobj)
+  unfold Reference.loc?
+  dsimp
+  have heap_h2_map_eq :
+      (cfg.heap.entries.find? (fun p => p.snd.objMap.keys.contains oid')).map Sigma.fst =
+      ((AList.insert rid newRegion cfg.heap).entries.find?
+        (fun p => p.snd.objMap.keys.contains oid')).map Sigma.fst := by
+    obtain ⟨region2, l1e, l2e, hnotmem, heq, hkerase⟩ :=
+      List.exists_of_kerase (swap_corollary_mem_keys_of_lookup hregion)
+    have region2_eq : region2 = region :=
+      List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys
+        (heq ▸ List.mem_append_right _ List.mem_cons_self) (AList.mem_lookup_iff.mp (by rw [hregion]; rfl))
+    rw [region2_eq] at heq
+    rw [AList.entries_insert, hkerase]
+    have region_mem_cfg : (⟨rid, region⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries :=
+      heq ▸ List.mem_append_right _ List.mem_cons_self
+    by_cases hb2 : region.objMap.keys.contains oid'
+    · have hb2' : newRegion.objMap.keys.contains oid' := by
+        rw [swap_corollary_perm_contains_eq keys_perm]; exact hb2
+      have find_eqR2 :
+          List.find? (fun p => p.snd.objMap.keys.contains oid')
+            ((⟨rid, newRegion⟩ : Sigma (fun _ : RegionId => Region)) :: (l1e ++ l2e)) =
+          some (⟨rid, newRegion⟩ : Sigma (fun _ : RegionId => Region)) :=
+        List.find?_cons_of_pos hb2'
+      rw [find_eqR2]
+      have find_eqL :
+          cfg.heap.entries.find? (fun p => p.snd.objMap.keys.contains oid') =
+          some (⟨rid, region⟩ : Sigma (fun _ : RegionId => Region)) := by
+        apply List.find?_eq_some_of_unique region_mem_cfg hb2
+        intro y hy hpy
+        obtain ⟨rid_y, region_y⟩ := y
+        have rid_y_eq : rid_y = rid :=
+          swap_corollary_region_unique l1 hy (List.contains_iff_mem.mp hpy)
+            region_mem_cfg (List.contains_iff_mem.mp hb2)
+        subst rid_y_eq
+        have region_y_eq : region_y = region :=
+          List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys hy region_mem_cfg
+        rw [region_y_eq]
+      rw [find_eqL]
+      rfl
+    · have hb2' : ¬ newRegion.objMap.keys.contains oid' := by
+        rw [swap_corollary_perm_contains_eq keys_perm]; exact hb2
+      have find_eqR2 :
+          List.find? (fun p => p.snd.objMap.keys.contains oid')
+            ((⟨rid, newRegion⟩ : Sigma (fun _ : RegionId => Region)) :: (l1e ++ l2e)) =
+          List.find? (fun p => p.snd.objMap.keys.contains oid') (l1e ++ l2e) :=
+        List.find?_cons_of_neg hb2'
+      rw [find_eqR2]
+      have find_eqL :
+          cfg.heap.entries.find? (fun p => p.snd.objMap.keys.contains oid') =
+          List.find? (fun p => p.snd.objMap.keys.contains oid') (l1e ++ l2e) := by
+        rw [heq]
+        clear region_mem_cfg heq hkerase hnotmem find_eqR2
+        induction l1e with
+        | nil =>
+          dsimp
+          exact List.find?_cons_of_neg hb2
+        | cons a as ih =>
+          dsimp
+          by_cases hpa : a.snd.objMap.keys.contains oid'
+          · have find_eqA :
+                List.find? (fun p => p.snd.objMap.keys.contains oid')
+                  (a :: (as ++ (⟨rid, region⟩ : Sigma (fun _ : RegionId => Region)) :: l2e)) =
+                some a := List.find?_cons_of_pos hpa
+            have find_eqB :
+                List.find? (fun p => p.snd.objMap.keys.contains oid') (a :: (as ++ l2e)) =
+                some a := List.find?_cons_of_pos hpa
+            rw [find_eqA, find_eqB]
+          · have find_eqA :
+                List.find? (fun p => p.snd.objMap.keys.contains oid')
+                  (a :: (as ++ (⟨rid, region⟩ : Sigma (fun _ : RegionId => Region)) :: l2e)) =
+                List.find? (fun p => p.snd.objMap.keys.contains oid')
+                  (as ++ (⟨rid, region⟩ : Sigma (fun _ : RegionId => Region)) :: l2e) :=
+              List.find?_cons_of_neg hpa
+            have find_eqB :
+                List.find? (fun p => p.snd.objMap.keys.contains oid') (a :: (as ++ l2e)) =
+                List.find? (fun p => p.snd.objMap.keys.contains oid') (as ++ l2e) :=
+              List.find?_cons_of_neg hpa
+            rw [find_eqA, find_eqB]
+            exact ih
+      rw [find_eqL]
+  have step1 := swap_corollary_loc_match_eq
+    (cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid'))
+    (cfg.heap.entries.find? (fun p => p.snd.objMap.keys.contains oid'))
+  have step2 := swap_corollary_loc_match_eq
+    (cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid'))
+    ((AList.insert rid newRegion cfg.heap).entries.find? (fun p => p.snd.objMap.keys.contains oid'))
+  rw [heap_h2_map_eq] at step1
+  exact step1.trans step2.symm
+
 theorem swap_H3 : ValidConfig cfg →
   swap x yf cfg = some cfg' →
   H3 cfg' := by
