@@ -131,7 +131,23 @@ theorem merge_H3 : ValidConfig cfg →
 theorem merge_S1 : ValidConfig cfg →
   merge x cfg = some cfg' →
   S1 cfg' := by
-  sorry
+  intro vcfg h
+  have s1 := vcfg.s1
+  obtain ⟨frame, rid', region, region', hframe, hxref, hregion, hregion', hclosed, hopen, hcfg'⟩ :=
+    merge_cases h
+  subst hcfg'
+  unfold S1
+  dsimp
+  have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame] :=
+    (List.dropLast_append_getLast? frame hframe).symm
+  have regionId_eq : (cfg.stack.dropLast ++
+      [{ frame with varMap := frame.varMap.insert x (Reference.OId region'.bridgeObjectId) }]).map
+      (fun f : Frame => f.regionId) = cfg.stack.map (fun f : Frame => f.regionId) := by
+    conv_rhs => rw [stack_eq]
+    rw [List.map_append, List.map_append]
+    rfl
+  rw [regionId_eq]
+  exact s1
 
 theorem merge_S2 : ValidConfig cfg →
   merge x cfg = some cfg' →
