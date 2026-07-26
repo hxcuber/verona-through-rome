@@ -105,10 +105,125 @@ theorem merge_corollary_union_append {cfg : RuntimeConfig} {frame : Frame} {rid'
     (region.objMap ∪ region'.objMap).entries = region.objMap.entries ++ region'.objMap.entries :=
   AList.union_eq_append_of_disjoint_keys (merge_corollary_disjoint_keys l1 hregion hregion' hne)
 
+-- `cfg.heap.entries` reorders (via `exists_of_kerase`, extracting `rid'` then `frame.regionId` from
+-- what's left) into exactly `region`/`region'`'s pair plus the same "everything else" tail that
+-- `cfg'.heap.entries` is built from (`kerase frame.regionId (kerase rid' cfg.heap.entries)`).
+theorem merge_corollary_heap_entries_perm {cfg : RuntimeConfig} {frame : Frame} {rid' : RegionId}
+    {region region' : Region} (hregion : cfg.heap.lookup frame.regionId = some region)
+    (hregion' : cfg.heap.lookup rid' = some region') (hne : rid' ≠ frame.regionId) :
+    cfg.heap.entries.Perm
+      (⟨frame.regionId, region⟩ :: ⟨rid', region'⟩ ::
+        List.kerase frame.regionId (List.kerase rid' cfg.heap.entries)) := by
+  obtain ⟨b1, l1, l2, hnotmem1, heq1, hkerase1⟩ :=
+    List.exists_of_kerase (a := rid') (List.mem_keys_of_mem (AList.lookup_mem_entries hregion'))
+  have hb1 : b1 = region' :=
+    List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys (heq1 ▸ List.mem_append_right _ List.mem_cons_self)
+      (AList.lookup_mem_entries hregion')
+  rw [hb1] at heq1
+  have hmem2 : frame.regionId ∈ (List.kerase rid' cfg.heap.entries).keys :=
+    (List.mem_keys_kerase_of_ne hne.symm).mpr (List.mem_keys_of_mem (AList.lookup_mem_entries hregion))
+  rw [hkerase1] at hmem2
+  obtain ⟨b2, m1, m2, hnotmem2, heq2, hkerase2⟩ := List.exists_of_kerase (a := frame.regionId) hmem2
+  have hb2 : b2 = region := by
+    have hmem_l1l2 : (⟨frame.regionId, b2⟩ : Sigma (fun _ : RegionId => Region)) ∈ l1 ++ l2 :=
+      heq2 ▸ List.mem_append_right _ List.mem_cons_self
+    have hmem_cfg : (⟨frame.regionId, b2⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries := by
+      rw [heq1]
+      rcases List.mem_append.mp hmem_l1l2 with hl1 | hl2
+      · exact List.mem_append_left _ hl1
+      · exact List.mem_append_right _ (List.mem_cons_of_mem _ hl2)
+    exact List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys hmem_cfg (AList.lookup_mem_entries hregion)
+  rw [hb2] at heq2
+  rw [← hkerase1] at hkerase2
+  rw [hkerase2]
+  have step1 : cfg.heap.entries.Perm ((⟨rid', region'⟩ : Sigma (fun _ : RegionId => Region)) :: (l1 ++ l2)) := by
+    rw [heq1]; exact List.perm_middle
+  have step2 : (((⟨rid', region'⟩ : Sigma (fun _ : RegionId => Region)) :: (l1 ++ l2)).Perm
+      ((⟨rid', region'⟩ : Sigma (fun _ : RegionId => Region)) :: (⟨frame.regionId, region⟩ :: (m1 ++ m2)))) := by
+    apply List.Perm.cons
+    rw [heq2]; exact List.perm_middle
+  have step3 : (((⟨rid', region'⟩ : Sigma (fun _ : RegionId => Region)) ::
+      ⟨frame.regionId, region⟩ :: (m1 ++ m2)).Perm
+      ((⟨frame.regionId, region⟩ : Sigma (fun _ : RegionId => Region)) :: ⟨rid', region'⟩ :: (m1 ++ m2))) :=
+    List.Perm.swap _ _ _
+  exact step1.trans (step2.trans step3)
+
+-- Nothing is created or destroyed by merging two regions' objMaps into one heap entry -- the merged
+-- heap's `objectIds` is a permutation (reunioned into fewer heap keys, same underlying multiset) of
+-- the original.
+theorem merge_corollary_heap_objectIds_perm {cfg : RuntimeConfig} {frame : Frame} {rid' : RegionId}
+    {region region' : Region} (l1 : L1 cfg) (hregion : cfg.heap.lookup frame.regionId = some region)
+    (hregion' : cfg.heap.lookup rid' = some region') (hne : rid' ≠ frame.regionId) :
+    (Heap.objectIds ((cfg.heap.erase rid').insert frame.regionId { region with
+      objMap := region.objMap ∪ region'.objMap })).Perm cfg.heap.objectIds := by
+  have entries_perm := merge_corollary_heap_entries_perm hregion hregion' hne
+  have hunion : Region.objectIds { region with objMap := region.objMap ∪ region'.objMap } =
+      region.objectIds ++ region'.objectIds := by
+    show (region.objMap ∪ region'.objMap).keys = region.objMap.keys ++ region'.objMap.keys
+    unfold AList.keys
+    rw [merge_corollary_union_append l1 hregion hregion' hne, List.keys_append]
+  unfold Heap.objectIds
+  rw [AList.entries_insert]
+  have hkerase_eq : (cfg.heap.erase rid').entries.kerase frame.regionId =
+      List.kerase frame.regionId (List.kerase rid' cfg.heap.entries) := rfl
+  rw [hkerase_eq, List.map_cons, List.flatten_cons, hunion, List.append_assoc]
+  have step := (entries_perm.map (fun e => e.2.objectIds)).flatten
+  rw [List.map_cons, List.map_cons, List.flatten_cons, List.flatten_cons] at step
+  exact step.symm
+
+-- Same idea, for `Heap.refs`: merging never creates or destroys a reference, only regroups them.
+theorem merge_corollary_heap_refs_perm {cfg : RuntimeConfig} {frame : Frame} {rid' : RegionId}
+    {region region' : Region} (l1 : L1 cfg) (hregion : cfg.heap.lookup frame.regionId = some region)
+    (hregion' : cfg.heap.lookup rid' = some region') (hne : rid' ≠ frame.regionId) :
+    (Heap.refs ((cfg.heap.erase rid').insert frame.regionId { region with
+      objMap := region.objMap ∪ region'.objMap })).Perm cfg.heap.refs := by
+  have entries_perm := merge_corollary_heap_entries_perm hregion hregion' hne
+  have hunion : Region.refs { region with objMap := region.objMap ∪ region'.objMap } =
+      region.refs ++ region'.refs := by
+    unfold Region.refs
+    rw [merge_corollary_union_append l1 hregion hregion' hne, List.map_append,
+      List.bind_eq_flatMap, List.bind_eq_flatMap, List.bind_eq_flatMap, List.flatMap_append]
+  have heap_refs_eq : ∀ h : Heap, h.refs = (h.entries.map (fun e => e.2.refs)).flatten := by
+    intro h
+    unfold Heap.refs
+    rw [List.bind_eq_flatMap, List.flatMap_def, List.map_map]
+    rfl
+  rw [heap_refs_eq, heap_refs_eq]
+  rw [AList.entries_insert]
+  have hkerase_eq : (cfg.heap.erase rid').entries.kerase frame.regionId =
+      List.kerase frame.regionId (List.kerase rid' cfg.heap.entries) := rfl
+  rw [hkerase_eq, List.map_cons, List.flatten_cons, hunion, List.append_assoc]
+  have step := (entries_perm.map (fun e => e.2.refs)).flatten
+  rw [List.map_cons, List.map_cons, List.flatten_cons, List.flatten_cons] at step
+  exact step.symm
+
 theorem merge_L1 : ValidConfig cfg →
   merge x cfg = some cfg' →
   L1 cfg' := by
-  sorry
+  intro vcfg h
+  have l1 := vcfg.l1
+  obtain ⟨frame, rid', region, region', hframe, hxref, hregion, hregion', hclosed, hopen, hcfg'⟩ :=
+    merge_cases h
+  subst hcfg'
+  unfold L1 RuntimeConfig.objectIds
+  dsimp
+  have hne := merge_corollary_rid_ne_regionId hregion hregion' hclosed hopen
+  have heap_perm := merge_corollary_heap_objectIds_perm l1 hregion hregion' hne
+  have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame] :=
+    (List.dropLast_append_getLast? frame hframe).symm
+  have stack_objectIds_eq : Stack.objectIds (cfg.stack.dropLast ++
+      [{ frame with varMap := frame.varMap.insert x (Reference.OId region'.bridgeObjectId) }]) =
+      Stack.objectIds cfg.stack := by
+    conv_rhs => rw [stack_eq]
+    unfold Stack.objectIds
+    rw [List.map_append, List.map_append]
+    rfl
+  rw [stack_objectIds_eq]
+  have perm_full : (Stack.objectIds cfg.stack ++ cfg.heap.objectIds).Perm
+      (Stack.objectIds cfg.stack ++ Heap.objectIds ((cfg.heap.erase rid').insert frame.regionId
+        { region with objMap := region.objMap ∪ region'.objMap })) :=
+    List.Perm.append_left (Stack.objectIds cfg.stack) heap_perm.symm
+  exact perm_full.nodup l1
 
 theorem merge_L2 : ValidConfig cfg →
   merge x cfg = some cfg' →
