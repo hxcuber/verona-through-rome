@@ -80,6 +80,17 @@ def Reference.objAt? (cfg : RuntimeConfig) : Reference → Option Object
         (fun frame => frame.objMap.lookup oid)
     | none => none
 
+-- `a` steps to `b` when `b` is a field value of the object `a` currently resolves to
+def RefStep (cfg : RuntimeConfig) (a b : Reference) : Prop :=
+  ∃ obj, a.objAt? cfg = some obj ∧ obj.refs.contains b
+
+theorem RefStep.exists_oid_left {cfg : RuntimeConfig} {a b : Reference}
+    (h : RefStep cfg a b) : ∃ oid, a = Reference.OId oid := by
+  obtain ⟨obj, hobj, _⟩ := h
+  cases a with
+  | RId rid => simp [Reference.objAt?] at hobj
+  | OId oid => exact ⟨oid, rfl⟩
+
 -- can be simplified: the `if frame.bridgeVar == var then ... else none` re-checks a fact
 -- already guaranteed by the `findRev?` predicate above (if `varMap.lookup var` fails, the
 -- disjunction forces `bridgeVar == var`), and `Reference.OId <$> region.bridgeObjectId` can
