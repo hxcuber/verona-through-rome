@@ -292,7 +292,85 @@ theorem swap_L1 : ValidConfig cfg →
 theorem swap_L2 : ValidConfig cfg →
   swap x yf cfg = some cfg' →
   L2 cfg' := by
-  sorry
+  intro vcfg h
+  have l2 := vcfg.l2
+  obtain ⟨frame, hframe, yRef, hyr, yRefLoc, hyrl, yfRef, hyf, yfRefLoc, hyfl, hcase⟩ := swap_cases h
+  unfold L2
+  rcases hcase with
+    ⟨yoid, xRef, obj, hxb, hyoid, hyrloc, hxr, hobj, hcfg'⟩ |
+    ⟨yoid, rid, region, obj, xoid, xrid, hxb, hyoid, hyrloc, hrid, hregion, hobj, hxr, hxrl, hxrid, hstatus, hcfg'⟩ |
+    ⟨yoid, rid, region, obj, xrid, hxb, hyoid, hyrloc, hrid, hregion, hobj, hxr, hstatus, hcfg'⟩ |
+    ⟨yoid, yrid, yfoid, yfrid, region, obj, hxb, hyoid, hyrloc, hyfoid, hyfrloc, hyrid, hyfrid, hregion, hobj, hcfg'⟩
+  · subst hcfg'
+    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    have frame_mem : frame.toFrame ∈ cfg.stack :=
+      stack_eq ▸ List.mem_append_right _ (List.mem_singleton_self _)
+    dsimp
+    intro frame'' hmem
+    rw [List.mem_append, List.mem_singleton] at hmem
+    cases hmem with
+    | inl hdrop => exact l2 frame'' (List.mem_of_mem_dropLast hdrop)
+    | inr heqframe => subst heqframe; exact l2 frame.toFrame frame_mem
+  · subst hcfg'
+    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    have frame_mem : frame.toFrame ∈ cfg.stack :=
+      stack_eq ▸ List.mem_append_right _ (List.mem_singleton_self _)
+    dsimp
+    intro frame'' hmem
+    rw [List.mem_append, List.mem_singleton] at hmem
+    obtain ⟨region0, hlookup0, hopen0⟩ :
+        ∃ region0, cfg.heap.lookup frame''.regionId = some region0 ∧ region0.status = Status.Open := by
+      cases hmem with
+      | inl hdrop => exact l2 frame'' (List.mem_of_mem_dropLast hdrop)
+      | inr heqframe => subst heqframe; exact l2 frame.toFrame frame_mem
+    by_cases heq : frame''.regionId = rid
+    · rw [heq] at hlookup0
+      rw [hregion, Option.some_inj] at hlookup0
+      refine ⟨{ region with
+          objMap := AList.insert yoid (AList.insert yf.field (Reference.OId xoid) obj) region.objMap }, ?_, ?_⟩
+      · rw [heq, AList.lookup_insert]
+      · dsimp; exact hstatus
+    · refine ⟨region0, ?_, hopen0⟩
+      rw [AList.lookup_insert_ne heq]
+      exact hlookup0
+  · subst hcfg'
+    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    have frame_mem : frame.toFrame ∈ cfg.stack :=
+      stack_eq ▸ List.mem_append_right _ (List.mem_singleton_self _)
+    dsimp
+    intro frame'' hmem
+    rw [List.mem_append, List.mem_singleton] at hmem
+    obtain ⟨region0, hlookup0, hopen0⟩ :
+        ∃ region0, cfg.heap.lookup frame''.regionId = some region0 ∧ region0.status = Status.Open := by
+      cases hmem with
+      | inl hdrop => exact l2 frame'' (List.mem_of_mem_dropLast hdrop)
+      | inr heqframe => subst heqframe; exact l2 frame.toFrame frame_mem
+    by_cases heq : frame''.regionId = rid
+    · rw [heq] at hlookup0
+      rw [hregion, Option.some_inj] at hlookup0
+      refine ⟨{ region with
+          objMap := AList.insert yoid (AList.insert yf.field (Reference.RId xrid) obj) region.objMap }, ?_, ?_⟩
+      · rw [heq, AList.lookup_insert]
+      · dsimp; exact hstatus
+    · refine ⟨region0, ?_, hopen0⟩
+      rw [AList.lookup_insert_ne heq]
+      exact hlookup0
+  · subst hcfg'
+    dsimp
+    intro frame'' hmem
+    obtain ⟨region0, hlookup0, hopen0⟩ := l2 frame'' hmem
+    by_cases heq : frame''.regionId = yrid
+    · rw [heq] at hlookup0
+      rw [hregion, Option.some_inj] at hlookup0
+      refine ⟨{ region with
+          bridgeObjectId := yfoid,
+          objMap := AList.insert yoid (AList.insert yf.field (Reference.OId region.bridgeObjectId) obj) region.objMap
+        }, ?_, ?_⟩
+      · rw [heq, AList.lookup_insert]
+      · dsimp; rw [hlookup0]; exact hopen0
+    · refine ⟨region0, ?_, hopen0⟩
+      rw [AList.lookup_insert_ne heq]
+      exact hlookup0
 
 theorem swap_H1 : ValidConfig cfg →
   swap x yf cfg = some cfg' →
