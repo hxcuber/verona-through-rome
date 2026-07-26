@@ -648,10 +648,186 @@ theorem merge_S1 : ValidConfig cfg →
   rw [regionId_eq]
   exact s1
 
+-- Sharper than `merge_corollary_stack_h1_none`: not just whether the stack side finds a match, but
+-- (if it does) at exactly which *index* -- needed for S2 (whose conclusion is about that index). Since
+-- the last frame's predicate value agrees between `frame`/`newFrame` (only varMap differs), `find?`
+-- either short-circuits on that shared frame (same index either way) or falls through identically to
+-- the common `dropIdx` tail.
+theorem merge_corollary_stack_h1_index_eq {stack : Stack} {frame newFrame : Frame}
+    (hframe : stack.getLast? = some frame) (hobjeq : newFrame.objMap = frame.objMap) (oid : ObjectId) :
+    (((stack.dropLast ++ [newFrame]).mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex))).findRev?
+      (fun f => f.objMap.keys.contains oid)).map FrameWithIndex.index =
+    ((stack.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex))).findRev?
+      (fun f => f.objMap.keys.contains oid)).map FrameWithIndex.index := by
+  have stack_eq : stack = stack.dropLast ++ [frame] := (List.dropLast_append_getLast? frame hframe).symm
+  set dropIdx := (stack.dropLast.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)))
+    with dropIdx_def
+  have cfg_eq : stack.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) =
+      dropIdx ++ [({ frame with index := stack.dropLast.length } : FrameWithIndex)] := by
+    conv_lhs => rw [stack_eq]
+    rw [List.mapIdx_append, List.mapIdx_cons, List.mapIdx_nil, Nat.zero_add]
+  have cfg'_eq : (stack.dropLast ++ [newFrame]).mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) =
+      dropIdx ++ [({ newFrame with index := stack.dropLast.length } : FrameWithIndex)] := by
+    rw [List.mapIdx_append, List.mapIdx_cons, List.mapIdx_nil, Nat.zero_add]
+  rw [List.findRev?_eq_find?_reverse, List.findRev?_eq_find?_reverse, cfg_eq, cfg'_eq,
+    List.reverse_append, List.reverse_append, List.reverse_singleton, List.reverse_singleton,
+    List.singleton_append, List.singleton_append, List.find?_cons, List.find?_cons]
+  by_cases hpred : ({ frame with index := stack.dropLast.length } : FrameWithIndex).objMap.keys.contains oid = true
+  · have hpred' : ({ newFrame with index := stack.dropLast.length } : FrameWithIndex).objMap.keys.contains oid
+        = true := by rw [← hobjeq] at hpred; exact hpred
+    rw [hpred, hpred']; rfl
+  · rw [Bool.not_eq_true] at hpred
+    have hpred' : ({ newFrame with index := stack.dropLast.length } : FrameWithIndex).objMap.keys.contains oid
+        = false := by rw [← hobjeq] at hpred; exact hpred
+    rw [hpred, hpred']
+
+-- Generic fact: the heap-side of `Reference.loc?`'s search fails exactly when the oid isn't
+-- allocated anywhere in the heap at all (no `L1`/uniqueness needed -- `find?` over a `contains`
+-- predicate is `none` iff no entry's `objMap.keys` contains `oid`, which is exactly `Heap.objectIds`
+-- membership unfolded).
+theorem merge_corollary_heap_find_none_iff_notin {heap : Heap} {oid : ObjectId} :
+    heap.entries.find? (fun e => e.2.objMap.keys.contains oid) = none ↔ oid ∉ heap.objectIds := by
+  rw [List.find?_eq_none]
+  unfold Heap.objectIds
+  rw [List.mem_flatten]
+  constructor
+  · intro hall ⟨l, hlmem, holmem⟩
+    obtain ⟨e, hemem, heq⟩ := List.mem_map.mp hlmem
+    have hfalse : e.2.objMap.keys.contains oid = false := (Bool.not_eq_true _).mp (hall e hemem)
+    rw [← heq] at holmem
+    have htrue : e.2.objMap.keys.contains oid = true := List.contains_iff_mem.mpr holmem
+    rw [hfalse] at htrue
+    exact absurd htrue (by decide)
+  · intro hnot e hemem hcontains
+    exact hnot ⟨e.2.objectIds, List.mem_map_of_mem hemem, List.contains_iff_mem.mp hcontains⟩
+
+-- Extracts the full witness from a known `Stk` resolution: the stack side must have hit some frame
+-- (at exactly that index), and the heap side must have missed entirely.
+theorem merge_corollary_loc_stk_elim {cfg : RuntimeConfig} {oid : ObjectId} {fid : Index}
+    (hloc : (Reference.OId oid).loc? cfg = some (Location.Stk fid)) :
+    ∃ frameX, cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid) = some frameX ∧
+      frameX.index = fid ∧ cfg.heap.entries.find? (fun e => e.2.objMap.keys.contains oid) = none := by
+  unfold Reference.loc? at hloc
+  dsimp at hloc
+  cases h1 : cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid) with
+  | none =>
+    rw [h1] at hloc
+    cases h2 : cfg.heap.entries.find? (fun e => e.2.objMap.keys.contains oid) with
+    | none => rw [h2] at hloc; dsimp at hloc; contradiction
+    | some _ =>
+      rw [h2] at hloc
+      dsimp at hloc
+      injection hloc with hloc
+      injection hloc
+  | some frameX =>
+    rw [h1] at hloc
+    cases h2 : cfg.heap.entries.find? (fun e => e.2.objMap.keys.contains oid) with
+    | none =>
+      rw [h2] at hloc
+      dsimp at hloc
+      rw [Option.some_inj, Location.Stk.injEq] at hloc
+      exact ⟨frameX, rfl, hloc, rfl⟩
+    | some _ => rw [h2] at hloc; dsimp at hloc; contradiction
+
+-- Both `cfg.stackWithIndex` and `cfg'.stackWithIndex` decompose into the *same* `dropIdx` prefix
+-- plus a differing singleton last element -- shared groundwork for S2/S3's membership casework.
+theorem merge_corollary_stackWithIndex_split {stack : Stack} {frame newFrame : Frame}
+    (hframe : stack.getLast? = some frame) :
+    ∃ dropIdx : List FrameWithIndex,
+      stack.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) =
+        dropIdx ++ [({ frame with index := stack.dropLast.length } : FrameWithIndex)] ∧
+      (stack.dropLast ++ [newFrame]).mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) =
+        dropIdx ++ [({ newFrame with index := stack.dropLast.length } : FrameWithIndex)] := by
+  have stack_eq : stack = stack.dropLast ++ [frame] := (List.dropLast_append_getLast? frame hframe).symm
+  refine ⟨stack.dropLast.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)), ?_, ?_⟩
+  · conv_lhs => rw [stack_eq]
+    rw [List.mapIdx_append, List.mapIdx_cons, List.mapIdx_nil, Nat.zero_add]
+  · rw [List.mapIdx_append, List.mapIdx_cons, List.mapIdx_nil, Nat.zero_add]
+
 theorem merge_S2 : ValidConfig cfg →
   merge x cfg = some cfg' →
   S2 cfg' := by
-  sorry
+  intro vcfg h
+  have l1 := vcfg.l1
+  have h1v := vcfg.h1
+  have s2 := vcfg.s2
+  obtain ⟨frame, rid', region, region', hframe, hxref, hregion, hregion', hclosed, hopen, hcfg'⟩ :=
+    merge_cases h
+  subst hcfg'
+  have hne := merge_corollary_rid_ne_regionId hregion hregion' hclosed hopen
+  have hobjeq : ({ frame with varMap := frame.varMap.insert x (Reference.OId region'.bridgeObjectId) } :
+      Frame).objMap = frame.objMap := rfl
+  have heap_ids_perm' : (Heap.objectIds ((cfg.heap.erase rid').insert frame.regionId { region with
+      objMap := AList.union region.objMap region'.objMap })).Perm cfg.heap.objectIds :=
+    merge_corollary_heap_objectIds_perm l1 hregion hregion' hne
+  obtain ⟨dropIdx, cfg_split, cfg'_split⟩ :=
+    merge_corollary_stackWithIndex_split (frame := frame)
+      (newFrame := { frame with varMap := frame.varMap.insert x (Reference.OId region'.bridgeObjectId) }) hframe
+  have hbridge_mem : region'.bridgeObjectId ∈ Heap.objectIds ((cfg.heap.erase rid').insert frame.regionId
+      { region with objMap := AList.union region.objMap region'.objMap }) := by
+    have hbmem : region'.bridgeObjectId ∈ region'.objMap :=
+      h1v region' (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hregion'))
+    rw [AList.mem_keys] at hbmem
+    have hmerged : region'.bridgeObjectId ∈ (region.objMap ∪ region'.objMap).keys :=
+      AList.mem_union.mpr (Or.inr hbmem)
+    unfold Heap.objectIds
+    rw [AList.entries_insert, List.map_cons]
+    exact List.mem_flatten.mpr ⟨(region.objMap ∪ region'.objMap).keys, List.mem_cons_self, hmerged⟩
+  unfold S2
+  intro frame' hframe' ref href fid' oid hrefeq hlocEq
+  subst hrefeq
+  obtain ⟨frameX, h1cfg', hindeq, h2cfg'⟩ := merge_corollary_loc_stk_elim hlocEq
+  unfold RuntimeConfig.stackWithIndex at h1cfg' hframe'
+  have h2cfg'_notin : oid ∉ Heap.objectIds ((cfg.heap.erase rid').insert frame.regionId { region with
+      objMap := AList.union region.objMap region'.objMap }) :=
+    merge_corollary_heap_find_none_iff_notin.mp h2cfg'
+  have h2cfg : cfg.heap.entries.find? (fun e => e.2.objMap.keys.contains oid) = none := by
+    rw [merge_corollary_heap_find_none_iff_notin]
+    intro hmem
+    exact h2cfg'_notin (heap_ids_perm'.symm.mem_iff.mp hmem)
+  have hindex_eq := merge_corollary_stack_h1_index_eq hframe hobjeq oid
+  rw [h1cfg', Option.map_some, hindeq] at hindex_eq
+  cases hcaseY : cfg.stack.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex))
+      |>.findRev? (fun f => f.objMap.keys.contains oid) with
+  | none => rw [hcaseY] at hindex_eq; contradiction
+  | some frameY =>
+    rw [hcaseY] at hindex_eq
+    dsimp at hindex_eq
+    have hlocEq_cfg : (Reference.OId oid).loc? cfg = some (Location.Stk fid') := by
+      unfold Reference.loc?
+      unfold RuntimeConfig.stackWithIndex
+      dsimp
+      rw [hcaseY, h2cfg]
+      dsimp
+      rw [Option.some_inj] at hindex_eq
+      rw [← hindex_eq]
+    rw [cfg'_split, List.mem_append] at hframe'
+    rcases hframe' with hframe' | hframe'
+    · have hframe'_cfg : frame' ∈ cfg.stack.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) := by
+        rw [cfg_split, List.mem_append]
+        exact Or.inl hframe'
+      exact s2 frame' hframe'_cfg (Reference.OId oid) href fid' oid rfl hlocEq_cfg
+    · rw [List.mem_singleton] at hframe'
+      subst hframe'
+      have hframe_cfg : ({ frame with index := cfg.stack.dropLast.length } : FrameWithIndex) ∈
+          cfg.stack.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) := by
+        rw [cfg_split, List.mem_append]
+        exact Or.inr (List.mem_singleton_self _)
+      unfold Frame.refs at href
+      dsimp at href
+      rw [List.mem_append] at href
+      rcases href with href | href
+      · exact s2 _ hframe_cfg (Reference.OId oid) (by unfold Frame.refs; exact List.mem_append_left _ href)
+          fid' oid rfl hlocEq_cfg
+      · rcases List.mem_cons.mp href with heq | href
+        · exfalso
+          rw [Reference.OId.injEq] at heq
+          exact h2cfg'_notin (heq ▸ hbridge_mem)
+        · have hsub : List.Sublist (List.kerase x frame.varMap.entries) frame.varMap.entries :=
+            List.kerase_sublist x frame.varMap.entries
+          exact s2 _ hframe_cfg (Reference.OId oid)
+            (by unfold Frame.refs; exact List.mem_append_right _ ((hsub.map (·.2)).mem href))
+            fid' oid rfl hlocEq_cfg
 
 theorem merge_S3 : ValidConfig cfg →
   merge x cfg = some cfg' →
