@@ -224,6 +224,66 @@ theorem swap_cases (h : swap x yf cfg = some cfg') :
                               hyridEq, hyfridEq, hregion, hobj, h.symm⟩
                       · rw [if_neg hcond2] at h; contradiction
 
+-- Relates the `stackWithIndex.getLast?` frame used by `swap_cases` back to `cfg.stack`'s own
+-- decomposition, mirroring fieldAsgn_corollary_stack_eq/VarAsgn.lean's stack_eq construction.
+theorem swap_corollary_stack_eq {cfg : RuntimeConfig} {frame : FrameWithIndex}
+    (hframe : cfg.stackWithIndex.getLast? = some frame) :
+    cfg.stack = cfg.stack.dropLast ++ [frame.toFrame] ∧ frame.index = cfg.stack.dropLast.length := by
+  cases hlast : cfg.stack.getLast? with
+  | none =>
+    exfalso
+    have hnil : cfg.stack = [] := List.getLast?_eq_none_iff.mp hlast
+    unfold RuntimeConfig.stackWithIndex at hframe
+    rw [hnil] at hframe
+    simp at hframe
+  | some lastF =>
+    have stack_eq : cfg.stack = cfg.stack.dropLast ++ [lastF] :=
+      (List.dropLast_append_getLast? lastF hlast).symm
+    have stackWithIndex_eq :
+        cfg.stackWithIndex =
+          cfg.stack.dropLast.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) ++
+            [({ lastF with index := cfg.stack.dropLast.length } : FrameWithIndex)] := by
+      unfold RuntimeConfig.stackWithIndex
+      conv_lhs => rw [stack_eq]
+      rw [List.mapIdx_concat]
+    rw [stackWithIndex_eq, List.getLast?_concat, Option.some_inj] at hframe
+    subst hframe
+    exact ⟨stack_eq, rfl⟩
+
+theorem swap_S1 : ValidConfig cfg →
+  swap x yf cfg = some cfg' →
+  S1 cfg' := by
+  intro vcfg h
+  have s1 := vcfg.s1
+  obtain ⟨frame, hframe, yRef, hyr, yRefLoc, hyrl, yfRef, hyf, yfRefLoc, hyfl, hcase⟩ := swap_cases h
+  unfold S1
+  obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+  have s1' : (cfg.stack.dropLast.map (fun frame => frame.regionId) ++ [frame.regionId]).Nodup := by
+    have := s1
+    unfold S1 at this
+    rw [stack_eq, List.map_append] at this
+    exact this
+  rcases hcase with
+    ⟨yoid, xRef, obj, hxb, hyoid, hyrloc, hxr, hobj, hcfg'⟩ |
+    ⟨yoid, rid, region, obj, xoid, xrid, hxb, hyoid, hyrloc, hrid, hregion, hobj, hxr, hxrl, hxrid, hstatus, hcfg'⟩ |
+    ⟨yoid, rid, region, obj, xrid, hxb, hyoid, hyrloc, hrid, hregion, hobj, hxr, hstatus, hcfg'⟩ |
+    ⟨yoid, yrid, yfoid, yfrid, region, obj, hxb, hyoid, hyrloc, hyfoid, hyfrloc, hyrid, hyfrid, hregion, hobj, hcfg'⟩
+  · subst hcfg'
+    dsimp
+    rw [List.map_append]
+    exact s1'
+  · subst hcfg'
+    dsimp
+    rw [List.map_append]
+    exact s1'
+  · subst hcfg'
+    dsimp
+    rw [List.map_append]
+    exact s1'
+  · subst hcfg'
+    dsimp
+    exact s1
+
 theorem swap_L1 : ValidConfig cfg →
   swap x yf cfg = some cfg' →
   L1 cfg' := by
@@ -247,11 +307,6 @@ theorem swap_H2 : ValidConfig cfg →
 theorem swap_H3 : ValidConfig cfg →
   swap x yf cfg = some cfg' →
   H3 cfg' := by
-  sorry
-
-theorem swap_S1 : ValidConfig cfg →
-  swap x yf cfg = some cfg' →
-  S1 cfg' := by
   sorry
 
 theorem swap_S2 : ValidConfig cfg →
