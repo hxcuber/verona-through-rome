@@ -44,11 +44,26 @@ theorem RegionReachable_stays_in_region : ValidConfig cfg ->
   intro hvalid h
   exact RegionReachable_stays_in_region_aux cfg hvalid rid _ h oid rfl
 
-theorem RegionReachable_implies_FrameReachable : ValidConfig cfg ->
+-- Generalized over `rid` (rather than fixing `rid := frame.regionId` up front), for the same
+-- reason as RegionReachable_stays_in_region_aux: `frame.regionId` is a projection, not a bare
+-- variable, so `induction h` needs a bare-variable index to generalize over.
+private theorem RegionReachable_implies_FrameReachable_aux (cfg : RuntimeConfig) (rid : RegionId)
+    (ref : Reference) (h : RegionReachable cfg rid ref) :
+    ∀ frame, frame ∈ cfg.stackWithIndex → frame.regionId = rid → FrameReachable cfg frame.index ref := by
+  induction h with
+  | bridge hlookup hbridge =>
+    intro frame hframe hrid
+    subst hrid
+    exact FrameReachable.bridge hframe hlookup hbridge
+  | step hobj hcontains hrr ih =>
+    intro frame hframe hrid
+    exact FrameReachable.step hobj hcontains (ih frame hframe hrid)
+
+theorem RegionReachable_implies_FrameReachable :
   frame ∈ cfg.stackWithIndex ->
-  cfg.heap.lookup frame.regionId = some region ->
   RegionReachable cfg frame.regionId ref ->
   FrameReachable cfg frame.index ref := by
   -- each case of RegionReachable matches to a case of FrameReachable directly:
   -- bridge -> bridge, step -> step (the objAt?/contains premises carry over unchanged)
-  sorry
+  intro hframe h
+  exact RegionReachable_implies_FrameReachable_aux cfg frame.regionId ref h frame hframe rfl
