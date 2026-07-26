@@ -366,6 +366,171 @@ theorem merge_H2 : ValidConfig cfg →
   have h2rid := h2 rid
   omega
 
+-- The "everything else" tail from `merge_corollary_heap_entries_perm` never contains `frame.regionId`
+-- or `rid'` as a key: both keys were explicitly erased to build it.
+theorem merge_corollary_rest_notMem {cfg : RuntimeConfig} {frame : Frame} {rid' : RegionId} :
+    frame.regionId ∉ (List.kerase frame.regionId (List.kerase rid' cfg.heap.entries)).keys ∧
+    rid' ∉ (List.kerase frame.regionId (List.kerase rid' cfg.heap.entries)).keys := by
+  refine ⟨List.notMem_keys_kerase frame.regionId (cfg.heap.nodupKeys.kerase rid'), ?_⟩
+  have h1 : rid' ∉ (List.kerase rid' cfg.heap.entries).keys := List.notMem_keys_kerase rid' cfg.heap.nodupKeys
+  exact fun hmem => h1 (List.kerase_keys_subset frame.regionId _ hmem)
+
+-- The common "rest" tail from `merge_corollary_heap_entries_perm` is (as membership) a subset of
+-- `cfg.heap.entries`, since it appears verbatim inside the `Perm`'s right-hand side.
+theorem merge_corollary_entries_perm_mem {cfg : RuntimeConfig} {frame : Frame} {rid' : RegionId}
+    {region region' : Region} (hregion : cfg.heap.lookup frame.regionId = some region)
+    (hregion' : cfg.heap.lookup rid' = some region') (hne : rid' ≠ frame.regionId)
+    {e : Sigma (fun _ : RegionId => Region)}
+    (hmem : e ∈ List.kerase frame.regionId (List.kerase rid' cfg.heap.entries)) :
+    e ∈ cfg.heap.entries :=
+  (merge_corollary_heap_entries_perm hregion hregion' hne).mem_iff.mpr
+    (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ hmem))
+
+-- At most one entry of `cfg'.heap` contains a given `oid` in its `objMap`. Every `cfg'.heap` entry is
+-- either the merged head (`⟨frame.regionId, mergedRegion⟩`) or comes from the common "rest" tail
+-- (which embeds into `cfg.heap.entries` via `merge_corollary_heap_entries_perm`, so `L1`'s
+-- `merge_corollary_region_unique` on `cfg` settles clashes among/against it).
+theorem merge_corollary_heap'_unique {cfg : RuntimeConfig} {frame : Frame} {rid' : RegionId}
+    {region region' : Region} (l1 : L1 cfg) (hregion : cfg.heap.lookup frame.regionId = some region)
+    (hregion' : cfg.heap.lookup rid' = some region') (hne : rid' ≠ frame.regionId)
+    {oid : ObjectId} {rid1 rid2 : RegionId} {region1 region2 : Region} :
+    (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ∈
+      ((cfg.heap.erase rid').insert frame.regionId { region with objMap := region.objMap ∪ region'.objMap }).entries →
+    oid ∈ region1.objMap.keys →
+    (⟨rid2, region2⟩ : Sigma (fun _ : RegionId => Region)) ∈
+      ((cfg.heap.erase rid').insert frame.regionId { region with objMap := region.objMap ∪ region'.objMap }).entries →
+    oid ∈ region2.objMap.keys →
+    rid1 = rid2 := by
+  intro hmem1 hoid1 hmem2 hoid2
+  rw [AList.entries_insert] at hmem1 hmem2
+  have hkerase_eq : (cfg.heap.erase rid').entries.kerase frame.regionId =
+      List.kerase frame.regionId (List.kerase rid' cfg.heap.entries) := rfl
+  rw [hkerase_eq, List.mem_cons] at hmem1 hmem2
+  have hrest_notmem := @merge_corollary_rest_notMem cfg frame rid'
+  -- Membership in the merged region reduces to membership in `region` or `region'`.
+  have merged_cases : ∀ {r : Region} {o : ObjectId}, r = { region with objMap := region.objMap ∪ region'.objMap } →
+      o ∈ r.objMap.keys → o ∈ region.objMap.keys ∨ o ∈ region'.objMap.keys := by
+    intro r o hr ho
+    subst hr
+    exact AList.mem_union.mp ho
+  rcases hmem1 with heq1 | hmem1 <;> rcases hmem2 with heq2 | hmem2
+  · rw [Sigma.mk.injEq] at heq1 heq2
+    obtain ⟨hrid1, hr1⟩ := heq1
+    obtain ⟨hrid2, hr2⟩ := heq2
+    rw [hrid1, hrid2]
+  · exfalso
+    rw [Sigma.mk.injEq] at heq1
+    obtain ⟨hrid1, hr1⟩ := heq1
+    rw [eq_of_heq hr1] at hoid1
+    rcases merged_cases rfl hoid1 with hcase | hcase
+    · exact absurd (merge_corollary_region_unique l1 (AList.lookup_mem_entries hregion) hcase
+        (merge_corollary_entries_perm_mem hregion hregion' hne hmem2) hoid2) (by
+          intro heq; apply hrest_notmem.1; subst heq
+          exact List.mem_map_of_mem (f := Sigma.fst) hmem2)
+    · exact absurd (merge_corollary_region_unique l1 (AList.lookup_mem_entries hregion') hcase
+        (merge_corollary_entries_perm_mem hregion hregion' hne hmem2) hoid2) (by
+          intro heq; apply hrest_notmem.2; subst heq
+          exact List.mem_map_of_mem (f := Sigma.fst) hmem2)
+  · exfalso
+    rw [Sigma.mk.injEq] at heq2
+    obtain ⟨hrid2, hr2⟩ := heq2
+    rw [eq_of_heq hr2] at hoid2
+    rcases merged_cases rfl hoid2 with hcase | hcase
+    · exact absurd (merge_corollary_region_unique l1 (merge_corollary_entries_perm_mem hregion hregion' hne hmem1) hoid1
+        (AList.lookup_mem_entries hregion) hcase) (by
+          intro heq; apply hrest_notmem.1; subst heq
+          exact List.mem_map_of_mem (f := Sigma.fst) hmem1)
+    · exact absurd (merge_corollary_region_unique l1 (merge_corollary_entries_perm_mem hregion hregion' hne hmem1) hoid1
+        (AList.lookup_mem_entries hregion') hcase) (by
+          intro heq; apply hrest_notmem.2; subst heq
+          exact List.mem_map_of_mem (f := Sigma.fst) hmem1)
+  · exact merge_corollary_region_unique l1 (merge_corollary_entries_perm_mem hregion hregion' hne hmem1) hoid1
+      (merge_corollary_entries_perm_mem hregion hregion' hne hmem2) hoid2
+
+-- `Reference.loc?`'s stack-side search only ever reads a frame's `objMap`, never its `varMap` -- so
+-- replacing the last frame's `varMap` (merge's only stack-side change) never turns a "not found
+-- anywhere on the stack" fact for `cfg` into a "found" one for `cfg'`, for any oid. (Only the `none`
+-- direction is needed anywhere in this file, since every case that needs the stack side already has a
+-- `loc? cfg = some (Rgn _)` fact in hand, from which "stack side is none" falls out directly.)
+theorem merge_corollary_stack_h1_none {stack : Stack} {frame newFrame : Frame}
+    (hframe : stack.getLast? = some frame) (hobjeq : newFrame.objMap = frame.objMap)
+    {oid : ObjectId}
+    (hnone : (stack.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex))).findRev?
+      (fun f => f.objMap.keys.contains oid) = none) :
+    ((stack.dropLast ++ [newFrame]).mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex))).findRev?
+      (fun f => f.objMap.keys.contains oid) = none := by
+  have stack_eq : stack = stack.dropLast ++ [frame] :=
+    (List.dropLast_append_getLast? frame hframe).symm
+  set dropIdx := (stack.dropLast.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)))
+    with dropIdx_def
+  have cfg_eq : stack.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) =
+      dropIdx ++ [({ frame with index := stack.dropLast.length } : FrameWithIndex)] := by
+    conv_lhs => rw [stack_eq]
+    rw [List.mapIdx_append, List.mapIdx_cons, List.mapIdx_nil, Nat.zero_add]
+  have cfg'_eq : (stack.dropLast ++ [newFrame]).mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) =
+      dropIdx ++ [({ newFrame with index := stack.dropLast.length } : FrameWithIndex)] := by
+    rw [List.mapIdx_append, List.mapIdx_cons, List.mapIdx_nil, Nat.zero_add]
+  rw [List.findRev?_eq_find?_reverse, List.find?_eq_none]
+  rw [List.findRev?_eq_find?_reverse, List.find?_eq_none, cfg_eq] at hnone
+  rw [cfg'_eq]
+  intro fwi hmem
+  rw [List.mem_reverse, List.mem_append] at hmem
+  rcases hmem with hmem | hmem
+  · exact hnone fwi (List.mem_reverse.mpr (List.mem_append_left _ hmem))
+  · rw [List.mem_singleton] at hmem
+    subst hmem
+    have hpred : ({ newFrame with index := stack.dropLast.length } : FrameWithIndex).objMap.keys.contains oid =
+        ({ frame with index := stack.dropLast.length } : FrameWithIndex).objMap.keys.contains oid := by
+      rw [hobjeq]
+    rw [hpred]
+    exact hnone _ (List.mem_reverse.mpr (List.mem_append_right _ (List.mem_singleton_self _)))
+
+-- The single fact H3/S2/S3 all lean on: if `oid` lives in `rid0`'s objMap in `cfg'.heap` (whether
+-- `rid0` is the merge target, holding `region`'s or `region'`'s objects, or an untouched "rest"
+-- region), it resolves there in `cfg'` too -- the stack side never contributes (previous corollary),
+-- so it reduces entirely to the heap-side uniqueness already established.
+theorem merge_corollary_loc_of_mem {cfg : RuntimeConfig} {frame : Frame} {rid' : RegionId}
+    {region region' : Region} (l1 : L1 cfg) (hregion : cfg.heap.lookup frame.regionId = some region)
+    (hregion' : cfg.heap.lookup rid' = some region') (hne : rid' ≠ frame.regionId)
+    {oid : ObjectId} {newFrame : Frame} (hobjeq : newFrame.objMap = frame.objMap)
+    (hframe : cfg.stack.getLast? = some frame)
+    (hstack_none : cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid) = none)
+    {rid0 : RegionId} {region0 : Region}
+    (hlookup0 : ((cfg.heap.erase rid').insert frame.regionId { region with
+      objMap := region.objMap ∪ region'.objMap }).lookup rid0 = some region0)
+    (hoid0 : oid ∈ region0.objMap.keys) :
+    (Reference.OId oid).loc? { cfg with
+      stack := cfg.stack.dropLast ++ [newFrame],
+      heap := (cfg.heap.erase rid').insert frame.regionId { region with objMap := region.objMap ∪ region'.objMap } } =
+    some (Location.Rgn rid0) := by
+  unfold RuntimeConfig.stackWithIndex at hstack_none
+  unfold Reference.loc?
+  dsimp
+  unfold RuntimeConfig.stackWithIndex
+  dsimp
+  rw [merge_corollary_stack_h1_none hframe hobjeq hstack_none]
+  have hfind : ((cfg.heap.erase rid').insert frame.regionId { region with
+      objMap := region.objMap ∪ region'.objMap }).entries.find? (fun e => e.2.objMap.keys.contains oid) =
+      some ⟨rid0, region0⟩ := by
+    apply List.find?_eq_some_of_unique
+    · exact AList.lookup_mem_entries hlookup0
+    · exact List.contains_iff_mem.mpr hoid0
+    · intro e hmem hpred
+      obtain ⟨rid2, region2⟩ := e
+      have hoid2 : oid ∈ region2.objMap.keys := List.contains_iff_mem.mp hpred
+      have hrideq : rid2 = rid0 := merge_corollary_heap'_unique l1 hregion hregion' hne hmem hoid2
+        (AList.lookup_mem_entries hlookup0) hoid0
+      subst hrideq
+      have hregioneq : region2 = region0 := List.NodupKeys.eq_of_mk_mem
+        (β := fun _ : RegionId => Region)
+        ((cfg.heap.erase rid').insert frame.regionId { region with
+          objMap := region.objMap ∪ region'.objMap }).nodupKeys
+        hmem (AList.lookup_mem_entries hlookup0)
+      subst hregioneq
+      rfl
+  rw [AList.entries_insert] at hfind
+  rw [hfind]
+
 theorem merge_H3 : ValidConfig cfg →
   merge x cfg = some cfg' →
   H3 cfg' := by
