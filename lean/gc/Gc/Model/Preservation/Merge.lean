@@ -531,10 +531,101 @@ theorem merge_corollary_loc_of_mem {cfg : RuntimeConfig} {frame : Frame} {rid' :
   rw [AList.entries_insert] at hfind
   rw [hfind]
 
+-- The merged region's own refs are exactly the union of `region`'s and `region'`'s (an exact
+-- equality, not just a `Perm`, via the same disjoint-keys append fact as `merge_corollary_union_append`).
+theorem merge_corollary_mergedRegion_refs {cfg : RuntimeConfig} {frame : Frame} {rid' : RegionId}
+    {region region' : Region} (l1 : L1 cfg) (hregion : cfg.heap.lookup frame.regionId = some region)
+    (hregion' : cfg.heap.lookup rid' = some region') (hne : rid' ≠ frame.regionId) :
+    Region.refs { region with objMap := region.objMap ∪ region'.objMap } = region.refs ++ region'.refs := by
+  unfold Region.refs
+  rw [merge_corollary_union_append l1 hregion hregion' hne, List.map_append, List.bind_eq_flatMap,
+    List.bind_eq_flatMap, List.bind_eq_flatMap, List.flatMap_append]
+
+-- Extracts the stack-side-empty fact directly from a known `Rgn` resolution: `Reference.loc?`'s match
+-- only ever produces `some (Rgn _)` via its `(none, some _)` arm, so the stack side must be `none`.
+theorem merge_corollary_loc_rgn_stack_none {cfg : RuntimeConfig} {oid : ObjectId} {rid : RegionId}
+    (hloc : (Reference.OId oid).loc? cfg = some (Location.Rgn rid)) :
+    cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid) = none := by
+  unfold Reference.loc? at hloc
+  dsimp at hloc
+  cases h1 : cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid) with
+  | none => rfl
+  | some fr =>
+    rw [h1] at hloc
+    cases h2 : cfg.heap.entries.find? (fun e => e.2.objMap.keys.contains oid) with
+    | none =>
+      rw [h2] at hloc; dsimp at hloc
+      injection hloc with hloc
+      contradiction
+    | some _ => rw [h2] at hloc; dsimp at hloc; contradiction
+
 theorem merge_H3 : ValidConfig cfg →
   merge x cfg = some cfg' →
   H3 cfg' := by
-  sorry
+  intro vcfg h
+  have l1 := vcfg.l1
+  obtain ⟨frame, rid', region, region', hframe, hxref, hregion, hregion', hclosed, hopen, hcfg'⟩ :=
+    merge_cases h
+  subst hcfg'
+  unfold H3
+  dsimp
+  have hne := merge_corollary_rid_ne_regionId hregion hregion' hclosed hopen
+  have hobjeq : ({ frame with varMap := frame.varMap.insert x (Reference.OId region'.bridgeObjectId) } :
+      Frame).objMap = frame.objMap := rfl
+  intro rid oid region0 hlookup0 href
+  by_cases heqr : rid = frame.regionId
+  · subst heqr
+    rw [AList.lookup_insert] at hlookup0
+    rw [Option.some_inj] at hlookup0
+    subst hlookup0
+    have href' : Reference.OId oid ∈ region.refs ++ region'.refs := by
+      have heq : Region.refs { region with objMap := AList.union region.objMap region'.objMap } =
+          region.refs ++ region'.refs := merge_corollary_mergedRegion_refs l1 hregion hregion' hne
+      rwa [heq] at href
+    rw [List.mem_append] at href'
+    clear href
+    rename' href' => href
+    have hoid0 : oid ∈ region.objMap.keys ∨ oid ∈ region'.objMap.keys := by
+      rcases href with href | href
+      · left
+        have hloc := vcfg.h3 frame.regionId oid region hregion href
+        obtain ⟨region2, hlookup2, hoid2⟩ := (oid_loc_rgn_iff_in_heap vcfg).mp hloc
+        rw [hregion, Option.some_inj] at hlookup2
+        rw [← hlookup2] at hoid2
+        exact AList.mem_keys.mp hoid2
+      · right
+        have hloc := vcfg.h3 rid' oid region' hregion' href
+        obtain ⟨region2, hlookup2, hoid2⟩ := (oid_loc_rgn_iff_in_heap vcfg).mp hloc
+        rw [hregion', Option.some_inj] at hlookup2
+        rw [← hlookup2] at hoid2
+        exact AList.mem_keys.mp hoid2
+    have hoid0' : oid ∈ (region.objMap ∪ region'.objMap).keys := by
+      rcases hoid0 with hoid0 | hoid0
+      · exact AList.mem_union.mpr (Or.inl hoid0)
+      · exact AList.mem_union.mpr (Or.inr hoid0)
+    have hstack_none : cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid) = none := by
+      rcases hoid0 with hoid0 | hoid0
+      · exact merge_corollary_loc_rgn_stack_none
+          ((oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region, hregion, hoid0⟩)
+      · exact merge_corollary_loc_rgn_stack_none
+          ((oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region', hregion', hoid0⟩)
+    exact merge_corollary_loc_of_mem l1 hregion hregion' hne hobjeq hframe hstack_none
+      (AList.lookup_insert (a := frame.regionId)
+        (b := { region with objMap := region.objMap ∪ region'.objMap }) (s := cfg.heap.erase rid')) hoid0'
+  · have hner' : rid ≠ rid' := by
+      intro heq
+      subst heq
+      rw [AList.lookup_insert_ne heqr, AList.lookup_erase] at hlookup0
+      contradiction
+    have hlookup_cfg : cfg.heap.lookup rid = some region0 := by
+      rwa [AList.lookup_insert_ne heqr, AList.lookup_erase_ne hner'] at hlookup0
+    have hloc := vcfg.h3 rid oid region0 hlookup_cfg href
+    obtain ⟨region2, hlookup2, hoid2⟩ := (oid_loc_rgn_iff_in_heap vcfg).mp hloc
+    rw [hlookup_cfg, Option.some_inj] at hlookup2
+    rw [← hlookup2] at hoid2
+    have hstack_none : cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid) = none :=
+      merge_corollary_loc_rgn_stack_none hloc
+    exact merge_corollary_loc_of_mem l1 hregion hregion' hne hobjeq hframe hstack_none hlookup0 hoid2
 
 theorem merge_S1 : ValidConfig cfg →
   merge x cfg = some cfg' →
