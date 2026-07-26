@@ -816,7 +816,185 @@ theorem swap_corollary_heap_insert_bind_count_eq {cfg : RuntimeConfig} {rid : Re
 theorem swap_H2 : ValidConfig cfg →
   swap x yf cfg = some cfg' →
   H2 cfg' := by
-  sorry
+  intro vcfg h
+  obtain ⟨frame, hframe, yRef, hyr, yRefLoc, hyrl, yfRef, hyf, yfRefLoc, hyfl, hcase⟩ := swap_cases h
+  have frame_mem : frame ∈ cfg.stackWithIndex := List.mem_of_getLast? hframe
+  unfold H2
+  rcases hcase with
+    ⟨yoid, xRef, obj, hxb, hyoid, hyrloc, hxr, hobj, hcfg'⟩ |
+    ⟨yoid, rid, region, obj, xoid, xrid, hxb, hyoid, hyrloc, hrid, hregion, hobj, hxr, hxrl, hxrid, hstatus, hcfg'⟩ |
+    ⟨yoid, rid, region, obj, xrid, hxb, hyoid, hyrloc, hrid, hregion, hobj, hxr, hstatus, hcfg'⟩ |
+    ⟨yoid, yrid, yfoid, yfrid, region, obj, hxb, hyoid, hyrloc, hyfoid, hyfrloc, hyrid, hyfrid, hregion, hobj, hcfg'⟩
+  · -- SWAP-STACK: a genuine exchange within the same frame -- exact count preservation
+    subst hcfg'
+    have hfield : obj.lookup yf.field = some yfRef :=
+      swap_corollary_stack_field_eq_yfRef frame_mem (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hobj hyf
+    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    set newFrame : Frame := { frame with
+        varMap := frame.varMap.insert x yfRef,
+        objMap := frame.objMap.insert yoid (obj.insert yf.field xRef) } with newFrame_def
+    have hframe_count_eq : ∀ t, (Frame.refs newFrame).count t = (Frame.refs frame.toFrame).count t := by
+      intro t
+      have eq_inner : (Object.refs (obj.insert yf.field xRef)).count t + (if (yfRef == t) = true then 1 else 0) =
+          (Object.refs obj).count t + (if (xRef == t) = true then 1 else 0) :=
+        swap_corollary_alist_insert_count_eq (l := obj) (k := yf.field) (v_old := yfRef)
+          (v_new := xRef) (t := t) hfield
+      have eq_outer := swap_corollary_objMap_insert_bind_count_eq (m := frame.objMap) (oid := yoid)
+        (obj := obj) (v := obj.insert yf.field xRef) (t := t) hobj
+      have eq_var := swap_corollary_alist_insert_count_eq (l := frame.varMap) (k := x) (v_old := xRef)
+        (v_new := yfRef) (t := t) hxr
+      have hgoal : (Frame.refs newFrame).count t =
+          ((frame.objMap.insert yoid (obj.insert yf.field xRef)).entries.map (·.2) >>= Object.refs).count t +
+          ((frame.varMap.insert x yfRef).entries.map (·.2)).count t := by
+        unfold Frame.refs
+        rw [newFrame_def, List.count_append]
+      have hgoal' : (Frame.refs frame.toFrame).count t =
+          (frame.objMap.entries.map (·.2) >>= Object.refs).count t + (frame.varMap.entries.map (·.2)).count t := by
+        unfold Frame.refs
+        rw [List.count_append]
+      rw [hgoal, hgoal']
+      omega
+    have hstack_count_eq : ∀ t,
+        (Stack.refs (cfg.stack.dropLast ++ [newFrame])).count t = (Stack.refs cfg.stack).count t := by
+      intro t
+      rw [swap_corollary_stack_refs_append, List.count_append]
+      conv_rhs => rw [stack_eq, swap_corollary_stack_refs_append, List.count_append]
+      rw [hframe_count_eq]
+    intro rid'
+    have h2' := vcfg.h2 rid'
+    dsimp
+    rw [hstack_count_eq]
+    exact h2'
+  · -- SWAP-REGION-OBJECT: the exchange spans the stack/heap boundary -- only the *sum* is preserved
+    subst hcfg'
+    have hfield : obj.lookup yf.field = some yfRef :=
+      swap_corollary_region_field_eq_yfRef (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hregion hobj hyf
+    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    set newFrame : Frame := { frame with varMap := frame.varMap.insert x yfRef } with newFrame_def
+    set newRegion : Region := { region with
+        objMap := AList.insert yoid (obj.insert yf.field (Reference.OId xoid)) region.objMap } with newRegion_def
+    have hsum_eq : ∀ t,
+        (Stack.refs (cfg.stack.dropLast ++ [newFrame])).count t + (Heap.refs (cfg.heap.insert rid newRegion)).count t =
+        (Stack.refs cfg.stack).count t + (Heap.refs cfg.heap).count t := by
+      intro t
+      have eq_inner : (Object.refs (obj.insert yf.field (Reference.OId xoid))).count t +
+            (if (yfRef == t) = true then 1 else 0) =
+          (Object.refs obj).count t + (if ((Reference.OId xoid) == t) = true then 1 else 0) :=
+        swap_corollary_alist_insert_count_eq (l := obj) (k := yf.field) (v_old := yfRef)
+          (v_new := Reference.OId xoid) (t := t) hfield
+      have eq_region : (Region.refs newRegion).count t + (Object.refs obj).count t =
+          (Region.refs region).count t + (Object.refs (obj.insert yf.field (Reference.OId xoid))).count t :=
+        swap_corollary_objMap_insert_bind_count_eq (m := region.objMap) (oid := yoid)
+          (obj := obj) (v := obj.insert yf.field (Reference.OId xoid)) (t := t) hobj
+      have eq_heap := swap_corollary_heap_insert_bind_count_eq (cfg := cfg) (rid := rid) (region := region)
+        (newRegion := newRegion) (t := t) hregion
+      have eq_var := swap_corollary_alist_insert_count_eq (l := frame.varMap) (k := x)
+        (v_old := Reference.OId xoid) (v_new := yfRef) (t := t) hxr
+      have hframecount : (Frame.refs newFrame).count t =
+          (frame.objMap.entries.map (·.2) >>= Object.refs).count t +
+          ((frame.varMap.insert x yfRef).entries.map (·.2)).count t := by
+        unfold Frame.refs
+        rw [newFrame_def, List.count_append]
+      have hframecount' : (Frame.refs frame.toFrame).count t =
+          (frame.objMap.entries.map (·.2) >>= Object.refs).count t + (frame.varMap.entries.map (·.2)).count t := by
+        unfold Frame.refs
+        rw [List.count_append]
+      have hstackgoal : (Stack.refs (cfg.stack.dropLast ++ [newFrame])).count t =
+          (Stack.refs cfg.stack.dropLast).count t + (Frame.refs newFrame).count t := by
+        rw [swap_corollary_stack_refs_append, List.count_append]
+      have hstackgoal' : (Stack.refs cfg.stack).count t =
+          (Stack.refs cfg.stack.dropLast).count t + (Frame.refs frame.toFrame).count t := by
+        conv_lhs => rw [stack_eq]
+        rw [swap_corollary_stack_refs_append, List.count_append]
+      rw [hstackgoal, hstackgoal', hframecount, hframecount']
+      omega
+    intro rid'
+    have h2' := vcfg.h2 rid'
+    dsimp
+    rw [hsum_eq]
+    exact h2'
+  · -- SWAP-REGION-REGION: identical shape to SWAP-REGION-OBJECT, xRef is Reference.RId xrid instead
+    subst hcfg'
+    have hfield : obj.lookup yf.field = some yfRef :=
+      swap_corollary_region_field_eq_yfRef (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hregion hobj hyf
+    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    set newFrame : Frame := { frame with varMap := frame.varMap.insert x yfRef } with newFrame_def
+    set newRegion : Region := { region with
+        objMap := AList.insert yoid (obj.insert yf.field (Reference.RId xrid)) region.objMap } with newRegion_def
+    have hsum_eq : ∀ t,
+        (Stack.refs (cfg.stack.dropLast ++ [newFrame])).count t + (Heap.refs (cfg.heap.insert rid newRegion)).count t =
+        (Stack.refs cfg.stack).count t + (Heap.refs cfg.heap).count t := by
+      intro t
+      have eq_inner : (Object.refs (obj.insert yf.field (Reference.RId xrid))).count t +
+            (if (yfRef == t) = true then 1 else 0) =
+          (Object.refs obj).count t + (if ((Reference.RId xrid) == t) = true then 1 else 0) :=
+        swap_corollary_alist_insert_count_eq (l := obj) (k := yf.field) (v_old := yfRef)
+          (v_new := Reference.RId xrid) (t := t) hfield
+      have eq_region : (Region.refs newRegion).count t + (Object.refs obj).count t =
+          (Region.refs region).count t + (Object.refs (obj.insert yf.field (Reference.RId xrid))).count t :=
+        swap_corollary_objMap_insert_bind_count_eq (m := region.objMap) (oid := yoid)
+          (obj := obj) (v := obj.insert yf.field (Reference.RId xrid)) (t := t) hobj
+      have eq_heap := swap_corollary_heap_insert_bind_count_eq (cfg := cfg) (rid := rid) (region := region)
+        (newRegion := newRegion) (t := t) hregion
+      have eq_var := swap_corollary_alist_insert_count_eq (l := frame.varMap) (k := x)
+        (v_old := Reference.RId xrid) (v_new := yfRef) (t := t) hxr
+      have hframecount : (Frame.refs newFrame).count t =
+          (frame.objMap.entries.map (·.2) >>= Object.refs).count t +
+          ((frame.varMap.insert x yfRef).entries.map (·.2)).count t := by
+        unfold Frame.refs
+        rw [newFrame_def, List.count_append]
+      have hframecount' : (Frame.refs frame.toFrame).count t =
+          (frame.objMap.entries.map (·.2) >>= Object.refs).count t + (frame.varMap.entries.map (·.2)).count t := by
+        unfold Frame.refs
+        rw [List.count_append]
+      have hstackgoal : (Stack.refs (cfg.stack.dropLast ++ [newFrame])).count t =
+          (Stack.refs cfg.stack.dropLast).count t + (Frame.refs newFrame).count t := by
+        rw [swap_corollary_stack_refs_append, List.count_append]
+      have hstackgoal' : (Stack.refs cfg.stack).count t =
+          (Stack.refs cfg.stack.dropLast).count t + (Frame.refs frame.toFrame).count t := by
+        conv_lhs => rw [stack_eq]
+        rw [swap_corollary_stack_refs_append, List.count_append]
+      rw [hstackgoal, hstackgoal', hframecount, hframecount']
+      omega
+    intro rid'
+    have h2' := vcfg.h2 rid'
+    dsimp
+    rw [hsum_eq]
+    exact h2'
+  · -- SWAP-REGION-BRIDGE: only the heap changes (bridgeObjectId doesn't feed into refs at all),
+    -- and both the old and new field values are OId-wrapped -- constructor mismatch closes it
+    -- directly for any RId target, no exchange-accounting needed.
+    subst hcfg'
+    have hfield : obj.lookup yf.field = some yfRef :=
+      swap_corollary_region_field_eq_yfRef (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hregion hobj hyf
+    set newRegion : Region := { region with
+        bridgeObjectId := yfoid,
+        objMap := AList.insert yoid (obj.insert yf.field (Reference.OId region.bridgeObjectId)) region.objMap
+      } with newRegion_def
+    intro rid'
+    have h2' := vcfg.h2 rid'
+    dsimp
+    have hheap_eq : (Heap.refs (cfg.heap.insert yrid newRegion)).count (Reference.RId rid') =
+        (Heap.refs cfg.heap).count (Reference.RId rid') := by
+      have eq_inner : (Object.refs (obj.insert yf.field (Reference.OId region.bridgeObjectId))).count
+              (Reference.RId rid') + (if (yfRef == Reference.RId rid') = true then 1 else 0) =
+          (Object.refs obj).count (Reference.RId rid') +
+          (if ((Reference.OId region.bridgeObjectId) == Reference.RId rid') = true then 1 else 0) :=
+        swap_corollary_alist_insert_count_eq (l := obj) (k := yf.field) (v_old := yfRef)
+          (v_new := Reference.OId region.bridgeObjectId) (t := Reference.RId rid') hfield
+      have eq_region : (Region.refs newRegion).count (Reference.RId rid') + (Object.refs obj).count (Reference.RId rid') =
+          (Region.refs region).count (Reference.RId rid') +
+          (Object.refs (obj.insert yf.field (Reference.OId region.bridgeObjectId))).count (Reference.RId rid') :=
+        swap_corollary_objMap_insert_bind_count_eq (m := region.objMap) (oid := yoid)
+          (obj := obj) (v := obj.insert yf.field (Reference.OId region.bridgeObjectId)) (t := Reference.RId rid') hobj
+      have eq_heap := swap_corollary_heap_insert_bind_count_eq (cfg := cfg) (rid := yrid) (region := region)
+        (newRegion := newRegion) (t := Reference.RId rid') hregion
+      have hb1 : (yfRef == Reference.RId rid') = false := by rw [hyfoid]; rfl
+      have hb2 : ((Reference.OId region.bridgeObjectId) == Reference.RId rid') = false := rfl
+      rw [hb1, hb2] at eq_inner
+      omega
+    rw [hheap_eq]
+    exact h2'
 
 theorem swap_H3 : ValidConfig cfg →
   swap x yf cfg = some cfg' →
