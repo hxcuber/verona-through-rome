@@ -574,6 +574,156 @@ theorem swap_H1 : ValidConfig cfg →
       unfold Heap.regions
       exact (List.Sublist.map _ (List.kerase_sublist yrid cfg.heap.entries)).mem hkeraseregion
 
+-- Two elements of `cfg.stackWithIndex` with the same `.index` are the same element -- `.index` is
+-- assigned to be the element's own position by `mapIdx`, so equal indices means equal positions.
+theorem swap_corollary_stackWithIndex_index_inj {cfg : RuntimeConfig} {f1 f2 : FrameWithIndex}
+    (h1 : f1 ∈ cfg.stackWithIndex) (h2 : f2 ∈ cfg.stackWithIndex) (heq : f1.index = f2.index) :
+    f1 = f2 := by
+  unfold RuntimeConfig.stackWithIndex at h1 h2
+  obtain ⟨n1, hn1, e1⟩ := List.mem_mapIdx.mp h1
+  obtain ⟨n2, hn2, e2⟩ := List.mem_mapIdx.mp h2
+  have hi1 : f1.index = n1 := by rw [← e1]
+  have hi2 : f2.index = n2 := by rw [← e2]
+  have hn : n1 = n2 := by rw [hi1, hi2] at heq; exact heq
+  subst hn
+  rw [← e1, ← e2]
+
+-- resolveFA's own `.find? (index==fid)` step recovers exactly the frame already known to have
+-- that index, via the index-injectivity fact above plus the generic find?-uniqueness lemma.
+theorem swap_corollary_stackWithIndex_find_eq {cfg : RuntimeConfig} {frame : FrameWithIndex}
+    (hmem : frame ∈ cfg.stackWithIndex) :
+    cfg.stackWithIndex.find? (fun f => f.index == frame.index) = some frame := by
+  apply List.find?_eq_some_of_unique hmem (by simp)
+  intro f' hf'_mem hf'_pred
+  rw [beq_iff_eq] at hf'_pred
+  exact swap_corollary_stackWithIndex_index_inj hf'_mem hmem hf'_pred
+
+-- Traces resolveFA's own computation to show it agrees with the already-known
+-- frame.objMap.lookup yoid = some obj (the SWAP-STACK case's own derivation, independent of
+-- resolveFA's internal one) -- establishing that the field being overwritten by the swap held
+-- exactly `yfRef` beforehand, i.e. this genuinely IS an exchange of two live values, not merely an
+-- overwrite of an unknown old one.
+theorem swap_corollary_stack_field_eq_yfRef {cfg : RuntimeConfig} {frame : FrameWithIndex} {yoid : ObjectId}
+    {obj : Object} {yf : FieldAccess} {yfRef : Reference}
+    (hframe_mem : frame ∈ cfg.stackWithIndex)
+    (hyr : resolveV yf.root cfg = some (Reference.OId yoid))
+    (hyrl : (Reference.OId yoid).loc? cfg = some (Location.Stk frame.index))
+    (hobj : frame.objMap.lookup yoid = some obj)
+    (hyf : resolveFA yf cfg = some yfRef) :
+    obj.lookup yf.field = some yfRef := by
+  unfold resolveFA at hyf
+  rw [hyr] at hyf
+  dsimp at hyf
+  rw [hyrl] at hyf
+  dsimp at hyf
+  rw [swap_corollary_stackWithIndex_find_eq hframe_mem] at hyf
+  dsimp at hyf
+  rw [hobj] at hyf
+  dsimp at hyf
+  exact hyf
+
+-- Region-side analogue: resolveFA's internal heap/region lookups are literally the same function
+-- calls as the ones already performed by the region-branch cases, so no uniqueness argument is
+-- needed here (unlike the stack case's `.find?`).
+theorem swap_corollary_region_field_eq_yfRef {cfg : RuntimeConfig} {yoid : ObjectId} {rid : RegionId}
+    {region : Region} {obj : Object} {yf : FieldAccess} {yfRef : Reference}
+    (hyr : resolveV yf.root cfg = some (Reference.OId yoid))
+    (hyrl : (Reference.OId yoid).loc? cfg = some (Location.Rgn rid))
+    (hregion : cfg.heap.lookup rid = some region)
+    (hobj : region.objMap.lookup yoid = some obj)
+    (hyf : resolveFA yf cfg = some yfRef) :
+    obj.lookup yf.field = some yfRef := by
+  unfold resolveFA at hyf
+  rw [hyr] at hyf
+  dsimp at hyf
+  rw [hyrl] at hyf
+  dsimp at hyf
+  rw [hregion] at hyf
+  dsimp at hyf
+  rw [hobj] at hyf
+  dsimp at hyf
+  exact hyf
+
+-- Generic AList fact (Reference-valued, α-indexed): membership after inserting at a key is either
+-- the newly-written value or a pre-existing one. Covers both VarMap and Object (`Object := VarMap`).
+theorem swap_corollary_alist_insert_refs_mem {α : Type*} [DecidableEq α] {l : AList (fun _ : α => Reference)}
+    {k : α} {v r : Reference} (hr : r ∈ (l.insert k v).entries.map (·.2)) :
+    r = v ∨ r ∈ l.entries.map (·.2) := by
+  by_cases hk : k ∈ l
+  · obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase (AList.mem_keys.mp hk)
+    rw [AList.entries_insert, hkerase, List.map_cons, List.mem_cons] at hr
+    rw [heq, List.map_append, List.map_cons, List.mem_append, List.mem_cons]
+    dsimp only at hr ⊢
+    rw [List.map_append, List.mem_append] at hr
+    tauto
+  · rw [AList.entries_insert_of_notMem hk, List.map_cons, List.mem_cons] at hr
+    dsimp only at hr
+    tauto
+
+-- Once an object is already stored at some key of an ObjMap, its own refs already contribute to
+-- the ObjMap-level bind-refs.
+theorem swap_corollary_objMap_bind_refs_mem_of_lookup {m : ObjMap} {oid : ObjectId} {obj : Object}
+    {r : Reference} (hobj : m.lookup oid = some obj) (hr : r ∈ Object.refs obj) :
+    r ∈ (m.entries.map (·.2) >>= Object.refs) := by
+  have hmem : (⟨oid, obj⟩ : Sigma (fun _ : ObjectId => Object)) ∈ m.entries :=
+    AList.mem_lookup_iff.mp (by rw [hobj]; rfl)
+  rw [List.bind_eq_flatMap, List.mem_flatMap]
+  exact ⟨obj, List.mem_map_of_mem (f := (·.2)) hmem, hr⟩
+
+-- Membership after inserting at an ObjMap key: either from the newly-written object, or already present.
+theorem swap_corollary_objMap_insert_bind_refs_mem {m : ObjMap} {oid : ObjectId} {v : Object} {r : Reference}
+    (hr : r ∈ ((m.insert oid v).entries.map (·.2) >>= Object.refs)) :
+    r ∈ Object.refs v ∨ r ∈ (m.entries.map (·.2) >>= Object.refs) := by
+  by_cases hoid : oid ∈ m
+  · obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase (AList.mem_keys.mp hoid)
+    rw [AList.entries_insert, hkerase, List.map_cons, List.bind_eq_flatMap, List.flatMap_cons,
+      ← List.bind_eq_flatMap, List.mem_append, List.map_append, List.bind_eq_flatMap, List.flatMap_append,
+      ← List.bind_eq_flatMap, List.mem_append] at hr
+    rw [heq, List.map_append, List.map_cons, List.bind_eq_flatMap, List.flatMap_append, List.flatMap_cons,
+      ← List.bind_eq_flatMap, ← List.bind_eq_flatMap, List.mem_append, List.mem_append]
+    tauto
+  · rw [AList.entries_insert_of_notMem hoid, List.map_cons, List.bind_eq_flatMap, List.flatMap_cons,
+      ← List.bind_eq_flatMap, List.mem_append] at hr
+    tauto
+
+-- Once a region is already stored at some key of a heap, its own refs already contribute to Heap.refs.
+theorem swap_corollary_heap_refs_mem_of_lookup {cfg : RuntimeConfig} {rid : RegionId} {region : Region}
+    {r : Reference} (hregion : cfg.heap.lookup rid = some region) (hr : r ∈ Region.refs region) :
+    r ∈ Heap.refs cfg.heap := by
+  have hmem : (⟨rid, region⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries :=
+    AList.mem_lookup_iff.mp (by rw [hregion]; rfl)
+  unfold Heap.refs
+  rw [List.bind_eq_flatMap, List.mem_flatMap]
+  exact ⟨region, List.mem_map_of_mem (f := (·.2)) hmem, hr⟩
+
+-- Membership after inserting at a heap key: either from the newly-written region, or already present.
+theorem swap_corollary_heap_insert_refs_mem {cfg : RuntimeConfig} {rid : RegionId} {newRegion : Region}
+    {r : Reference} (hrid : rid ∈ cfg.heap.keys) (hr : r ∈ Heap.refs (cfg.heap.insert rid newRegion)) :
+    r ∈ Region.refs newRegion ∨ r ∈ Heap.refs cfg.heap := by
+  unfold Heap.refs at hr ⊢
+  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase hrid
+  rw [AList.entries_insert, hkerase, List.map_cons, List.bind_eq_flatMap, List.flatMap_cons,
+    ← List.bind_eq_flatMap, List.mem_append, List.map_append, List.bind_eq_flatMap, List.flatMap_append,
+    ← List.bind_eq_flatMap, List.mem_append] at hr
+  rw [heq, List.map_append, List.map_cons, List.bind_eq_flatMap, List.flatMap_append, List.flatMap_cons,
+    ← List.bind_eq_flatMap, ← List.bind_eq_flatMap, List.mem_append, List.mem_append]
+  tauto
+
+-- Heap key set is unchanged by inserting at an already-present key.
+theorem swap_corollary_heap_insert_keys_mem {cfg : RuntimeConfig} {rid : RegionId} {newRegion : Region}
+    (hridmem : rid ∈ cfg.heap.keys) (rid' : RegionId) :
+    rid' ∈ (cfg.heap.insert rid newRegion).keys ↔ rid' ∈ cfg.heap.keys := by
+  rw [← AList.mem_keys, AList.mem_insert, AList.mem_keys]
+  exact or_iff_right_of_imp (fun heq => heq ▸ hridmem)
+
+-- Generic fact used for the stack-mutation branches: `Stack.refs` distributes over `++ [f]`.
+theorem swap_corollary_stack_refs_append (l : Stack) (f : Frame) :
+    Stack.refs (l ++ [f]) = Stack.refs l ++ f.refs := by
+  unfold Stack.refs
+  rw [List.bind_eq_flatMap, List.bind_eq_flatMap, List.flatMap_id, List.flatMap_id,
+    List.map_append, List.flatten_append]
+  simp
+
 theorem swap_H2 : ValidConfig cfg →
   swap x yf cfg = some cfg' →
   H2 cfg' := by
