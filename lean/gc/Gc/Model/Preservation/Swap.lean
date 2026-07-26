@@ -297,7 +297,75 @@ theorem swap_L2 : ValidConfig cfg →
 theorem swap_H1 : ValidConfig cfg →
   swap x yf cfg = some cfg' →
   H1 cfg' := by
-  sorry
+  intro vcfg h
+  have h1 := vcfg.h1
+  obtain ⟨frame, hframe, yRef, hyr, yRefLoc, hyrl, yfRef, hyf, yfRefLoc, hyfl, hcase⟩ := swap_cases h
+  unfold H1
+  rcases hcase with
+    ⟨yoid, xRef, obj, hxb, hyoid, hyrloc, hxr, hobj, hcfg'⟩ |
+    ⟨yoid, rid, region, obj, xoid, xrid, hxb, hyoid, hyrloc, hrid, hregion, hobj, hxr, hxrl, hxrid, hstatus, hcfg'⟩ |
+    ⟨yoid, rid, region, obj, xrid, hxb, hyoid, hyrloc, hrid, hregion, hobj, hxr, hstatus, hcfg'⟩ |
+    ⟨yoid, yrid, yfoid, yfrid, region, obj, hxb, hyoid, hyrloc, hyfoid, hyfrloc, hyrid, hyfrid, hregion, hobj, hcfg'⟩
+  · subst hcfg'
+    dsimp
+    exact h1
+  · subst hcfg'
+    dsimp
+    have region_mem : region ∈ cfg.heap.regions := by
+      unfold Heap.regions
+      exact List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hregion)
+    intro region0 hregion0
+    unfold Heap.regions at hregion0
+    rw [AList.entries_insert, List.map_cons, List.mem_cons] at hregion0
+    cases hregion0 with
+    | inl heqregion =>
+      subst heqregion
+      dsimp
+      exact (AList.mem_insert _).mpr (Or.inr (h1 region region_mem))
+    | inr hkeraseregion =>
+      apply h1
+      unfold Heap.regions
+      exact (List.Sublist.map _ (List.kerase_sublist rid cfg.heap.entries)).mem hkeraseregion
+  · subst hcfg'
+    dsimp
+    have region_mem : region ∈ cfg.heap.regions := by
+      unfold Heap.regions
+      exact List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hregion)
+    intro region0 hregion0
+    unfold Heap.regions at hregion0
+    rw [AList.entries_insert, List.map_cons, List.mem_cons] at hregion0
+    cases hregion0 with
+    | inl heqregion =>
+      subst heqregion
+      dsimp
+      exact (AList.mem_insert _).mpr (Or.inr (h1 region region_mem))
+    | inr hkeraseregion =>
+      apply h1
+      unfold Heap.regions
+      exact (List.Sublist.map _ (List.kerase_sublist rid cfg.heap.entries)).mem hkeraseregion
+  · subst hcfg'
+    dsimp
+    have region_mem : region ∈ cfg.heap.regions := by
+      unfold Heap.regions
+      exact List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hregion)
+    have hyfrid_eq : yrid = yfrid := hyrid.trans hyfrid.symm
+    have hyfoid_loc : (Reference.OId yfoid).loc? cfg = some (Location.Rgn yrid) := by
+      rw [← hyfoid, hyfl, hyfrloc, hyfrid_eq]
+    obtain ⟨region', hregion', hyfoid_mem'⟩ := (oid_loc_rgn_iff_in_heap vcfg).mp hyfoid_loc
+    have region'_eq : region' = region := by rw [hregion] at hregion'; exact Option.some_inj.mp hregion'.symm
+    have hyfoid_mem : yfoid ∈ region.objMap := region'_eq ▸ hyfoid_mem'
+    intro region0 hregion0
+    unfold Heap.regions at hregion0
+    rw [AList.entries_insert, List.map_cons, List.mem_cons] at hregion0
+    cases hregion0 with
+    | inl heqregion =>
+      subst heqregion
+      dsimp
+      exact (AList.mem_insert _).mpr (Or.inr hyfoid_mem)
+    | inr hkeraseregion =>
+      apply h1
+      unfold Heap.regions
+      exact (List.Sublist.map _ (List.kerase_sublist yrid cfg.heap.entries)).mem hkeraseregion
 
 theorem swap_H2 : ValidConfig cfg →
   swap x yf cfg = some cfg' →
