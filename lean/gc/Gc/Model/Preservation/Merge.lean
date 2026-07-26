@@ -4,6 +4,8 @@ import Gc.Model.Validity
 import Gc.Model.Theorems
 import Gc.Model.Mutation
 
+import Mathlib.Data.List.Infix
+
 theorem merge_cases (h : merge x cfg = some cfg') :
     ∃ frame rid' region region',
       cfg.stack.getLast? = some frame ∧
@@ -111,7 +113,36 @@ theorem merge_L1 : ValidConfig cfg →
 theorem merge_L2 : ValidConfig cfg →
   merge x cfg = some cfg' →
   L2 cfg' := by
-  sorry
+  intro vcfg h
+  have l2 := vcfg.l2
+  obtain ⟨frame, rid', region, region', hframe, hxref, hregion, hregion', hclosed, hopen, hcfg'⟩ :=
+    merge_cases h
+  subst hcfg'
+  unfold L2
+  dsimp
+  have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame] :=
+    (List.dropLast_append_getLast? frame hframe).symm
+  have frame_mem : frame ∈ cfg.stack := stack_eq ▸ List.mem_append_right _ (List.mem_singleton_self _)
+  intro frame'' hmem
+  rw [List.mem_append, List.mem_singleton] at hmem
+  obtain ⟨region0, hlookup0, hopen0⟩ :
+      ∃ region0, cfg.heap.lookup frame''.regionId = some region0 ∧ region0.status = Status.Open := by
+    cases hmem with
+    | inl hdrop => exact l2 frame'' (List.mem_of_mem_dropLast hdrop)
+    | inr heqframe => subst heqframe; exact l2 frame frame_mem
+  by_cases heq1 : frame''.regionId = frame.regionId
+  · refine ⟨{ region with objMap := region.objMap.union region'.objMap }, ?_, ?_⟩
+    · rw [heq1, AList.lookup_insert]
+    · dsimp; exact hopen
+  · by_cases heq2 : frame''.regionId = rid'
+    · exfalso
+      rw [heq2, hregion'] at hlookup0
+      rw [Option.some_inj] at hlookup0
+      rw [hlookup0] at hclosed
+      exact absurd (hopen0.symm.trans hclosed) (by decide)
+    · refine ⟨region0, ?_, hopen0⟩
+      rw [AList.lookup_insert_ne heq1, AList.lookup_erase_ne heq2]
+      exact hlookup0
 
 theorem merge_H1 : ValidConfig cfg →
   merge x cfg = some cfg' →
