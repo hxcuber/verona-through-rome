@@ -113,6 +113,24 @@ theorem List.mem_le_foldl_max {l : List Nat} : ∀ (init x : Nat), x ∈ l → x
       exact le_trans (le_max_right init x) (List.le_foldl_max_self (max init x))
     · exact ih (max init a) x hmem
 
+theorem List.kunion_eq_append_of_disjoint_keys {α : Type u} {β : α → Type v} [DecidableEq α]
+    {l1 l2 : List (Sigma β)} (h : ∀ a ∈ l1.keys, a ∉ l2.keys) :
+    List.kunion l1 l2 = l1 ++ l2 := by
+  induction l1 generalizing l2 with
+  | nil => rw [List.nil_kunion]; rfl
+  | cons s l1 ih =>
+    rw [List.kunion_cons]
+    have hs : s.1 ∉ l2.keys := h s.1 (by rw [List.keys_cons]; exact List.mem_cons_self)
+    rw [List.kerase_of_notMem_keys hs]
+    rw [ih (fun a ha => h a (by rw [List.keys_cons]; exact List.mem_cons_of_mem _ ha))]
+    rfl
+
+theorem AList.union_eq_append_of_disjoint_keys {α : Type u} {β : α → Type v} [DecidableEq α]
+    {s1 s2 : AList β} (h : ∀ a ∈ s1.keys, a ∉ s2.keys) :
+    (s1 ∪ s2).entries = s1.entries ++ s2.entries := by
+  rw [AList.union_entries]
+  exact List.kunion_eq_append_of_disjoint_keys h
+
 theorem List.find?_eq_some_of_unique {α} {p : α → Bool} {l : List α} {e : α}
     (mem : e ∈ l) (pe : p e) (uniq : ∀ x ∈ l, p x → x = e) : l.find? p = some e := by
   obtain ⟨as, bs, hl, e_notin_as⟩ := List.eq_append_cons_of_mem mem
