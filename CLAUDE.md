@@ -149,11 +149,119 @@ not by reading file contents alone):
   8 invariants — `enter_H2`'s proof already computes the same permutation facts inline via its own
   unnamed `have`s — and were deleted rather than left as dead `sorry` stubs. Axiom check confirms only
   `propext`/`Classical.choice`/`Quot.sound` throughout.
-- **`Merge.lean`** — not started: all 10 invariant lemmas (`L1`/`L2`/`H1`/`H2`/`H3`/`S1`/`S2`/`S3`/`HS1`/
-  `HS2`) are bare `sorry`. Only the combining `merge_valid` theorem (which just assembles the 10 sorry'd
-  lemmas) is written. This builds successfully (a `sorry` doesn't fail compilation) but contains no real
-  proof content yet — the sole remaining not-started `Preservation` file now that `Swap.lean` is done
-  (see its bullet further below).
+- **`Merge.lean`** — **fully proved, builds cleanly, zero `sorry`** (finished 2026-07-26, across several
+  checkpoints: scaffold, `S1`, `H1`, `L2`, `L1`, `HS2`, `H2`, `HS1`, then `H3`, `S2`, `S3`). All 10
+  invariants and `merge_valid` are real proofs; axiom check on `merge_valid` confirms only
+  `propext`/`Classical.choice`/`Quot.sound`. This was the hardest file in the project — the sole
+  `Mutation.lean` operation that actually **relocates** existing objects between heap keys, rather than
+  just inserting/overwriting a value at one key.
+  - The operation: `merge x cfg` takes the current (last) frame's own region (`region`, must be `Open`)
+    and a region referenced by `x` (`region'`, must be `Closed`, looked up via `frame.varMap.lookup x =
+    some (RId rid')`), unions `region'.objMap` into `region.objMap` at `frame.regionId`, **erases `rid'`
+    from the heap entirely**, and reassigns `x`'s varMap value from `RId rid'` to `OId
+    region'.bridgeObjectId` (now itself living inside the merged region). No fresh id is allocated, but
+    a whole heap *key* disappears — the first and only `Preservation` operation to do so alongside a
+    genuine value relocation (every prior operation's `Reference.loc?` changes, if any, were either
+    additive or key-preserving).
+  - **Scaffold**: `merge_cases` unpacks the single-branch `do`-block (confirmed via CLAUDE.md's own
+    prediction — merge really is the one operation with no location-dependent branching). Core
+    corollaries: `merge_corollary_rid_ne_regionId` (`rid' ≠ frame.regionId`, from the mutually exclusive
+    Open/Closed precondition), `merge_corollary_region_unique` (`L1`-based, mirrors `MakeObjRegion`'s),
+    `merge_corollary_disjoint_keys`/`_union_append` (`region`/`region'`'s objMap keys are disjoint, so
+    `region.objMap ∪ region'.objMap`'s `entries` is an *exact* append, not just a `Perm` — no
+    `kunion`-induced reordering at all, via a new generic `List.kunion_eq_append_of_disjoint_keys` /
+    `AList.union_eq_append_of_disjoint_keys` pair added to `Theorems.lean`).
+  - **`merge_corollary_heap_entries_perm`**: extracts `rid'` then `frame.regionId` from `cfg.heap.entries`
+    via two applications of `List.exists_of_kerase`, reassembling into
+    `⟨frame.regionId,region⟩ :: ⟨rid',region'⟩ :: rest` — the same `rest` (`kerase frame.regionId
+    (kerase rid' cfg.heap.entries)`) that `cfg'.heap.entries` is built from via `AList.entries_insert`
+    after the erase+insert. This one `Perm` fact underlies `merge_corollary_heap_objectIds_perm`/
+    `_heap_refs_perm` (nothing is created or destroyed by the merge, just regrouped into fewer heap
+    keys — the merged region's own `objectIds`/`refs` are the *exact* append of `region`'s and
+    `region'`'s, via `merge_corollary_mergedRegion_refs`) and, combined with `merge_corollary_rest_notMem`
+    (the `rest` tail excludes both erased/reused keys, via `List.notMem_keys_kerase`) and
+    `merge_corollary_entries_perm_mem` (`rest`, as membership, embeds back into `cfg.heap.entries`), the
+    heap-side uniqueness corollary `merge_corollary_heap'_unique` (at most one `cfg'.heap` entry contains
+    a given `oid` — every entry is either the merged head or from `rest`, reducing clashes to `L1`'s
+    `region_unique` on `cfg`).
+  - **`merge_H1`/`merge_L2`**: straightforward once the scaffold is in place — `H1`'s merged-region case
+    is direct (`region.bridgeObjectId ∈ region.objMap.keys ⊆ mergedRegion.objMap.keys` via `mem_union`);
+    `L2`'s three-way `by_cases` (frame''.regionId = frame.regionId / = rid' / neither) rules out the
+    `rid'` case by contradiction (a stack frame can't have a Closed region) with no `S1`/uniqueness
+    machinery needed at all.
+  - **`merge_L1`/`merge_HS1`**: `cfg'.objectIds.Perm cfg.objectIds` follows from `heap_objectIds_perm`
+    plus the fact that `Stack.objectIds` is *exactly* (not just `Perm`) unchanged — merge only ever
+    touches `varMap`, never `objMap`, on the stack side. `HS1`'s one genuinely new stack occurrence
+    (`region'.bridgeObjectId`, replacing `x`'s old `RId rid'` value) is already heap-allocated via `H1`
+    on `region'`, so it transports into `cfg'.objectIds` trivially via the same `Perm`.
+  - **`merge_H2`/`merge_HS2`**: both lean on copying two generic corollaries from `Swap.lean`'s convention
+    (`merge_corollary_mem_keys_of_lookup`, `merge_corollary_alist_insert_count_eq` — the additive
+    replace-at-existing-key count identity, dodging `Nat` subtraction) applied to the *single* varMap
+    slot `x` changes. `H2`: the heap regroup preserves every `RId`'s count exactly (via the `Perm`), and
+    the varMap change can only ever *decrease* any particular `RId`'s count, so the sum stays `≤ 1`.
+    `HS2`'s harder direction (ruling out `RId rid'` surviving anywhere in `cfg'.refs`) uses `H2` itself as
+    a lever: `x`'s own entry was already the *unique* occurrence of `RId rid'` in all of `cfg.refs` (the
+    `H2` bound, with `x`'s entry as the witness contributing exactly 1), so once that entry is overwritten,
+    the exact (not just `≤`) count drops to 0 — computed via the same additive alist-insert-count identity.
+  - **`merge_H3`/`merge_S2`/`merge_S3`** (the hard trio, and the reason this file took the whole session):
+    unlike every prior file, `oid`'s `Reference.loc?` genuinely *changes* for objects that were in
+    `region'` (`Rgn rid'` in `cfg` → `Rgn frame.regionId` in `cfg'`), so there is no unconditional
+    `loc?`-equality corollary here at all (contrast `Swap.lean`'s fully unconditional one). The payoff
+    corollary, `merge_corollary_loc_of_mem` (built from `merge_corollary_stack_h1_none` — the stack side
+    of `loc?` only ever reads `objMap`, never `varMap`, so a "not found on the stack" fact transports
+    unconditionally across merge's only stack change, regardless of *where* the searched-for `oid`
+    actually lives — plus `heap'_unique` via `List.find?_eq_some_of_unique`): if `oid` lives in `rid0`'s
+    objMap in `cfg'.heap` (whichever heap key that is — the merge target *or* an untouched "rest"
+    region), it resolves there in `cfg'` too. `H3` case-splits on `rid = frame.regionId` (referenced
+    `oid` comes from `region.refs` or `region'.refs`, pinned via the *existing* `oid_loc_rgn_iff_in_heap`
+    theorem applied to `cfg` — full `ValidConfig cfg` is available as `H3`'s own hypothesis, so no
+    `L1`-only variant was needed here unlike `heap'_unique`) vs. an unaffected `rest` region (lookup
+    transports unconditionally, `rid ≠ rid'` derived by contradiction since `rid'` is no longer a valid
+    `cfg'.heap` key). `S2` additionally needed `merge_corollary_heap_find_none_iff_notin` (the heap side
+    of `loc?` fails exactly when the oid isn't allocated anywhere — a pure unfolding fact needing no
+    `L1`/uniqueness at all) plus a *sharper*, index-tracking version of the stack-none corollary
+    (`merge_corollary_stack_h1_index_eq`, via `List.find?_append`'s `Option.or` short-circuit semantics)
+    to reconstruct `loc? cfg = Stk fid'` in full from `loc? cfg' = Stk fid'`; from there every case reduces
+    to invoking `S2` on `cfg` directly, except the one genuinely new stack occurrence (`x`'s slot holding
+    `OId region'.bridgeObjectId`), which turns out **vacuous**: that id is already heap-allocated, directly
+    contradicting the just-derived "`oid` not in `cfg'.heap.objectIds`".
+  - **`merge_S3`'s surprising resolution**: it initially looks like `merge` breaks `S3` outright — an
+    *earlier* (`dropLast`) stack frame could in principle hold a ref that used to resolve into `region'`
+    and now resolves into `frame.regionId` (the *current*, highest-index frame's own region), for which
+    no valid ancestor could possibly exist (ancestors need index `≤` the holder's, and nothing has a
+    smaller index than an already-earlier frame yet *equal or larger* regionId-ownership than the last
+    frame). The resolution: this scenario is **already impossible in `cfg`**, by `cfg`'s own `S3` (`+S1`/
+    `L2`) — either the referenced `oid` was already in `region.objMap.keys` (then `S3` on `cfg` would
+    already have required an ancestor owning `frame.regionId`, which by `S1`'s regionId-uniqueness
+    lifted to `FrameWithIndex` — new corollary `merge_corollary_regionId_unique_index`, via
+    `List.Nodup.getElem_inj_iff` — could only be `frame` itself, whose index exceeds any `dropLast`
+    frame's, contradiction), or `oid` came from `region'` (then `S3` on `cfg` would need an ancestor
+    owning `rid'`, but `rid'` is `Closed` so by `L2` no stack frame can have that regionId, contradiction).
+    So the `dropLast`-frame case of `rid0 = frame.regionId` closes by contradiction, never needing a real
+    witness; the trivial witness (`frame`/`newFrame` itself, `index ≤ index` reflexively) only has to
+    cover the case where the *referencing* frame is itself the last one. The `rid0 ≠ frame.regionId`
+    branch transports the ancestor found via `s3` on `cfg` back into `cfg'.stackWithIndex` through the
+    shared `dropIdx` prefix (`merge_corollary_stackWithIndex_split`), ruling out the ancestor being the
+    differently-regionId'd last frame directly from `heqr`.
+  - **New gotchas this session**: (1) an `∃`-bundled goal (`merge_corollary_stack_h1_none`'s `∃ dropIdx,
+    eq1 ∧ eq2`) that hides `dropIdx`'s *definition* behind the existential is fine for equality-only
+    proofs but useless the moment a later proof needs to case-split `dropIdx`'s own structure (e.g. via
+    `List.mem_mapIdx`) — switched to `set dropIdx := ... with dropIdx_def` (keeping the definition visible)
+    once `merge_S3` needed to drill into it, at the cost of duplicating the two split equations per call
+    site rather than sharing them via the packaged corollary. (2) `omega` intermittently refused simple
+    `Nat` contradictions among `.index`/`.length`-projection hypotheses that were visibly sufficient
+    (`"No usable constraints found"` despite `a ≤ b`, `b = c`, `c < a` all being literally in context) —
+    same flakiness class already documented under `VarAsgn.lean`; worked around with an explicit
+    `Nat.not_le.mpr`/`rw` chain instead of trusting `omega`. (3) `unfold RuntimeConfig.stackWithIndex` on
+    a hypothesis/goal mentioning the substituted `cfg'` record literal leaves a dangling `.stack`/`.heap`
+    projection on that literal that `unfold` alone doesn't reduce — needs a following `dsimp only` before
+    any `rw` against a `cfg.stack.mapIdx (...) = ...`-shaped corollary can match syntactically.
+  - Otherwise the recurring gotchas already documented under prior files resurfaced unchanged: the
+    multi-line record-literal parser error inside a `have`'s type (`set newFrame`/`set dropIdx` fix), `rw
+    [h]`/`▸` picking the wrong occurrence or direction when a pattern appears more than once (fixed with
+    `subst`, or with fully spelled-out `rw [X] at h` chains instead of one-shot term rewrites), and `cases
+    h : e with` silently generalizing a goal's own `∃`-conjunct (fixed with `rfl` in place of the naively
+    expected hypothesis in `merge_cases`).
 - **`MakeObjStack.lean`** — **fully proved, builds cleanly, zero `sorry`** (finished 2026-07-26, across
   several checkpoints: `H3` first, then `S2`, then `S3`, then the corollaries). All 9 invariants
   (`makeObjStack_L1` … `_S3`, plus `_HS1`) and `makeObjStack_valid` are real proofs. Axiom check confirms
@@ -520,18 +628,21 @@ Elsewhere:
 
 ## Next planned step
 
-`Swap.lean` is now finished (see its bullet above for full context — the four-branch case scaffold,
-the genuine-exchange `H2` count argument, the unconditional `loc?`-transport corollaries for
-`H3`/`S2`/`S3`, and why its `S3` needed no `resolveV`/`resolveFA` provenance-tracing unlike
-`VarAsgn`/`FieldAsgn`'s). Together with `FieldAsgn.lean`, `VarAsgn.lean`, `MakeObjStack.lean`,
-`MakeObjRegion.lean`, `MakeRegion.lean`, `Exit.lean`, `Validity.lean`, `Enter.lean`, and `Start.lean`,
-that's every proof-bearing file in `Gc/Model/` done except the one not-started `Preservation` file below
-(zero `sorry` anywhere in `Gc/Model/` outside it, including both the `HS1` and `HS2` invariants — see
-`Validity.lean`'s note above for why `HS1` was added; `HS2` mirrors it for `RId`/`RegionId`).
+**`Merge.lean` is now finished** (2026-07-26; see its bullet above for full context — the heap-key-erasure
++ object-relocation machinery, the `merge_S3` "already impossible in `cfg`" resolution, and the new
+generic `List.kunion_eq_append_of_disjoint_keys`/`AList.union_eq_append_of_disjoint_keys` pair added to
+`Theorems.lean`). This was the last not-started `Preservation` file, so **every proof-bearing file in
+`Gc/Model/` is now done, zero `sorry` anywhere**: `Start.lean`, `Validity.lean`, `Enter.lean`, `Exit.lean`,
+`VarAsgn.lean`, `FieldAsgn.lean`, `Swap.lean`, `MakeObjStack.lean`, `MakeObjRegion.lean`, `MakeRegion.lean`,
+and `Merge.lean` all build cleanly with fully-real proofs, and `lake build` (bare) succeeds end to end
+(confirmed 2026-07-26 including the `merge_valid` axiom check: only `propext`/`Classical.choice`/
+`Quot.sound`, no leaked `sorry`).
 
-The remaining **not-started** file, `Merge.lean`, has all 10 invariant lemmas
-(`L1`/`L2`/`H1`/`H2`/`H3`/`S1`/`S2`/`S3`/`HS1`/`HS2`) as bare `sorry`, with only the combining
-`merge_valid` assembled. It's the sole `Mutation.lean` operation with a single case (no branching on
-where values live, unlike every `Preservation` file proved so far), which should make it the simplest
-file yet to scope out — but this hasn't been confirmed against its actual proof obligations the way
-`FieldAsgn.lean`/`Swap.lean` were scoped out in advance.
+`Gc/Model/` — the runtime model and its operational-semantics preservation proofs — is thus **complete**.
+The natural next step is the `Gc/Reachability/` layer (see its section above): `Reachability.lean`
+currently fails to build (wrong `Location` constructor names, `Stack`/`Region` instead of `Stk`/`Rgn` —
+not pulled into the default build target so this doesn't block `lake build`, but will need fixing before
+that file is usable), `Invariants.lean` has definitions but no proofs yet, and `Guarantees.lean` is an
+empty placeholder for the eventual GC-safety theorems this whole project is building toward. Scoping out
+what those theorems should even *say*, in terms of `RegionReachable`/`StackReachable`/`FrameReachable`
+from `Semantics.lean`, hasn't been done yet and would be the natural next planning session.
