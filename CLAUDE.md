@@ -404,107 +404,46 @@ not by reading file contents alone):
 - **`FieldAsgn.lean`** — **fully proved, builds cleanly, zero `sorry`, zero warnings** (finished
   2026-07-26, all 10 invariants in one session going easy-to-hard: `S1`, `H1`, `L2`, `L1`, `HS2`, `H2`,
   `HS1`, then `H3`, `S2`, `S3`). Axiom check on `fieldAsgn_valid` confirms only
-  `propext`/`Classical.choice`/`Quot.sound`; `lake build Gc.Model.Preservation.FieldAsgn` passes clean.
+  `propext`/`Classical.choice`/`Quot.sound`.
   - The operation: `fieldAsgn xf y cfg` resolves both `xf.root` and `y` via `resolveV` — **both must
-    resolve to `Reference.OId _`** (`RId` on either side makes the whole op stuck), so the value newly
-    written is always an `OId`, never an `RId`. Two branches on where `xf.root`'s object lives:
-    (1) **FIELD-ASGN-STACK** — the object is in the **last** frame (`Location.Stk fid` with `fid ==
-    frame.index`); looks up `obj := frame.objMap.lookup oid` (so `oid` is already a key) and replaces
-    `frame.objMap` with `frame.objMap.insert oid (obj.insert xf.field yRef)` — heap and every other frame
-    untouched, and even within the last frame only `objMap`'s value at the already-present key `oid`
-    changes (`varMap`/`regionId`/`bridgeVar` untouched); (2) **FIELD-ASGN-REGION** — the object is in a
-    heap region `rid`; requires `yRef.loc? cfg = some (Rgn rid)` (i.e. `y`'s value lives in the *same*
-    region) and `region.status == Open`, then replaces `cfg.heap` with `cfg.heap.insert rid {region with
-    objMap := region.objMap.insert oid (obj.insert xf.field yRef)}` — stack entirely untouched, region's
-    `bridgeObjectId`/`status` untouched. **`fieldAsgn` never allocates a fresh id** (like `VarAsgn`,
-    unlike `MakeObjStack`/`MakeObjRegion`/`MakeRegion`) — `oid` is always a pre-existing key in both
-    branches, so every `objMap`/`heap` insert in this file is a "replace value at an already-present key"
-    operation, not a fresh cons.
-  - **The one genuinely new wrinkle vs. `VarAsgn.lean`**: `VarAsgn`'s two branches each changed only a
-    *scalar* field (`bridgeObjectId`) or added a *fresh* key (`varMap`), so its `Reference.loc?`/objectIds/
-    refs transport corollaries got away with either literal equality or an unconditional `List.Perm`.
-    `FieldAsgn` instead replaces the *value* at an *already-present* key one level deeper (`frame.objMap`/
-    `region.objMap`'s value, itself an `Object` whose *own* insert at `xf.field` may or may not be at an
-    already-present key) — so every "did the key set change" argument now needs a genuine
-    `AList.insert`-at-existing-key permutation, and every "did the value change" argument needs its own
-    membership/count analysis of the mutated `Object`. Two small generic corollaries carry essentially the
-    whole file: `fieldAsgn_corollary_insert_keys_perm` (any `AList.insert` at an already-present key
-    permutes `.keys` but never changes the key *set*; via `List.exists_of_kerase` + `List.perm_middle.symm`
-    — much shorter than the ad-hoc `swap_perm`/`List.append_assoc` constructions used for the analogous
-    fact in `VarAsgn.lean`/`MakeObjRegion.lean`) and `fieldAsgn_corollary_mem_keys_of_lookup` (a successful
-    `lookup` means the key is already present, via `AList.lookup_isSome`).
-  - **`L1`**: needs genuine `List.Perm` (not literal equality like `VarAsgn`'s bridge branch), since here
-    the region/frame's `objMap` *content* changes, not just a scalar field.
-    `fieldAsgn_corollary_region_heap_objectIds_perm` composes the outer heap-entries reorder (same
-    `List.exists_of_kerase`/`NodupKeys.eq_of_mk_mem` technique as `varAsgn_corollary_bridge_heap_
-    objectIds_perm`) with an *extra* inner region-level permutation step (via `fieldAsgn_corollary_
-    insert_keys_perm`) that `VarAsgn`'s version didn't need.
-  - **`H2`/`HS2`**: since the newly-written value is always `OId`, never `RId`, any `Reference.RId`
-    occurrence's count can only *decrease-or-preserve*, never increase, under this mutation — proved at
-    the `Object`-field level first (`fieldAsgn_corollary_object_insert_count_le`, `fieldAsgn_corollary_
-    object_insert_refs_mem` for the membership-only version used by `HS2`) then propagated upward through
-    `ObjMap`-bind (`fieldAsgn_corollary_objMap_insert_bind_refs_count_le`/`_mem`), `Frame`/`Region`, and
-    finally `Stack`/`Heap`, mirroring the nesting depth of the mutation itself. **Gotcha**: after `rw
-    [hne]` turns an `if (v == t) = true then 1 else 0` into `if false = true then 1 else 0`, neither
-    `split_ifs <;> omega` nor plain `omega` can discharge the resulting goal on its own — `omega` doesn't
-    inspect a `Bool`-equality hypothesis like `h : false = true` for a contradiction (it only reasons about
-    linear arithmetic), so a branch that's actually *impossible* just looks like an unprovable inequality
-    to it. Fix: eliminate the always-false `ite` explicitly first via `rw [if_neg (by decide)]`, *before*
-    any `split_ifs`, so only the genuinely-undetermined `ite` (if any) remains for `omega` to case-split on.
-  - **`H3`/`S2`/`S3`** (the hard trio, saved for last per plan): needed a full `Reference.loc?` transport
-    corollary in each branch — `fieldAsgn_corollary_stack_loc_eq` (unconditional in `oid'`, mirroring
-    `varAsgn_corollary_fresh_loc_eq`'s case-split-on-`contains` structure, but needing a new generic lemma
-    `fieldAsgn_corollary_perm_contains_eq` — a `List.Perm` doesn't change what `.contains` reports — since
-    here, unlike `VarAsgn`'s untouched-objMap case, the key *list* itself genuinely reorders even though
-    the key *set* doesn't) and `fieldAsgn_corollary_region_loc_eq` (mirrors `varAsgn_corollary_bridge_
-    loc_eq`'s heap-reorder handling via its own local `fieldAsgn_corollary_region_unique` +
-    `fieldAsgn_corollary_loc_match_eq` combinator + `List.find?_eq_some_of_unique`, again composed with
-    the perm-contains argument for the mutated region's own key list). `S3`'s stack branch needed one more
-    ancestor-tracing corollary, `fieldAsgn_corollary_resolveV_loc_ancestor` — but this turned out to be
-    *exactly* `varAsgn_corollary_resolveV_loc_ancestor` verbatim (a fully general fact about `resolveV`,
-    not tied to any one mutation), copied rather than reused across files per this repo's
-    per-file-self-contained convention. Notably **simpler** than `VarAsgn.lean`'s equivalent: `VarAsgn`
-    needed the extra `varAsgn_corollary_yfRef_ancestor` wrapper because its `yf` parameter was a
-    `FieldAccess` (resolved via `resolveFA`, one indirection deeper); `FieldAsgn`'s `y` parameter is a
-    plain `VarName` resolved directly via `resolveV`, so `fieldAsgn_corollary_resolveV_loc_ancestor` alone
-    suffices with no wrapper. The region branch of `H3`/`S2`/`S3` is comparatively easy since the region
-    mutation never touches any frame's `refs` at all — just a direct `loc?` transport plus (for `H3`) a
-    case split on whether the ref in question is the newly-written field value.
-  - **New gotchas this session** (beyond the already-documented `find?_cons_of_pos/neg` HOU failure and
-    multi-line record-literal parser error, both of which resurfaced here too):
-    - `AList.mem_insert.mpr` doesn't resolve as dot notation (`Unknown constant`) even though
-      `AList.mem_insert` itself exists and `#check`s fine — the iff needs an explicit application first:
-      `(AList.mem_insert _).mpr (...)`, not `AList.mem_insert.mpr (...)`.
-    - `Status` only derives `BEq, DecidableEq` in `Types.lean`, **not** `LawfulBEq` — `beq_iff_eq` fails
-      with "failed to synthesize instance of type class `LawfulBEq Status`". Worked around locally by
-      `cases hs : region.status with | Open => rfl | Closed => contradiction`-style case splits instead of
-      converting the `==` to `=` via `beq_iff_eq`, rather than touching `Types.lean`'s `deriving` clause.
-    - When a `rw [...]` list contains the *same*-shaped lemma (e.g. two `List.map_append`s, two
-      `List.count_append`s) intended for *different* sides of a `≤`/`=` goal, `rw` applies each to
-      whichever matching occurrence it encounters first in traversal order — not necessarily the one
-      intended — silently leaving the *other* side unrewritten and the *wrong* occurrence rewritten twice.
-      Symptom: a later `rw` in the same list fails with "did not find occurrence" against a goal that
-      looks like it should have matched. Fix: split into separately-named `have`s (one per side, or one
-      per rewrite target) instead of one long combined `rw [...]` list whenever the same pattern occurs
-      more than once in a goal.
-    - A record-literal `{ x with field := v }` written inside a **standalone** `have`'s type (i.e. not at
-      the exact source position where the original mutation's `do`-notation already forces an "expected
-      type `Frame`" from context) elaborates at `x`'s own declared type instead — e.g. `frame :
-      FrameWithIndex`, so `{ frame with objMap := v }` elaborates as `FrameWithIndex`, not `Frame`, even
-      though the surrounding `List Frame ++ [...]` context "should" force it. This produces a confusing
-      `HAppend (List Frame) (List FrameWithIndex) Stack` instance-not-found error with no mention of the
-      record literal itself. Fix: an explicit type ascription, `({ frame with objMap := v } : Frame)`.
-    - `List.NodupKeys.eq_of_mk_mem`'s implicit `β : α → Type _` argument sometimes fails to unify on its
-      own when called deep inside other implicit-heavy term construction (confusing which `Sigma β` the
-      two `∈`-hypotheses live in) — supply it explicitly, e.g. `(β := fun _ : ObjectId => Object)`.
-    - `AList.lookup_mem_entries` (used freely in `VarAsgn.lean`/`MakeObjRegion.lean`/`Enter.lean`/
-      `Exit.lean`) doesn't resolve via a bare `#check` against only `import Mathlib` — it's a
-      **project-local** lemma defined in `Gc/Model/Theorems.lean` (a thin wrapper: `AList.lookup a s =
-      some b → ⟨a, b⟩ ∈ s.entries`, proved via `AList.mem_lookup_iff`), reachable fine once `Theorems.lean`
-      is imported transitively. `FieldAsgn.lean` ended up using both it directly (e.g. `fieldAsgn_H1`) and
-      the equivalent inline `AList.mem_lookup_iff.mp (by rw [h]; rfl)` pattern elsewhere, without settling
-      on one convention — prefer `AList.lookup_mem_entries` going forward since it's the established
-      project-local name for exactly this.
+    resolve to `Reference.OId _`**, so the value newly written is always an `OId`, never an `RId`. Two
+    branches on where `xf.root`'s object lives: (1) **FIELD-ASGN-STACK** — object in the **last** frame;
+    replaces `frame.objMap` with `frame.objMap.insert oid (obj.insert xf.field yRef)`, heap/other frames
+    untouched; (2) **FIELD-ASGN-REGION** — object in heap region `rid`; requires `yRef` to live in the
+    *same* region and `region.status == Open`, replaces `cfg.heap` with an analogous `objMap`-level
+    insert, stack entirely untouched. **Never allocates a fresh id** (like `VarAsgn`) — `oid` is always a
+    pre-existing key, so every insert in this file replaces a value at an already-present key.
+  - **New wrinkle vs. `VarAsgn.lean`**: `VarAsgn` changed only a *scalar* field or a *fresh* key, so its
+    transport corollaries got away with literal equality or an unconditional `Perm`. Here the mutation
+    replaces the *value* at an *already-present* key one level deeper (`frame`/`region`'s `objMap`, whose
+    own `Object` value may itself be inserted at a fresh-or-existing field), so every "key set unchanged"
+    argument needs a genuine `AList.insert`-at-existing-key permutation, not just equality. Two small
+    generic corollaries carry most of the file: `fieldAsgn_corollary_insert_keys_perm` (any such insert
+    permutes `.keys` but never changes the key *set*, via `List.exists_of_kerase` + `List.perm_middle.symm`
+    — shorter than the ad-hoc constructions used for the analogous VarAsgn/MakeObjRegion fact) and
+    `fieldAsgn_corollary_mem_keys_of_lookup` (a successful `lookup` means the key is already present).
+  - `L1` needs the genuine `Perm` above (`fieldAsgn_corollary_region_heap_objectIds_perm`, composing the
+    outer heap-entries reorder with the inner region-level permutation). `H2`/`HS2` lean on the fact that
+    the newly-written value is always `OId`, so any `RId` count can only decrease-or-preserve — proved at
+    the `Object`-field level then propagated up through `ObjMap`-bind, `Frame`/`Region`, `Stack`/`Heap`.
+    `H3`/`S2`/`S3` each needed a full `Reference.loc?` transport corollary per branch
+    (`fieldAsgn_corollary_stack_loc_eq`/`_region_loc_eq`, mirroring `VarAsgn`'s but needing a new
+    `fieldAsgn_corollary_perm_contains_eq` — a `Perm` doesn't change what `.contains` reports — since the
+    key *list* now genuinely reorders even though the key *set* doesn't). `S3`'s stack branch reused
+    `varAsgn_corollary_resolveV_loc_ancestor` verbatim (renamed `fieldAsgn_corollary_resolveV_loc_ancestor`,
+    copied per this repo's per-file convention) and came out simpler than `VarAsgn`'s equivalent since
+    `fieldAsgn`'s `y : VarName` resolves directly via `resolveV`, with no `resolveFA` wrapper needed.
+  - **New gotchas this session** (beyond the already-documented `find?_cons_of_pos/neg`/record-literal
+    ones, which resurfaced here too): `AList.mem_insert.mpr` doesn't resolve as dot notation — needs
+    `(AList.mem_insert _).mpr (...)`. `Status` derives `BEq`/`DecidableEq` but not `LawfulBEq`, so
+    `beq_iff_eq` fails to synthesize — case-split on `region.status` directly instead. After `rw [hne]`
+    turns an `ite` condition into `false = true`, `split_ifs <;> omega` doesn't discharge it — `omega`
+    doesn't inspect `Bool`-equality hypotheses for contradictions, so eliminate the always-false branch
+    explicitly first via `rw [if_neg (by decide)]`. A `rw [...]` list with the same-shaped lemma appearing
+    twice (e.g. two `List.count_append`s) can silently rewrite the wrong occurrence — split into
+    separately-named `have`s per side instead. A record literal `{ x with ... }` inside a *standalone*
+    `have`'s type elaborates at `x`'s own declared type rather than the context's expected type (e.g.
+    `FrameWithIndex` instead of `Frame`) — fix with an explicit ascription, `({ x with ... } : Frame)`.
 
 Elsewhere:
 
