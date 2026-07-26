@@ -405,7 +405,98 @@ theorem merge_S3 : ValidConfig cfg →
 theorem merge_HS1 : ValidConfig cfg →
   merge x cfg = some cfg' →
   HS1 cfg' := by
-  sorry
+  intro vcfg h
+  have l1 := vcfg.l1
+  have h1 := vcfg.h1
+  have hs1 := vcfg.hs1
+  obtain ⟨frame, rid', region, region', hframe, hxref, hregion, hregion', hclosed, hopen, hcfg'⟩ :=
+    merge_cases h
+  subst hcfg'
+  unfold HS1
+  have hne := merge_corollary_rid_ne_regionId hregion hregion' hclosed hopen
+  have heap_refs_perm' : (Heap.refs ((cfg.heap.erase rid').insert frame.regionId { region with
+      objMap := AList.union region.objMap region'.objMap })).Perm cfg.heap.refs :=
+    merge_corollary_heap_refs_perm l1 hregion hregion' hne
+  have heap_ids_perm' : (Heap.objectIds ((cfg.heap.erase rid').insert frame.regionId { region with
+      objMap := AList.union region.objMap region'.objMap })).Perm cfg.heap.objectIds :=
+    merge_corollary_heap_objectIds_perm l1 hregion hregion' hne
+  have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame] :=
+    (List.dropLast_append_getLast? frame hframe).symm
+  have stack_split1 : Stack.refs (cfg.stack.dropLast ++
+      [{ frame with varMap := frame.varMap.insert x (Reference.OId region'.bridgeObjectId) }]) =
+      Stack.refs cfg.stack.dropLast ++ Frame.refs { frame with
+        varMap := frame.varMap.insert x (Reference.OId region'.bridgeObjectId) } := by
+    unfold Stack.refs
+    rw [List.bind_eq_flatMap, List.bind_eq_flatMap, List.flatMap_id, List.flatMap_id,
+      List.map_append, List.flatten_append, List.map_singleton, List.flatten_singleton]
+  have stack_split2 : Stack.refs cfg.stack = Stack.refs cfg.stack.dropLast ++ Frame.refs frame := by
+    conv_lhs => rw [stack_eq]
+    unfold Stack.refs
+    rw [List.bind_eq_flatMap, List.bind_eq_flatMap, List.flatMap_id, List.flatMap_id,
+      List.map_append, List.flatten_append, List.map_singleton, List.flatten_singleton]
+  have newFrame_split : Frame.refs { frame with
+      varMap := frame.varMap.insert x (Reference.OId region'.bridgeObjectId) } =
+      (frame.objMap.entries.map (·.2) >>= Object.refs) ++
+        (frame.varMap.insert x (Reference.OId region'.bridgeObjectId)).entries.map (·.2) := by
+    unfold Frame.refs; rfl
+  have frame_split : Frame.refs frame =
+      (frame.objMap.entries.map (·.2) >>= Object.refs) ++ frame.varMap.entries.map (·.2) := by
+    unfold Frame.refs; rfl
+  have stack_objectIds_eq : Stack.objectIds (cfg.stack.dropLast ++
+      [{ frame with varMap := frame.varMap.insert x (Reference.OId region'.bridgeObjectId) }]) =
+      Stack.objectIds cfg.stack := by
+    conv_rhs => rw [stack_eq]
+    unfold Stack.objectIds
+    rw [List.map_append, List.map_append]
+    rfl
+  have objectIds_perm : (Stack.objectIds (cfg.stack.dropLast ++
+      [{ frame with varMap := frame.varMap.insert x (Reference.OId region'.bridgeObjectId) }]) ++
+      Heap.objectIds ((cfg.heap.erase rid').insert frame.regionId { region with
+        objMap := AList.union region.objMap region'.objMap })).Perm
+      (Stack.objectIds cfg.stack ++ Heap.objectIds cfg.heap) := by
+    rw [stack_objectIds_eq]
+    exact List.Perm.append_left (Stack.objectIds cfg.stack) heap_ids_perm'
+  -- `region'.bridgeObjectId` (the value the new varMap entry takes) was already an allocated id.
+  have hbridge_mem : region'.bridgeObjectId ∈ cfg.objectIds := by
+    have hbmem : region'.bridgeObjectId ∈ region'.objMap :=
+      h1 region' (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hregion'))
+    rw [AList.mem_keys] at hbmem
+    unfold RuntimeConfig.objectIds
+    exact List.mem_append_right _ (List.mem_flatten.mpr
+      ⟨region'.objMap.keys, List.mem_map_of_mem (f := fun e => e.2.objectIds)
+        (AList.lookup_mem_entries hregion'), hbmem⟩)
+  intro oid href
+  unfold RuntimeConfig.refs at href
+  dsimp at href
+  unfold RuntimeConfig.objectIds
+  dsimp
+  rw [List.mem_append] at href
+  have hoid_cfg : oid ∈ cfg.objectIds := by
+    rcases href with h1' | h1'
+    · rw [stack_split1, List.mem_append] at h1'
+      rcases h1' with h1' | h1'
+      · exact hs1 oid (by
+          unfold RuntimeConfig.refs
+          exact List.mem_append_left _ (stack_split2 ▸ List.mem_append_left _ h1'))
+      · rw [newFrame_split, List.mem_append] at h1'
+        rcases h1' with h1' | h1'
+        · exact hs1 oid (by
+            unfold RuntimeConfig.refs
+            exact List.mem_append_left _ (stack_split2 ▸ List.mem_append_right _ (frame_split ▸ List.mem_append_left _ h1')))
+        · have hsub : List.Sublist (List.kerase x frame.varMap.entries) frame.varMap.entries :=
+            List.kerase_sublist x frame.varMap.entries
+          have hins := AList.entries_insert (a := x) (b := Reference.OId region'.bridgeObjectId) (s := frame.varMap)
+          rw [hins, List.map_cons] at h1'
+          rcases List.mem_cons.mp h1' with heq | h1'
+          · rw [Reference.OId.injEq] at heq
+            rw [heq]
+            exact hbridge_mem
+          · exact hs1 oid (by
+              unfold RuntimeConfig.refs
+              exact List.mem_append_left _ (stack_split2 ▸ List.mem_append_right _
+                (frame_split ▸ List.mem_append_right _ ((hsub.map (·.2)).mem h1'))))
+    · exact hs1 oid (by unfold RuntimeConfig.refs; exact List.mem_append_right _ (heap_refs_perm'.mem_iff.mp h1'))
+  exact objectIds_perm.mem_iff.mpr hoid_cfg
 
 theorem merge_HS2 : ValidConfig cfg →
   merge x cfg = some cfg' →
