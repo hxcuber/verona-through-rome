@@ -81,18 +81,50 @@ The proof development has two layers under `Gc/`:
 - `Theorems.lean` — generic `List`/`AList` lemmas (not domain-specific) used as a small helper library
   by the `Preservation` proofs.
 
-### `Gc/Reachability/` — reachability/liveness definitions (newer, less complete layer)
+### `Gc/Reachability/` — reachability/liveness definitions (now substantially built out)
 
 - `Semantics.lean` — `RegionReachable` (reachable from a region's bridge object, staying inside the
   region), `StackReachable`/`FrameReachable` (reachable from stack variables, optionally scoped to one
-  frame's stack-index).
+  frame's stack-index), and `FrameRoot` (the two ways a `FrameReachable` chain can start: a stack var's
+  value, or a frame's own region's bridge object). Also proves `RegionReachable_iff_reflTransGen`/
+  `FrameReachable_iff_reflTransGen`, converting the inductive props to `Relation.ReflTransGen (RefStep
+  cfg) start ref` form — the representation almost every CR1–CR3 proof actually works with.
+- `Path.lean` — a thin `Path`/`ValidPath` wrapper (`path.refs : List Reference`, valid when consecutive
+  refs are linked by `RefStep`) used specifically by the CR2 proof below, which needs to reason about
+  *every* element of a chain (via `List.IsChain` induction), not just its endpoints.
+- `Corollaries.lean` — the reusable, non-operation-specific reachability lemmas, in three groups:
+  - **CR1** (`RegionReachable_implies_FrameReachable`): if a region has an associated (on-stack) frame,
+    everything region-reachable in it is also frame-reachable from that frame. `RegionReachable_stays_
+    in_region` (H3-driven: once a chain resolves into a region, it never leaves) is proved along the way.
+  - **CR2** (`Path_from_frame_to_own_region_stays_in_frame`): a path rooted at frame F, ending at an
+    object in F's own region, never passes through any *other* frame's stack slot. Built from S2/S3-
+    driven upper/lower index bounds (`Path_from_frame_upper_bound`/`_lower_bound`, `FrameRoot_upper_
+    bound`, `RefStep_upper_bound_step`/`_lower_bound_step`) combined via `le_antisymm`.
+  - **Reusable `ReflTransGen`-flavored machinery** (added 2026-07-28 while proving `fieldAsgn_cr3`, see
+    below): `ReflTransGen_rgn_confined` (once a chain resolves into a region, H3 forces every *later*
+    chain element into that exact same region — the `RefStep`-chain analogue of CR2, but for regions
+    rather than stack slots, and rooted at an arbitrary point rather than a `FrameRoot`); `ReflTransGen_
+    upper_bound` (a `Relation.ReflTransGen`-based restatement of the same S2/S3 upper-bound argument
+    behind CR2, avoiding the `List`/`Path`/`IsChain` detour); `FrameReachable_owner_index_le`/
+    `FrameReachable_stk_index_le` (packaged wrappers: any region/stack-slot reached along a
+    `FrameReachable cfg frameY.index _` chain has an owner-index/slot-index `≤ frameY.index`). The
+    latter two are the actual workhorses `fieldAsgn_cr3`/`varAsgn_cr3` call for their "was this value
+    already visible from *some* frame no later than the suspended owner" argument (see their bullets
+    below).
 - `Reachability.lean` — a fuel-based *computational* reachability walk (`Region.reachableRefs`,
   `RuntimeConfig.stackReachableRefs`) rather than the inductive props above; **currently fails to
   build** — it pattern-matches on `Location.Stack`/`Location.Region`, but `Types.lean`'s `Location`
-  constructors are actually named `Location.Stk`/`Location.Rgn`.
+  constructors are actually named `Location.Stk`/`Location.Rgn`. Not pulled into the default build
+  target, so this doesn't block `lake build`; untouched since the `Validity/` layer below made it
+  effectively redundant (the inductive `FrameReachable`/`RefStep` machinery is what CR3 actually uses).
 - `Invariants.lean` — cross-config properties about reachability being preserved for suspended regions
-  and earlier frames across a transition (currently just definitions/comments, no proofs yet).
+  and earlier frames across a transition (currently just definitions/comments, no proofs yet) —
+  **superseded in practice by `Validity/`'s `CR3` below**, which formalizes and proves exactly this
+  property per-operation. Worth revisiting only if `Invariants.lean`'s own phrasing is needed for the
+  eventual `Guarantees.lean` theorems.
 - `Guarantees.lean` — currently an empty file (placeholder for the eventual GC-safety theorems).
+- `Validity/` — a `ValidConfig`-style invariant *specifically* about reachability (`CR3`, see below),
+  plus its own `Preservation/*.lean` mirroring `Gc/Model/Preservation/*.lean`'s per-operation pattern.
 
 ## Current known state (check before assuming something works)
 
@@ -606,6 +638,112 @@ not by reading file contents alone):
     goal's own `∃`-conjunct when its LHS syntactically matches `e` independent of the existential witness
     (fixed with `rfl` in place of the naively-expected hypothesis at three sites in `swap_cases`).
 
+### `Gc/Reachability/Validity/` — CR3 preservation (mirrors the `Gc/Model/Preservation/` pattern above)
+
+`Validity/Reachable.lean` defines the third reachability invariant:
+
+```
+def CR3 (cfg : RuntimeConfig) : Prop :=
+  ∀ frame ∈ cfg.stackWithIndex, ∀ frame' ∈ cfg.stackWithIndex,
+    frame.index < frame'.index →
+    ∀ oid, (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId) →
+    FrameReachable cfg frame'.index (Reference.OId oid) →
+    FrameReachable cfg frame.index (Reference.OId oid)
+```
+
+("if an object lives in a suspended region owned by an earlier frame F, and is frame-reachable from
+some later frame F', it's already frame-reachable from F itself" — report.pdf CR3). Unlike L1–HS2, CR3
+isn't provable from a `ValidConfig` snapshot alone (nothing in the 9 invariants says anything about
+*how* a reference came to exist) — it's a fact about the operational semantics, so it's proved to hold
+at `RuntimeConfig.start` (`Validity/Start.lean`) and preserved by every `Mutation.lean` operation
+(`Validity/Preservation/*.lean`), exactly mirroring `Gc/Model/Preservation/*.lean`'s per-operation
+pattern. `ValidReachableConfig cfg extends ValidConfig cfg` with a `cr3` field.
+
+Per-operation status (8 of 9 operations done; `Swap.lean` is the one remaining `sorry` — see "Next
+planned step" below):
+
+- **`Enter.lean`/`Exit.lean`/`MakeObjStack.lean`/`MakeObjRegion.lean`/`MakeRegion.lean`/`Merge.lean`**
+  — **all fully proved, zero `sorry`** (done across earlier sessions, before this file had a "Current
+  known state" entry for the `Reachability/` layer at all — retroactively documented here from reading
+  the finished proofs). All six follow the same skeleton: an `objAt_eq`/`refStep_iff` corollary showing
+  `RefStep` is either fully unconditional or conditional only on "not the freshly-allocated id" (these
+  five operations are additive — `Enter` pushes an empty frame, `MakeObjStack`/`MakeObjRegion`/
+  `MakeRegion` allocate a fresh, isolated (empty) object — so newly-added content can never itself be a
+  `RefStep` *source*); a `frameRoot_down`/`_iff` corollary transporting `FrameRoot` witnesses cfg'→cfg
+  (unconditional for non-fresh values, since a fresh-var/fresh-region slot can never supply an
+  already-existing `OId`/`RId` shape); and a main `<op>_cr3` proof that case-splits on whether the
+  CR3-quantified `frame'` sits at the newly-added/mutated stack position or an old one, applying
+  `vrcfg.cr3` in the "old position" branch and a direct argument in the "new position" branch (the
+  fresh/entered content trivially can't already be region-resident in a way CR3 cares about). `Merge.lean`
+  is the exception worth its own note: since merge *relocates* existing objects rather than adding a
+  fresh one, its `objAt_eq`/`refStep_iff` corollaries (`merge_corollary_objAt_eq`/`_refStep_iff`) are
+  **fully unconditional for every reference** (nothing is created, destroyed, or content-edited, only
+  regrouped between heap keys) — the *simplest* of the six in this respect, despite `Merge.lean` being
+  the hardest file in `Gc/Model/Preservation/` for the L1–HS2 invariants.
+- **`FieldAsgn.lean`** — **fully proved, zero `sorry`** (finished 2026-07-28). The first CR3 proof where
+  the mutated object's *own content* genuinely changes (a field write can add a brand-new edge, or
+  silently overwrite an existing one) rather than the mutation being purely additive — so the "mutated
+  object never lies on the relevant chain" argument the other six files lean on (fresh/isolated content,
+  never a valid `RefStep` source) doesn't apply here at all, and this file took a full session.
+  - **Key insight** (from the project's own author, sketched informally before any Lean was written): if
+    a post-mutation reachability chain uses the newly-written field's edge, the value written there
+    (`yRef`, from `resolveV`/`resolveFA`) was *already* resolvable pre-mutation, so it already has its
+    own natural root `frameY`. By the same S2/S3 "no reference from an earlier frame into a later
+    frame/region" argument CR2 already uses, `frame.index ≤ frameY.index` (`frame` being the suspended
+    region's owner) — the pre-existing path *can't* have come from strictly later than `frame`, since
+    `frame` itself already S1-uniquely owns the target region. The case split is then `frameY = frame`
+    (trivial) or `frame.index < frameY.index` (recurse into `vrcfg.cr3` itself, using `frameY` as the
+    "later frame" this time).
+  - **New reusable facts added to `Corollaries.lean`** to make this precise (see its bullet above):
+    `ReflTransGen_rgn_confined`, `ReflTransGen_upper_bound`, `FrameReachable_owner_index_le`,
+    `FrameReachable_stk_index_le`. In the end only the latter two (the packaged wrappers, not the raw
+    `ReflTransGen`-level ones) were needed by the final proof — `ReflTransGen_rgn_confined` was built
+    first while exploring a more complicated "confinement" approach that turned out unnecessary once the
+    owner's own S1+S3 argument (above) was worked out directly, but is left in `Corollaries.lean` as a
+    genuinely reusable, independently-true fact (not yet needed elsewhere).
+  - **Proof shape**: `fieldAsgn_corollary_stack_objAt_eq_of_ne`/`_region_objAt_eq_of_ne` (`objAt?`
+    equality for any oid *other than* the mutated container, built on top of the already-unconditional
+    `fieldAsgn_corollary_stack_loc_eq`/`_region_loc_eq` from `Gc.Model.Preservation.FieldAsgn`) plus
+    `_stack_objAt_mutated`/`_region_objAt_mutated` (the mutated container's own exact new content). The
+    main `fieldAsgn_cr3` proof structures the "down" transport as `main_claim`, an induction via
+    `Relation.ReflTransGen.head_induction_on` (walking forward from the chain's start, target fixed at
+    CR3's own `oid`) whose invariant is "the remaining suffix is *already* a valid cfg-chain, OR the
+    overall goal is already established" — at each hop, `by_cases` on whether the hop's source is
+    exactly the mutated container *and* its target is exactly the newly-written value; if so, invoke the
+    escape (`FrameReachable_owner_index_le` + case split, described above); otherwise the hop transports
+    down unconditionally (via the objAt-ne corollaries, plus `fieldAsgn_corollary_object_insert_refs_mem`
+    from the Model layer to show a *retained* old field edge, when the target isn't the newly-written
+    value specifically). The "up" transport (after invoking `vrcfg.cr3`) is comparatively easy: the
+    suspended `frame` is *never* the mutated frame (`frame.index < frame'.index ≤` the mutated frame's
+    own index, since the mutated frame is always the stack's *last* one), so its own root set and every
+    `RefStep` hop reachable from it are provably untouched by the mutation, via the same bound applied to
+    rule out the mutated object ever appearing on *this* chain specifically.
+  - Axiom check on `fieldAsgn_cr3`/`fieldAsgn_reachable_valid` confirms only
+    `propext`/`Classical.choice`/`Quot.sound`.
+- **`VarAsgn.lean`** — **fully proved, zero `sorry`** (finished 2026-07-28, immediately after
+  `FieldAsgn.lean` and considerably faster once the escape technique above already existed).
+  Substantially simpler than `FieldAsgn.lean`: `varAsgn` never touches any `objMap` at all (only
+  `varMap`, or a region's `bridgeObjectId` scalar field), so `varAsgn_corollary_objAt_eq` is fully
+  **unconditional for every reference** (built directly on top of the already-unconditional
+  `varAsgn_corollary_loc_eq` from the Model layer, plus new `varAsgn_corollary_stack_shape_eq`/
+  `_heap_objMap_eq` showing the relevant `objMap` component is untouched at every position/key) —
+  meaning `RefStep cfg = RefStep cfg'` pointwise, and no per-hop induction is needed *at all* (unlike
+  `FieldAsgn.lean`'s `main_claim`). The only thing that can differ between cfg/cfg' is the *root set*
+  itself: the bridge branch replaces one region's `bridgeObjectId`, the fresh-var branch adds one new
+  `varMap` key — and in both branches, that one new/changed root value is always exactly `resolveFA
+  y cfg`'s result (a pre-existing reference). New helper `varAsgn_corollary_resolveFA_frameReach`
+  (`resolveFA y cfg = some (OId oid) → ∃ frameY, FrameReachable cfg frameY.index (OId oid)`, composing a
+  `varAsgn_corollary_resolveV_frameRoot`-style root fact for `y.root` with one more `RefStep` hop for the
+  field access itself) plays the analogous role to `FieldAsgn.lean`'s escape setup. The proof structure:
+  build `hconcDown : FrameReachable cfg frameD.index oid` directly via an outer `rcases` on
+  `varAsgn_cases`'s two branches, each further `rcases`-ing `FrameRoot`'s two disjuncts and `by_cases`-ing
+  whether the specific witness frame/value is the mutated one; the `escape` closure (identical in shape
+  to `FieldAsgn.lean`'s) handles that case, ordinary `FrameRoot` transport handles the rest. The final
+  "up" transport is the same "the suspended `frame` is never the mutated frame" argument as
+  `FieldAsgn.lean`.
+  - Axiom check on `varAsgn_cr3`/`varAsgn_reachable_valid` confirms only
+    `propext`/`Classical.choice`/`Quot.sound`.
+
 Elsewhere:
 
 - **`Gc/Model/Validity.lean`** — **fully proved, builds cleanly, zero `sorry`** (as of 2026-07-24). Its
@@ -628,21 +766,52 @@ Elsewhere:
 
 ## Next planned step
 
-**`Merge.lean` is now finished** (2026-07-26; see its bullet above for full context — the heap-key-erasure
-+ object-relocation machinery, the `merge_S3` "already impossible in `cfg`" resolution, and the new
-generic `List.kunion_eq_append_of_disjoint_keys`/`AList.union_eq_append_of_disjoint_keys` pair added to
-`Theorems.lean`). This was the last not-started `Preservation` file, so **every proof-bearing file in
-`Gc/Model/` is now done, zero `sorry` anywhere**: `Start.lean`, `Validity.lean`, `Enter.lean`, `Exit.lean`,
-`VarAsgn.lean`, `FieldAsgn.lean`, `Swap.lean`, `MakeObjStack.lean`, `MakeObjRegion.lean`, `MakeRegion.lean`,
-and `Merge.lean` all build cleanly with fully-real proofs, and `lake build` (bare) succeeds end to end
-(confirmed 2026-07-26 including the `merge_valid` axiom check: only `propext`/`Classical.choice`/
-`Quot.sound`, no leaked `sorry`).
+`Gc/Model/` (the runtime model and its operational-semantics preservation proofs) has been **complete**
+since 2026-07-26 — see its own "Current known state" section above. Since then, `Gc/Reachability/`'s CR3
+layer (`Validity/Preservation/*.lean`, see its section above) has been built out to **8 of 9 operations
+done, zero `sorry`**: `Enter`/`Exit`/`MakeObjStack`/`MakeObjRegion`/`MakeRegion`/`Merge` (earlier sessions)
+and `FieldAsgn`/`VarAsgn` (this session, 2026-07-28). **`Swap.lean`'s `swap_cr3` is the only remaining
+`sorry` in the entire `Gc/` tree** (confirmed via `grep -c sorry` across every `.lean` file under `Gc/`,
+2026-07-28). Once it's proved, `Gc/Reachability/Validity/` — CR3 preservation across every `Mutation.lean`
+operation — reaches the same completion milestone `Gc/Model/` already has.
 
-`Gc/Model/` — the runtime model and its operational-semantics preservation proofs — is thus **complete**.
-The natural next step is the `Gc/Reachability/` layer (see its section above): `Reachability.lean`
-currently fails to build (wrong `Location` constructor names, `Stack`/`Region` instead of `Stk`/`Rgn` —
-not pulled into the default build target so this doesn't block `lake build`, but will need fixing before
-that file is usable), `Invariants.lean` has definitions but no proofs yet, and `Guarantees.lean` is an
-empty placeholder for the eventual GC-safety theorems this whole project is building toward. Scoping out
-what those theorems should even *say*, in terms of `RegionReachable`/`StackReachable`/`FrameReachable`
-from `Semantics.lean`, hasn't been done yet and would be the natural next planning session.
+**Rough plan for `Swap.lean`'s CR3 proof** (not yet started; based on reading `Gc/Model/Preservation/
+Swap.lean`'s own CR3-relevant corollaries — `swap_corollary_stack_loc_eq`/`_region_loc_eq`/
+`_stack_varmap_loc_eq`, all already fully **unconditional** in `oid'` — and on the technique that worked
+for `FieldAsgn.lean`/`VarAsgn.lean` above):
+
+- `swap` is the hardest of the "content-mutating" operations because it's a genuine **exchange**: `x`'s
+  var value and `yf`'s field value trade places, rather than one overwriting a copy of the other. This
+  means, unlike `FieldAsgn`, there are potentially **two** simultaneously-changing slots to reason about
+  (three, counting the bridge branch's `bridgeObjectId`) — mirroring why the Model-layer's own `swap_H2`
+  needed a genuine additive *identity* rather than a `≤`-bound (see `Swap.lean`'s own bullet above).
+- **Good news, reducing the risk**: `swap`'s `Reference.loc?` transport is *already* the sharpest of any
+  file proved so far — fully **unconditional for every `oid'`** (no `oid ≠ freshObjectId`-style exception
+  at all, since `swap` never allocates a fresh id or adds/removes an `objMap`/heap key anywhere — every
+  insert replaces a value at an already-present key). If `objAt?`/`RefStep` turn out *also* unconditional
+  (plausible — like `FieldAsgn`, the exchanged content only ever changes the two swapped slots' own
+  field/key *value*, never the surrounding key *set* at any level), the proof should reduce to: for each
+  of the four `swap_cases` sub-branches (SWAP-STACK, SWAP-REGION-OBJECT, SWAP-REGION-REGION,
+  SWAP-REGION-BRIDGE), identify the (at most two) slots whose *value* actually changes, and reuse the
+  same `main_claim` shape (`head_induction_on`-based per-hop induction, escaping via
+  `FrameReachable_owner_index_le`/`_stk_index_le` when a hop's source/target pair matches one of the
+  swapped slots) as `fieldAsgn_cr3`.
+- **Where it likely gets harder than `FieldAsgn`**: SWAP-STACK and the SWAP-REGION-* variants change `x`'s
+  var slot (or the region's `bridgeObjectId`) *at the same time* as `yf`'s field/objMap slot — so
+  `main_claim`'s per-hop `by_cases` needs to check against **two** distinguished (source, target) pairs,
+  not one, and the escape may need to fire for *either* of the two newly-placed values (both `x`'s new
+  value landing at `yf`'s old slot, and `yf`'s old value landing at `x`'s old slot) — each via its own
+  `resolveV`/`resolveFA`-provenance fact, probably reusing `varAsgn_corollary_resolveV_frameRoot`/
+  `fieldAsgn_corollary_resolveFA_frameReach`-style helpers again (copied per this repo's per-file
+  convention, or perhaps finally worth promoting to a shared location given this would be their *third*
+  copy). SWAP-REGION-BRIDGE additionally swaps a `bridgeObjectId` (heap-level, mirroring `VarAsgn.lean`'s
+  bridge branch) *simultaneously* with an objMap field write (mirroring `FieldAsgn.lean`) — likely the
+  single hardest sub-case, combining both files' complications in one branch.
+- **Suggested attack order**: SWAP-STACK first (closest to `FieldAsgn`'s STACK branch, just with two
+  slots swapped instead of one field overwritten), then SWAP-REGION-OBJECT/`-REGION` (closest to
+  `FieldAsgn`'s REGION branch), then SWAP-REGION-BRIDGE last (hardest, combines both prior files'
+  techniques). Get `swap_cases`'s four-way case split confirmed via `lean_goal` before writing any real
+  proof (per this repo's established habit), and expect to need `swap_corollary_stack_field_eq_yfRef`/
+  `_region_field_eq_yfRef` (already in `Gc.Model.Preservation.Swap`) for the "compute the exchanged
+  values' exact identity" step, analogous to `fieldAsgn_corollary_stack_objAt_mutated`/`_region_objAt_
+  mutated` from this session.
