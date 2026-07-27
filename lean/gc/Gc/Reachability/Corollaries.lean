@@ -285,7 +285,7 @@ private theorem Path_from_frame_upper_bound (cfg : RuntimeConfig) (hvalid : Vali
 -- An allocated object id always resolves somewhere (never `none`) -- needed because the backward
 -- step below has to determine whether the *successor* in a step resolves `Stk` or `Rgn` before it
 -- can pick which of S2/S3 to chain through.
-private theorem loc_ne_none_of_mem_objectIds (cfg : RuntimeConfig) (hvalid : ValidConfig cfg) (oid : ObjectId)
+theorem loc_ne_none_of_mem_objectIds (cfg : RuntimeConfig) (hvalid : ValidConfig cfg) (oid : ObjectId)
     (hmem : oid ∈ cfg.objectIds) : (Reference.OId oid).loc? cfg ≠ none := by
   unfold RuntimeConfig.objectIds at hmem
   rw [List.mem_append] at hmem

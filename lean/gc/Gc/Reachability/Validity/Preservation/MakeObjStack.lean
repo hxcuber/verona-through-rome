@@ -1,4 +1,4 @@
-import Gc.Model.Mutation
+import Gc.Model.Mutation.MakeObjStack
 import Gc.Model.Preservation.MakeObjStack
 import Gc.Reachability.Validity.Reachable
 

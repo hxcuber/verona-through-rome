@@ -1,4 +1,4 @@
-import Gc.Model.Mutation
+import Gc.Model.Mutation.VarAsgn
 import Gc.Model.Preservation.VarAsgn
 import Gc.Reachability.Validity.Reachable
 

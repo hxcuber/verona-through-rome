@@ -1,7 +1,20 @@
 -- This module serves as the root of the `Gc` library.
 -- Import modules here that should be built as part of the library.
 import Gc.Model.Helpers
-import Gc.Model.Mutation
+import Gc.Model.Mutation.Mutation
+import Gc.Reachability.Corollaries
+import Gc.Reachability.Path
+import Gc.Reachability.Validity.Reachable
+import Gc.Reachability.Validity.Start
+import Gc.Reachability.Validity.Preservation.Enter
+import Gc.Reachability.Validity.Preservation.Exit
+import Gc.Reachability.Validity.Preservation.FieldAsgn
+import Gc.Reachability.Validity.Preservation.MakeObjRegion
+import Gc.Reachability.Validity.Preservation.MakeObjStack
+import Gc.Reachability.Validity.Preservation.MakeRegion
+import Gc.Reachability.Validity.Preservation.Merge
+import Gc.Reachability.Validity.Preservation.Swap
+import Gc.Reachability.Validity.Preservation.VarAsgn
 import Gc.Model.Preservation.Enter
 import Gc.Model.Preservation.Exit
 import Gc.Model.Preservation.FieldAsgn

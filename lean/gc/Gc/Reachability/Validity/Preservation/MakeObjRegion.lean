@@ -1,4 +1,4 @@
-import Gc.Model.Mutation
+import Gc.Model.Mutation.MakeObjRegion
 import Gc.Model.Preservation.MakeObjRegion
 import Gc.Reachability.Validity.Reachable
 

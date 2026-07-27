@@ -2,7 +2,7 @@ import Gc.Model.Types
 import Gc.Model.Helpers
 import Gc.Model.Validity
 import Gc.Model.Theorems
-import Gc.Model.Mutation
+import Gc.Model.Mutation.MakeObjStack
 
 import Mathlib.Data.List.Infix
 

@@ -1,4 +1,4 @@
-import Gc.Model.Mutation
+import Gc.Model.Mutation.FieldAsgn
 import Gc.Model.Preservation.FieldAsgn
 import Gc.Reachability.Validity.Reachable
 

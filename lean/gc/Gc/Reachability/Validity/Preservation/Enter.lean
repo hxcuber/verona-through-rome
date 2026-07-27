@@ -1,38 +1,9 @@
-import Gc.Model.Mutation
+import Gc.Model.Mutation.Enter
 import Gc.Model.Preservation.Enter
 import Gc.Model.Preservation.Swap
 import Gc.Reachability.Validity.Reachable
 import Gc.Reachability.Corollaries
 
-
-private theorem enter_cases (h : enter xf a cfg = some cfg') :
-    ∃ rid region, resolveFA xf cfg = some (Reference.RId rid) ∧ cfg.heap.lookup rid = some region ∧
-      region.status = Status.Closed ∧
-      cfg' = { cfg with
-        stack := cfg.stack ++ [{ regionId := rid, bridgeVar := a, objMap := ∅, varMap := ∅ }],
-        heap := cfg.heap.insert rid { region with status := Status.Open } } := by
-  unfold enter at h
-  cases hresolve : resolveFA xf cfg with
-  | none => rw [hresolve] at h; contradiction
-  | some xfRef =>
-    rw [hresolve] at h
-    dsimp at h
-    cases xfRef with
-    | OId _ => contradiction
-    | RId rid =>
-      dsimp at h
-      cases hheapLookup : cfg.heap.lookup rid with
-      | none => rw [hheapLookup] at h; contradiction
-      | some region =>
-        rw [hheapLookup] at h
-        dsimp at h
-        cases hstatus : region.status with
-        | Open => rw [hstatus] at h; contradiction
-        | Closed =>
-          rw [hstatus] at h
-          rw [if_pos (by rfl)] at h
-          rw [Option.some_inj] at h
-          exact ⟨rid, region, rfl, hheapLookup, hstatus, h.symm⟩
 
 -- Old (already-on-stack) frames' own region can never be the entered region: L2 says every
 -- on-stack frame's own region is already Open, but `enter` requires the entered region Closed.
