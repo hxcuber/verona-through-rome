@@ -11,3 +11,5 @@ Major changes from the report
 - `HS2` - same as `HS1`, but for region references.
 
 - updated reachability semantic definitions to more accurately reflect what was said in the report - in particular generalising both region and frame reachability, and then truly matching stack reachability to its definition found in the report.
+
+- CR3 is actually a valid configuration invariant that should be preserved with every operation, not just a corollary from the reachability statements. Deciding on what to do with it...
