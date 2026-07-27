@@ -815,3 +815,28 @@ for `FieldAsgn.lean`/`VarAsgn.lean` above):
   `_region_field_eq_yfRef` (already in `Gc.Model.Preservation.Swap`) for the "compute the exchanged
   values' exact identity" step, analogous to `fieldAsgn_corollary_stack_objAt_mutated`/`_region_objAt_
   mutated` from this session.
+
+**After `Swap.lean`: consolidate the duplicated/cross-imported helpers.** Once all 9 operations are done,
+the "per-file self-contained" convention (deliberate throughout `Gc/Model/Preservation/`, so each file
+reads standalone) has started to produce genuine duplication in `Gc/Reachability/Validity/Preservation/`
+that's worth cleaning up rather than perpetuating into a fourth/fifth copy for future operations:
+- `fieldAsgn_corollary_resolveV_frameRoot` and `varAsgn_corollary_resolveV_frameRoot` are byte-for-byte
+  identical proofs, just renamed per-file; `varAsgn_corollary_resolveFA_frameReach` will very likely need
+  a third near-identical copy in `Swap.lean` (`swap`'s `yf : FieldAccess`, exactly like `varAsgn`'s).
+  These should become one shared definition (in `Gc.Reachability.Corollaries`, alongside the other
+  non-operation-specific reachability lemmas) rather than N private copies.
+- More importantly, both `FieldAsgn.lean` and `VarAsgn.lean` currently `import Gc.Model.Preservation.Swap`
+  *purely* to borrow generic, non-swap-specific lemmas — `swap_corollary_stackWithIndex_index_inj`,
+  `swap_corollary_stackWithIndex_find_eq` (and separately get `merge_corollary_regionId_unique_index`
+  transitively, via `Gc.Reachability.Corollaries`'s own `import Gc.Model.Preservation.Merge`, needed
+  there for CR2's proof). These live inside `Swap`/`Merge` only because that's where they were *first*
+  needed, not because they're conceptually about swapping or merging — reaching into a sibling
+  operation's preservation file for a generic frame-index fact is exactly the "importing other proofs"
+  smell worth avoiding. Once `Swap.lean` is done and it's clear which facts are *actually* shared across
+  every operation (not just guessed at), pull these into a proper home — either `Gc.Model.Theorems`/
+  `Gc.Model.Helpers` (if they're really about `stackWithIndex` in general, no `ValidConfig` needed) or a
+  new small `Gc.Model.Preservation.Common`-style file — and have `Swap`/`Merge` import *from* there
+  instead of being the accidental source everyone else imports *from*.
+- This is a refactor to do **after** `Swap.lean`'s CR3 proof is green, not before — doing it mid-flight
+  risks destabilizing the 8 already-finished proofs for a cleanup that's easier to scope correctly once
+  all 9 operations' actual sharing patterns are known.
