@@ -48,21 +48,24 @@ def fieldAsgn (xf : FieldAccess) (y : VarName) (cfg : RuntimeConfig) : Option (R
       else
         none
     | Location.Rgn rid =>
-      let region ← cfg.heap.lookup rid
-      let obj ← region.objMap.lookup oid
-      let yfRefLoc ← yRef.loc? cfg
-      match yfRefLoc with
-      | Location.Stk _ => none
-      | Location.Rgn rid' =>
-        if rid == rid' ∧ region.status == Status.Open then
-          -- FIELD-ASGN-REGION
-          some { cfg with
-            heap := cfg.heap.insert rid { region with
-              objMap := region.objMap.insert oid (obj.insert xf.field yRef)
+      if rid == frame.regionId then
+        let region ← cfg.heap.lookup rid
+        let obj ← region.objMap.lookup oid
+        let yfRefLoc ← yRef.loc? cfg
+        match yfRefLoc with
+        | Location.Stk _ => none
+        | Location.Rgn rid' =>
+          if rid == rid' ∧ region.status == Status.Open then
+            -- FIELD-ASGN-REGION
+            some { cfg with
+              heap := cfg.heap.insert rid { region with
+                objMap := region.objMap.insert oid (obj.insert xf.field yRef)
+              }
             }
-          }
-        else
-          none
+          else
+            none
+      else
+        none
   | _, _ => none
 
 def swap (x : VarName) (yf : FieldAccess) (cfg : RuntimeConfig) : Option (RuntimeConfig) := do

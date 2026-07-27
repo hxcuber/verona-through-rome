@@ -13,3 +13,5 @@ Major changes from the report
 - updated reachability semantic definitions to more accurately reflect what was said in the report - in particular generalising both region and frame reachability (`RegionReachable`, `FrameReachable`), and then truly matching stack reachability (`StackReachable`) to its definition found in the report.
 
 - `CR3` is actually a valid configuration invariant that should be preserved with every operation, not just a corollary from the reachability statements. Deciding on what to do with it...
+
+- `fieldAsgn` - fixed a bug with the lean implementation, where in the case that `x` in `x.f` is a region object, it hadn't previously checked that `x` is from the current frame's region, instead only checking that `x` and `y` are from the same region.

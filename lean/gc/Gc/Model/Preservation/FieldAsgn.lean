@@ -23,6 +23,7 @@ theorem fieldAsgn_cases (h : fieldAsgn xf y cfg = some cfg') :
           region.objMap.lookup oid = some obj ∧
           (Reference.OId oid_y).loc? cfg = some (Location.Rgn rid) ∧
           region.status = Status.Open ∧
+          rid = frame.regionId ∧
           cfg' = { cfg with heap := cfg.heap.insert rid { region with
             objMap := region.objMap.insert oid (obj.insert xf.field (Reference.OId oid_y)) } })) := by
   unfold fieldAsgn at h
@@ -72,39 +73,43 @@ theorem fieldAsgn_cases (h : fieldAsgn xf y cfg = some cfg') :
                 · rw [if_neg hfid] at h; contradiction
               | Rgn rid =>
                 dsimp at h
-                cases hregion : cfg.heap.lookup rid with
-                | none => rw [hregion] at h; contradiction
-                | some region =>
-                  rw [hregion] at h
-                  dsimp at h
-                  cases hobj : region.objMap.lookup oid with
-                  | none => rw [hobj] at h; contradiction
-                  | some obj =>
-                    rw [hobj] at h
+                by_cases hfrid : (rid == frame.regionId) = true
+                · rw [if_pos hfrid] at h
+                  rw [beq_iff_eq] at hfrid
+                  cases hregion : cfg.heap.lookup rid with
+                  | none => rw [hregion] at h; contradiction
+                  | some region =>
+                    rw [hregion] at h
                     dsimp at h
-                    cases hyloc : (Reference.OId oid_y).loc? cfg with
-                    | none => rw [hyloc] at h; dsimp at h; contradiction
-                    | some yloc =>
-                      rw [hyloc] at h
+                    cases hobj : region.objMap.lookup oid with
+                    | none => rw [hobj] at h; contradiction
+                    | some obj =>
+                      rw [hobj] at h
                       dsimp at h
-                      cases yloc with
-                      | Stk fid' => dsimp at h; contradiction
-                      | Rgn rid' =>
+                      cases hyloc : (Reference.OId oid_y).loc? cfg with
+                      | none => rw [hyloc] at h; dsimp at h; contradiction
+                      | some yloc =>
+                        rw [hyloc] at h
                         dsimp at h
-                        by_cases hcond : rid == rid' ∧ region.status == Status.Open
-                        · rw [if_pos hcond] at h
-                          obtain ⟨hridEq0, hstatusEq0'⟩ := hcond
-                          rw [beq_iff_eq] at hridEq0
-                          have hstatusEq0 : region.status = Status.Open := by
-                            cases hs : region.status with
-                            | Open => rfl
-                            | Closed => rw [hs] at hstatusEq0'; contradiction
-                          rw [Option.some_inj] at h
-                          right
-                          subst hridEq0
-                          exact ⟨oid, oid_y, rid, region, obj, rfl, rfl, hloc, hregion, hobj, hyloc,
-                            hstatusEq0, h.symm⟩
-                        · rw [if_neg hcond] at h; contradiction
+                        cases yloc with
+                        | Stk fid' => dsimp at h; contradiction
+                        | Rgn rid' =>
+                          dsimp at h
+                          by_cases hcond : rid == rid' ∧ region.status == Status.Open
+                          · rw [if_pos hcond] at h
+                            obtain ⟨hridEq0, hstatusEq0'⟩ := hcond
+                            rw [beq_iff_eq] at hridEq0
+                            have hstatusEq0 : region.status = Status.Open := by
+                              cases hs : region.status with
+                              | Open => rfl
+                              | Closed => rw [hs] at hstatusEq0'; contradiction
+                            rw [Option.some_inj] at h
+                            right
+                            subst hridEq0
+                            exact ⟨oid, oid_y, rid, region, obj, rfl, rfl, hloc, hregion, hobj, hyloc,
+                              hstatusEq0, hfrid, h.symm⟩
+                          · rw [if_neg hcond] at h; contradiction
+                · rw [if_neg hfrid] at h; contradiction
 
 -- Relates the `stackWithIndex.getLast?` frame used by `fieldAsgn_cases` back to `cfg.stack`'s own
 -- decomposition, mirroring the `stack_eq`/`stackWithIndex_eq` construction used throughout
@@ -193,7 +198,7 @@ theorem fieldAsgn_L1 : ValidConfig cfg →
   unfold L1
   rcases hcase with
     ⟨oid, oid_y, obj, hxr, hyr, hloc, hobj, hcfg'⟩ |
-    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hcfg'⟩
+    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
   · subst hcfg'
     obtain ⟨stack_eq, _⟩ := fieldAsgn_corollary_stack_eq hframe
     have hoidmem : oid ∈ frame.objMap.keys := fieldAsgn_corollary_mem_keys_of_lookup hobj
@@ -237,7 +242,7 @@ theorem fieldAsgn_L2 : ValidConfig cfg →
   unfold L2
   rcases hcase with
     ⟨oid, oid_y, obj, hxr, hyr, hloc, hobj, hcfg'⟩ |
-    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hcfg'⟩
+    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
   · subst hcfg'
     obtain ⟨stack_eq, _⟩ := fieldAsgn_corollary_stack_eq hframe
     have frame_mem : frame.toFrame ∈ cfg.stack :=
@@ -273,7 +278,7 @@ theorem fieldAsgn_S1 : ValidConfig cfg →
   unfold S1
   rcases hcase with
     ⟨oid, oid_y, obj, hxr, hyr, hloc, hobj, hcfg'⟩ |
-    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hcfg'⟩
+    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
   · subst hcfg'
     obtain ⟨stack_eq, _⟩ := fieldAsgn_corollary_stack_eq hframe
     have s1' : (cfg.stack.dropLast.map (fun frame => frame.regionId) ++ [frame.regionId]).Nodup := by
@@ -297,7 +302,7 @@ theorem fieldAsgn_H1 : ValidConfig cfg →
   unfold H1
   rcases hcase with
     ⟨oid, oid_y, obj, hxr, hyr, hloc, hobj, hcfg'⟩ |
-    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hcfg'⟩
+    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
   · subst hcfg'
     dsimp
     exact h1
@@ -553,7 +558,7 @@ theorem fieldAsgn_H2 : ValidConfig cfg →
   unfold H2
   rcases hcase with
     ⟨oid, oid_y, obj, hxr, hyr, hloc, hobj, hcfg'⟩ |
-    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hcfg'⟩
+    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
   · subst hcfg'
     intro rid'
     obtain ⟨stack_eq, _⟩ := fieldAsgn_corollary_stack_eq hframe
@@ -882,7 +887,7 @@ theorem fieldAsgn_H3 : ValidConfig cfg →
   unfold H3
   rcases hcase with
     ⟨oid, oid_y, obj, hxr, hyr, hloc, hobj, hcfg'⟩ |
-    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hcfg'⟩
+    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
   · subst hcfg'
     intro rid0 oid0 region0 hlookup0 href0
     dsimp at hlookup0
@@ -917,7 +922,7 @@ theorem fieldAsgn_S2 : ValidConfig cfg →
   unfold S2
   rcases hcase with
     ⟨oid, oid_y, obj, hxr, hyr, hloc, hobj, hcfg'⟩ |
-    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hcfg'⟩
+    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
   · subst hcfg'
     obtain ⟨stack_eq, _⟩ := fieldAsgn_corollary_stack_eq hframe
     set newFrame : Frame :=
@@ -1040,7 +1045,7 @@ theorem fieldAsgn_S3 : ValidConfig cfg →
   unfold S3
   rcases hcase with
     ⟨oid, oid_y, obj, hxr, hyr, hloc, hobj, hcfg'⟩ |
-    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hcfg'⟩
+    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
   · subst hcfg'
     obtain ⟨stack_eq, _⟩ := fieldAsgn_corollary_stack_eq hframe
     set newFrame : Frame :=
@@ -1122,7 +1127,7 @@ theorem fieldAsgn_HS1 : ValidConfig cfg →
   unfold HS1
   rcases hcase with
     ⟨oid, oid_y, obj, hxr, hyr, hloc, hobj, hcfg'⟩ |
-    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hcfg'⟩
+    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
   · subst hcfg'
     obtain ⟨stack_eq, _⟩ := fieldAsgn_corollary_stack_eq hframe
     have hoidmem : oid ∈ frame.objMap.keys := fieldAsgn_corollary_mem_keys_of_lookup hobj
@@ -1220,7 +1225,7 @@ theorem fieldAsgn_HS2 : ValidConfig cfg →
   unfold HS2
   rcases hcase with
     ⟨oid, oid_y, obj, hxr, hyr, hloc, hobj, hcfg'⟩ |
-    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hcfg'⟩
+    ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
   · subst hcfg'
     obtain ⟨stack_eq, _⟩ := fieldAsgn_corollary_stack_eq hframe
     have stack_refs_append : ∀ (l : Stack) (f : Frame), Stack.refs (l ++ [f]) = Stack.refs l ++ f.refs := by
