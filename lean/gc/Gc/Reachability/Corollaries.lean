@@ -715,6 +715,8 @@ theorem resolveFA_frameReach {cfg : RuntimeConfig} {y : FieldAccess} {oid : Obje
                 (AList.mem_lookup_iff.mp (Option.mem_def.mpr hyf) |> (List.mem_map_of_mem (f := (·.2))) )
                 ) hreachY0⟩
 
+-- report.pdf CR4. `_hframesus` isn't needed by the proof (CR3 already forces it vacuously when
+-- `frame` is the active/last frame) -- kept only to stay faithful to the report's statement.
 theorem StackReachable_iff_FrameReachable (cfg : RuntimeConfig) (vrcfg : ValidReachableConfig cfg)
     (frame : FrameWithIndex) (hframemem : frame ∈ cfg.stackWithIndex)
     (_hframesus : frame.index < cfg.stackWithIndex.length - 1)
