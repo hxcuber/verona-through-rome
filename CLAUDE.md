@@ -104,7 +104,7 @@ The proof development has two layers under `Gc/`:
 - `Path.lean` — a thin `Path`/`ValidPath` wrapper (`path.refs : List Reference`, valid when consecutive
   refs are linked by `RefStep`) used specifically by the CR2 proof below, which needs to reason about
   *every* element of a chain (via `List.IsChain` induction), not just its endpoints.
-- `Corollaries.lean` — the reusable, non-operation-specific reachability lemmas, in three groups:
+- `Corollaries.lean` — the reusable, non-operation-specific reachability lemmas, in four groups:
   - **CR1** (`RegionReachable_implies_FrameReachable`): if a region has an associated (on-stack) frame,
     everything region-reachable in it is also frame-reachable from that frame. `RegionReachable_stays_
     in_region` (H3-driven: once a chain resolves into a region, it never leaves) is proved along the way.
@@ -123,6 +123,22 @@ The proof development has two layers under `Gc/`:
     latter two are the actual workhorses `fieldAsgn_cr3`/`varAsgn_cr3` call for their "was this value
     already visible from *some* frame no later than the suspended owner" argument (see their bullets
     below).
+  - **CR4** (`StackReachable_iff_FrameReachable`, added 2026-07-28): packages CR3 into a single iff —
+    an object living in a region owned by (on-stack) frame `frame` is stack-wide reachable
+    (`StackReachable`) iff it's already reachable from `frame` alone (`FrameReachable cfg
+    frame.index _`). Drafted by the user as a rough skeleton (one sorry, unfinished backward
+    direction); the sorry (`frame.index < frame'.index`, asserted unconditionally) was actually false
+    as stated, since the witness frame `frame'` could coincide with `frame` itself. Fixed by getting
+    `frame.index ≤ frame'.index` from `FrameReachable_owner_index_le` first, then a `.lt_or_eq` split:
+    the strict case invokes CR3 directly, the equality case collapses `frame' = frame` via
+    `stackWithIndex` index-uniqueness (`swap_corollary_stackWithIndex_index_inj`, from
+    `Gc.Model.Preservation.Common`). Takes an explicit `_hframesus` ("`frame` isn't the active/last
+    frame") hypothesis that the proof doesn't actually need — CR3 is already vacuously satisfied
+    whenever `frame` is the last frame (nothing has a larger index to instantiate `frame'` with), so
+    the equality branch fires there regardless — but it's kept (underscore-prefixed to silence the
+    unused-variable linter, matching `Merge.lean`'s `_hregion'` precedent) purely to stay faithful to
+    report.pdf's own CR4 statement. Backward direction needed no changes: `frame` itself is already a
+    valid `StackReachable` witness.
 - `Reachability.lean` — a fuel-based *computational* reachability walk (`Region.reachableRefs`,
   `RuntimeConfig.stackReachableRefs`) rather than the inductive props above; **currently fails to
   build** — it pattern-matches on `Location.Stack`/`Location.Region`, but `Types.lean`'s `Location`
