@@ -7,7 +7,7 @@ import Gc.Reachability.Corollaries
 -- Every on-stack frame's region is Open (L2), but `rid'` (the region being merged away) is
 -- Closed -- so no on-stack frame (in particular, no frame reachable via `vcfg.l2`) can ever own
 -- `rid'`. General fact, reusable at any position.
-private theorem merge_corollary_frame_ne_rid' (vcfg : ValidConfig cfg) {rid' : RegionId} {region' : Region}
+theorem merge_corollary_frame_ne_rid' (vcfg : ValidConfig cfg) {rid' : RegionId} {region' : Region}
     (hregion' : cfg.heap.lookup rid' = some region') (hclosed : region'.status = Status.Closed)
     {frame : Frame} (hframe : frame ∈ cfg.stack) : frame.regionId ≠ rid' := by
   intro hc
@@ -238,7 +238,7 @@ private theorem merge_corollary_objAt_eq (vcfg : ValidConfig cfg) {x : VarName} 
 
 -- `RefStep` is fully unconditionally preserved (a direct corollary of `objAt_eq`'s unconditional
 -- content preservation).
-private theorem merge_corollary_refStep_iff (vcfg : ValidConfig cfg) {x : VarName} {cfg' : RuntimeConfig}
+theorem merge_corollary_refStep_iff (vcfg : ValidConfig cfg) {x : VarName} {cfg' : RuntimeConfig}
     (h : merge x cfg = some cfg') : ∀ a b, RefStep cfg a b ↔ RefStep cfg' a b := by
   intro a b
   cases a with
@@ -413,6 +413,109 @@ private theorem merge_corollary_frameRoot_down (vcfg' : ValidConfig cfg')
         obtain ⟨h1, heq⟩ := List.getElem?_eq_some_iff.mp hcfgn
         exact List.mem_mapIdx.mpr ⟨n, h1, by rw [heq, ← hidx_n]⟩
       exact ⟨fr, hfr_untouched, hidx, region0, by rw [hlookup'']; exact hlookup, hstart⟩
+
+-- `FrameReachable` is completely unaffected at any position strictly before the mutated (last)
+-- one -- generalizes the frame-transport / heap-lookup argument `merge_cr3` already builds inline
+-- for its own specific `frame` (`frame_transport_down`/`_up`, `hframe_ridne_frame1`/
+-- `hframe_ridne_rid'`) to an arbitrary suspended `fid`, since CR5 (`Gc/Reachability/Validity/
+-- CR5.lean`) needs exactly this fact, not CR3's later-frame-implies-earlier-frame shape. Unlike
+-- `makeObjStack`/`makeObjRegion`/`makeRegion`'s analogues, only `ValidConfig cfg` is needed (no
+-- `cfg'` validity, matching `merge_corollary_refStep_iff`'s own unconditional-in-`cfg'` shape).
+theorem merge_corollary_frameReachable_iff_of_lt (vcfg : ValidConfig cfg)
+    (h : merge x cfg = some cfg')
+    {fid : Index} (hfid : fid < cfg.stack.dropLast.length) (ref : Reference) :
+    FrameReachable cfg fid ref ↔ FrameReachable cfg' fid ref := by
+  obtain ⟨frame1, rid', region1, region', hframe1Last, hxref1, hregion1, hregion', hclosed1, hopen1, hcfg'⟩ :=
+    merge_cases h
+  have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame1] :=
+    (List.dropLast_append_getLast? frame1 hframe1Last).symm
+  have hframe1_get : cfg.stack[cfg.stack.dropLast.length]? = some frame1 := by
+    conv_lhs => rw [stack_eq]; simp
+  have hlast1_mem : ({ frame1 with index := cfg.stack.dropLast.length } : FrameWithIndex) ∈ cfg.stackWithIndex := by
+    obtain ⟨hh1, hheq⟩ := List.getElem?_eq_some_iff.mp hframe1_get
+    unfold RuntimeConfig.stackWithIndex
+    exact List.mem_mapIdx.mpr ⟨cfg.stack.dropLast.length, hh1, by rw [hheq]⟩
+  have frame_transport_down : ∀ fr : FrameWithIndex, fr ∈ cfg'.stackWithIndex →
+      fr.index < cfg.stack.dropLast.length → fr ∈ cfg.stackWithIndex := by
+    intro fr hfr hltfr
+    obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hfr
+    have hidx_n : fr.index = n := by rw [← hfeq]
+    have hlt : n < cfg.stack.dropLast.length := by rw [← hidx_n]; exact hltfr
+    have e1 : cfg.stack[n]? = cfg.stack.dropLast[n]? := by
+      conv_lhs => rw [stack_eq]
+      rw [List.getElem?_append_left hlt]
+    have e2 : cfg'.stack[n]? = cfg.stack.dropLast[n]? := by
+      rw [hcfg']; dsimp only
+      rw [List.getElem?_append_left hlt]
+    have hfr_get? : cfg'.stack[n]? = some fr.toFrame := by
+      rw [show fr.toFrame = cfg'.stack[n] from by rw [← hfeq]]
+      exact List.getElem?_eq_getElem hn
+    have hcfgn : cfg.stack[n]? = some fr.toFrame := by rw [e1, ← e2, hfr_get?]
+    obtain ⟨h1, heq⟩ := List.getElem?_eq_some_iff.mp hcfgn
+    unfold RuntimeConfig.stackWithIndex
+    exact List.mem_mapIdx.mpr ⟨n, h1, by rw [heq, ← hidx_n]⟩
+  have frame_transport_up : ∀ fr : FrameWithIndex, fr ∈ cfg.stackWithIndex →
+      fr.index < cfg.stack.dropLast.length → fr ∈ cfg'.stackWithIndex := by
+    intro fr hfr hltfr
+    obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hfr
+    have hidx_n : fr.index = n := by rw [← hfeq]
+    have hlt : n < cfg.stack.dropLast.length := by rw [← hidx_n]; exact hltfr
+    have e1 : cfg.stack[n]? = cfg.stack.dropLast[n]? := by
+      conv_lhs => rw [stack_eq]
+      rw [List.getElem?_append_left hlt]
+    have e2 : cfg'.stack[n]? = cfg.stack.dropLast[n]? := by
+      rw [hcfg']; dsimp only
+      rw [List.getElem?_append_left hlt]
+    have hfr_get? : cfg.stack[n]? = some fr.toFrame := by
+      rw [show fr.toFrame = cfg.stack[n] from by rw [← hfeq]]
+      exact List.getElem?_eq_getElem hn
+    have hcfg'n : cfg'.stack[n]? = some fr.toFrame := by rw [e2, ← e1, hfr_get?]
+    obtain ⟨h1, heq⟩ := List.getElem?_eq_some_iff.mp hcfg'n
+    unfold RuntimeConfig.stackWithIndex
+    exact List.mem_mapIdx.mpr ⟨n, h1, by rw [heq, ← hidx_n]⟩
+  -- Any suspended frame's own `regionId` is never `frame1.regionId` (S1-index-uniqueness: a
+  -- shared regionId would force a shared index, contradicting `hfid`) nor `rid'` (L2: `fr` is
+  -- on-stack, so its region is Open, but `rid'`'s region is Closed) -- so its heap entry is
+  -- unaffected by both the `insert` (at `frame1.regionId`) and the `erase` (at `rid'`).
+  have hridne1 : ∀ fr : FrameWithIndex, fr ∈ cfg.stackWithIndex → fr.index = fid →
+      fr.regionId ≠ frame1.regionId := by
+    intro fr hfr hidx hc
+    have hidxeq := merge_corollary_regionId_unique_index vcfg.s1 hfr hlast1_mem hc
+    dsimp only at hidxeq
+    rw [hidx] at hidxeq
+    exact absurd hidxeq (Nat.ne_of_lt hfid)
+  have hridne2 : ∀ fr : FrameWithIndex, fr ∈ cfg.stackWithIndex → fr.regionId ≠ rid' := by
+    intro fr hfr
+    obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hfr
+    have hget : cfg.stack[n]? = some fr.toFrame := by
+      rw [show fr.toFrame = cfg.stack[n] from by rw [← hfeq]]
+      exact List.getElem?_eq_getElem hn
+    exact merge_corollary_frame_ne_rid' vcfg hregion' hclosed1 (frame := fr.toFrame) (List.mem_of_getElem? hget)
+  have hfrRootIff : ∀ start, FrameRoot cfg fid start ↔ FrameRoot cfg' fid start := by
+    intro start
+    unfold FrameRoot
+    constructor
+    · rintro (⟨fr, hfr, hidx, var, hlookup⟩ | ⟨fr, hfr, hidx, region, hlookup, hstart⟩)
+      · exact Or.inl ⟨fr, frame_transport_up fr hfr (hidx ▸ hfid), hidx, var, hlookup⟩
+      · exact Or.inr ⟨fr, frame_transport_up fr hfr (hidx ▸ hfid), hidx, region,
+          by rw [hcfg']; dsimp only
+             rw [AList.lookup_insert_ne (hridne1 fr hfr hidx), AList.lookup_erase_ne (hridne2 fr hfr)]
+             exact hlookup, hstart⟩
+    · rintro (⟨fr, hfr, hidx, var, hlookup⟩ | ⟨fr, hfr, hidx, region, hlookup, hstart⟩)
+      · exact Or.inl ⟨fr, frame_transport_down fr hfr (hidx ▸ hfid), hidx, var, hlookup⟩
+      · have hfrCfg : fr ∈ cfg.stackWithIndex := frame_transport_down fr hfr (hidx ▸ hfid)
+        exact Or.inr ⟨fr, hfrCfg, hidx, region,
+          by rw [hcfg'] at hlookup; dsimp only at hlookup
+             rw [AList.lookup_insert_ne (hridne1 fr hfrCfg hidx), AList.lookup_erase_ne (hridne2 fr hfrCfg)] at hlookup
+             exact hlookup, hstart⟩
+  rw [FrameReachable_iff_reflTransGen, FrameReachable_iff_reflTransGen]
+  constructor
+  · rintro ⟨start, hroot, hrtg⟩
+    exact ⟨start, (hfrRootIff start).mp hroot,
+      hrtg.mono (fun a b hab => (merge_corollary_refStep_iff vcfg h a b).mp hab)⟩
+  · rintro ⟨start, hroot, hrtg⟩
+    exact ⟨start, (hfrRootIff start).mpr hroot,
+      hrtg.mono (fun a b hab => (merge_corollary_refStep_iff vcfg h a b).mpr hab)⟩
 
 theorem merge_cr3 : ValidReachableConfig cfg →
   merge x cfg = some cfg' →
