@@ -150,7 +150,20 @@ theorem cr5_step_makeObjStack (x : VarName) : CR5_step (Stmt.makeObjStack x) := 
   exact makeObjStack_corollary_frameReachable_iff_of_lt vcfg vcfg' h hidlt ref
 
 theorem cr5_step_makeRegion (x : VarName) : CR5_step (Stmt.makeRegion x) := by
-  sorry
+  intro cfg cfg' vrcfg h i hsusp ref
+  have vcfg := vrcfg.toValidConfig
+  have vcfg' := makeRegion_valid vcfg h
+  have hlt := Suspended_lt_length_sub_one hsusp
+  obtain ⟨frame1, hframe1Last, hcfg'⟩ := makeRegion_cases h
+  have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame1] :=
+    (List.dropLast_append_getLast? frame1 hframe1Last).symm
+  have hlenWI : cfg.stackWithIndex.length = cfg.stack.length := by
+    unfold RuntimeConfig.stackWithIndex; rw [List.length_mapIdx]
+  have hlen : cfg.stack.length = cfg.stack.dropLast.length + 1 := by rw [stack_eq]; simp
+  have hidlt : i < cfg.stack.dropLast.length := by
+    rw [hlenWI, hlen] at hlt
+    simpa using hlt
+  exact makeRegion_corollary_frameReachable_iff_of_lt vcfg vcfg' h hidlt ref
 
 theorem cr5_step_merge (x : VarName) : CR5_step (Stmt.merge x) := by
   sorry
