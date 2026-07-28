@@ -27,6 +27,8 @@ def Stack.objectIds (stack : Stack) : List ObjectId :=
 def RuntimeConfig.objectIds (cfg : RuntimeConfig) : List ObjectId :=
   cfg.stack.objectIds ++ cfg.heap.objectIds
 
+def RuntimeConfig.regionIds (cfg : RuntimeConfig) : List RegionId := cfg.heap.keys
+
 def RuntimeConfig.freshRegionId (cfg : RuntimeConfig) : RegionId :=
   match cfg.heap.keys with
   | [] => 0

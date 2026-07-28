@@ -1,0 +1,9 @@
+import Gc.Model.Preservation.Enter
+import Gc.Model.Preservation.Exit
+import Gc.Model.Preservation.FieldAsgn
+import Gc.Model.Preservation.MakeObjRegion
+import Gc.Model.Preservation.MakeObjStack
+import Gc.Model.Preservation.MakeRegion
+import Gc.Model.Preservation.Merge
+import Gc.Model.Preservation.Swap
+import Gc.Model.Preservation.VarAsgn
