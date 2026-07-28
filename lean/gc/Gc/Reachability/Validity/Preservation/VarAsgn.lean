@@ -115,7 +115,7 @@ private theorem varAsgn_corollary_heap_objMap_eq (h : varAsgn xf y cfg = some cf
 -- exception): `loc?` is already unconditionally unchanged (`varAsgn_corollary_loc_eq`), and
 -- neither branch ever touches an `objMap`, so whichever frame/region `loc?` resolves into has
 -- identical content in both configs.
-private theorem varAsgn_corollary_objAt_eq (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
+theorem varAsgn_corollary_objAt_eq (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
     (h : varAsgn xf y cfg = some cfg') (ref : Reference) : ref.objAt? cfg = ref.objAt? cfg' := by
   cases ref with
   | RId rid0 => rfl
