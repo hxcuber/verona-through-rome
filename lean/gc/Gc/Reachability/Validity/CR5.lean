@@ -197,7 +197,22 @@ theorem cr5_step_merge (x : VarName) : CR5_step (Stmt.merge x) := by
   exact merge_corollary_frameReachable_iff_of_lt vcfg h hidlt ref
 
 theorem cr5_step_swap (x : VarName) (yf : FieldAccess) : CR5_step (Stmt.swap x yf) := by
-  sorry
+  intro cfg cfg' vrcfg h i hsusp ref
+  obtain ⟨frame, hframe, hidx, active, hactive, hlt0⟩ := hsusp
+  have vcfg := vrcfg.toValidConfig
+  have vcfg' := swap_valid vcfg h
+  have hlt := Suspended_lt_length_sub_one ⟨frame, hframe, hidx, active, hactive, hlt0⟩
+  obtain ⟨frame0, hframe0, _, _, _, _, _, _, _, _, _⟩ := swap_cases h
+  obtain ⟨stack_eq0, hidx00⟩ := swap_corollary_stack_eq hframe0
+  have hlenWI : cfg.stackWithIndex.length = cfg.stack.length := by
+    unfold RuntimeConfig.stackWithIndex; rw [List.length_mapIdx]
+  have hlen : cfg.stack.length = cfg.stack.dropLast.length + 1 := by rw [stack_eq0]; simp
+  have hidlt : i < cfg.stack.dropLast.length := by
+    rw [hlenWI, hlen] at hlt
+    simpa using hlt
+  have hframelt : frame.index < cfg.stack.dropLast.length := by rw [hidx]; exact hidlt
+  have hres := swap_corollary_frameReachable_iff_of_lt vcfg vcfg' h frame hframelt ref
+  rwa [hidx] at hres
 
 theorem cr5_step_varAsgn (x : VarName) (yf : FieldAccess) : CR5_step (Stmt.varAsgn x yf) := by
   intro cfg cfg' vrcfg h i hsusp ref

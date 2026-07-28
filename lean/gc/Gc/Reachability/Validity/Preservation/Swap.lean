@@ -497,6 +497,482 @@ private theorem swap_corollary_root_escape {cfg : RuntimeConfig} (vcfg : ValidCo
   · have hltidx : frameD.index < frame0.index := lt_of_le_of_ne hownerbound heqidx
     exact vrcfg.cr3 frameD hframeDMem frame0 hframe0_mem hltidx oid hlocDown hreachY
 
+-- `FrameReachable` is completely unaffected at any position strictly before the mutated (last)
+-- one, across all four swap branches. Simpler than `swap_cr3` itself in the same way
+-- `fieldAsgn_corollary_frameReachable_iff_of_lt` is simpler than `fieldAsgn_cr3`: a chain rooted
+-- at a suspended frame can never reach the mutated container `yoid` at all (owner-index bound), so
+-- neither `swap_corollary_escape` nor `swap_corollary_root_escape` (CR3's mid-chain/root escape
+-- machinery) is ever needed here -- just a per-branch FrameRoot-iff (frame identity is preserved
+-- outside the mutated position) plus a straightforward tail-induction transport in each direction.
+theorem swap_corollary_frameReachable_iff_of_lt (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
+    (h : swap x yf cfg = some cfg')
+    (frame : FrameWithIndex) (hlt : frame.index < cfg.stack.dropLast.length) (ref : Reference) :
+    FrameReachable cfg frame.index ref ↔ FrameReachable cfg' frame.index ref := by
+  obtain ⟨frame0, hframe0, yRef, hyr, yRefLoc, hyrl, yfRef, hyf, yfRefLoc, hyfl, hcase⟩ := swap_cases h
+  have hframe0_mem : frame0 ∈ cfg.stackWithIndex := List.mem_of_getLast? hframe0
+  obtain ⟨stack_eq0, hidx00⟩ := swap_corollary_stack_eq hframe0
+  have hltd : frame.index < frame0.index := by rw [hidx00]; exact hlt
+  rw [FrameReachable_iff_reflTransGen, FrameReachable_iff_reflTransGen]
+  rcases hcase with
+    ⟨yoid, xRef, obj, hxb, hyoid, hyrloc, hxr, hobj, hcfg'⟩ |
+    ⟨yoid, rid, region, obj, xoid, xrid, hxb, hyoid, hyrloc, hrid, hregion, hobj, hxr, hxrl, hxridEq, hstatus, hcfg'⟩ |
+    ⟨yoid, rid, region, obj, xrid, hxb, hyoid, hyrloc, hrid, hregion, hobj, hxr, hstatus, hcfg'⟩ |
+    ⟨yoid, yrid, yfoid, yfrid, region, obj, hxb, hyoid, hyrloc, hyfoid, hyfrloc, hyridEq, hyfridEq, hregion, hobj,
+      hcfg'⟩
+  · -- SWAP-STACK
+    have hyloc0 : (Reference.OId yoid).loc? cfg = some (Location.Stk frame0.index) := by
+      rw [← hyoid, ← hyrloc]; exact hyrl
+    have frame_transport_down : ∀ fr : FrameWithIndex, fr ∈ cfg'.stackWithIndex →
+        fr.index < cfg.stack.dropLast.length → fr ∈ cfg.stackWithIndex := by
+      intro fr hfr hltfr
+      obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hfr
+      have hidx_n : fr.index = n := by rw [← hfeq]
+      have hltn : n < cfg.stack.dropLast.length := by rw [← hidx_n]; exact hltfr
+      have e1 : cfg.stack[n]? = cfg.stack.dropLast[n]? := by
+        conv_lhs => rw [stack_eq0]; rw [List.getElem?_append_left hltn]
+      have e2 : cfg'.stack[n]? = cfg.stack.dropLast[n]? := by
+        rw [hcfg']; dsimp only; rw [List.getElem?_append_left hltn]
+      have hfr_get? : cfg'.stack[n]? = some fr.toFrame := by
+        rw [show fr.toFrame = cfg'.stack[n] from by rw [← hfeq]]
+        exact List.getElem?_eq_getElem hn
+      have hcfgn : cfg.stack[n]? = some fr.toFrame := by rw [e1, ← e2, hfr_get?]
+      obtain ⟨h1, heq⟩ := List.getElem?_eq_some_iff.mp hcfgn
+      unfold RuntimeConfig.stackWithIndex
+      exact List.mem_mapIdx.mpr ⟨n, h1, by rw [heq, ← hidx_n]⟩
+    have frame_transport_up : ∀ fr : FrameWithIndex, fr ∈ cfg.stackWithIndex →
+        fr.index < cfg.stack.dropLast.length → fr ∈ cfg'.stackWithIndex := by
+      intro fr hfr hltfr
+      obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hfr
+      have hidx_n : fr.index = n := by rw [← hfeq]
+      have hltn : n < cfg.stack.dropLast.length := by rw [← hidx_n]; exact hltfr
+      have e1 : cfg.stack[n]? = cfg.stack.dropLast[n]? := by
+        conv_lhs => rw [stack_eq0]; rw [List.getElem?_append_left hltn]
+      have e2 : cfg'.stack[n]? = cfg.stack.dropLast[n]? := by
+        rw [hcfg']; dsimp only; rw [List.getElem?_append_left hltn]
+      have hfr_get? : cfg.stack[n]? = some fr.toFrame := by
+        rw [show fr.toFrame = cfg.stack[n] from by rw [← hfeq]]
+        exact List.getElem?_eq_getElem hn
+      have hcfg'n : cfg'.stack[n]? = some fr.toFrame := by rw [e2, ← e1, hfr_get?]
+      obtain ⟨h1, heq⟩ := List.getElem?_eq_some_iff.mp hcfg'n
+      unfold RuntimeConfig.stackWithIndex
+      exact List.mem_mapIdx.mpr ⟨n, h1, by rw [heq, ← hidx_n]⟩
+    have hheap_eq : cfg'.heap = cfg.heap := by rw [hcfg']
+    have hfrRootIff : ∀ start, FrameRoot cfg frame.index start ↔ FrameRoot cfg' frame.index start := by
+      intro start
+      unfold FrameRoot
+      constructor
+      · rintro (⟨fr, hfr, hidx, var, hlookup⟩ | ⟨fr, hfr, hidx, region1, hlookup, hstart⟩)
+        · exact Or.inl ⟨fr, frame_transport_up fr hfr (hidx ▸ hlt), hidx, var, hlookup⟩
+        · exact Or.inr ⟨fr, frame_transport_up fr hfr (hidx ▸ hlt), hidx, region1, by rw [hheap_eq]; exact hlookup, hstart⟩
+      · rintro (⟨fr, hfr, hidx, var, hlookup⟩ | ⟨fr, hfr, hidx, region1, hlookup, hstart⟩)
+        · exact Or.inl ⟨fr, frame_transport_down fr hfr (hidx ▸ hlt), hidx, var, hlookup⟩
+        · exact Or.inr ⟨fr, frame_transport_down fr hfr (hidx ▸ hlt), hidx, region1, by rw [← hheap_eq]; exact hlookup, hstart⟩
+    have hoidm_ne : ∀ oidx, FrameReachable cfg frame.index (Reference.OId oidx) → oidx ≠ yoid := by
+      intro oidx hreachx heq
+      rw [heq] at hreachx
+      have := FrameReachable_stk_index_le cfg vcfg frame hreachx frame0.index hyloc0
+      exact absurd this (Nat.not_le.mpr hltd)
+    have hoidm_ne' : ∀ oidx, FrameReachable cfg' frame.index (Reference.OId oidx) → oidx ≠ yoid := by
+      intro oidx hreachx heq
+      rw [heq] at hreachx
+      have hyloc0' : (Reference.OId yoid).loc? cfg' = some (Location.Stk frame0.index) := by
+        have e := swap_corollary_stack_loc_eq (field := yf.field) (newVal := xRef)
+          (newVarMap := frame0.varMap.insert x yfRef) hframe0 hobj yoid
+        rw [← hcfg'] at e; rw [← e]; exact hyloc0
+      have := FrameReachable_stk_index_le cfg' vcfg' frame hreachx frame0.index hyloc0'
+      exact absurd this (Nat.not_le.mpr hltd)
+    have hobjAtEq : ∀ oid', oid' ≠ yoid →
+        (Reference.OId oid').objAt? cfg = (Reference.OId oid').objAt? cfg' := by
+      intro oid' hne
+      have e := swap_corollary_stack_objAt_eq_of_ne (yoid := yoid) (obj := obj) (field := yf.field)
+        (newVal := xRef) (newVarMap := frame0.varMap.insert x yfRef) (oid' := oid') hframe0 hobj hne
+      rw [← hcfg'] at e; exact e
+    constructor
+    · rintro ⟨start, hroot, hrtg⟩
+      have main_up : ∀ target : Reference, Relation.ReflTransGen (RefStep cfg) start target →
+          FrameReachable cfg frame.index target ∧ Relation.ReflTransGen (RefStep cfg') start target := by
+        intro target htrg
+        induction htrg with
+        | refl =>
+          exact ⟨(FrameReachable_iff_reflTransGen cfg frame.index start).mpr
+            ⟨start, hroot, Relation.ReflTransGen.refl⟩, Relation.ReflTransGen.refl⟩
+        | tail hprev hstep ih =>
+          obtain ⟨ihreach, ihrtg⟩ := ih
+          obtain ⟨oidb, hbeq⟩ := hstep.exists_oid_left
+          subst hbeq
+          have hbne : oidb ≠ yoid := hoidm_ne oidb ihreach
+          have heqB := hobjAtEq oidb hbne
+          obtain ⟨objv, hobjAt, hcontains⟩ := hstep
+          refine ⟨FrameReachable.step hobjAt hcontains ihreach, ihrtg.tail ⟨objv, ?_, hcontains⟩⟩
+          rw [← heqB]; exact hobjAt
+      obtain ⟨_, hup⟩ := main_up ref hrtg
+      exact ⟨start, (hfrRootIff start).mp hroot, hup⟩
+    · rintro ⟨start, hroot, hrtg⟩
+      have hroot_down := (hfrRootIff start).mpr hroot
+      have main_down : ∀ target : Reference, Relation.ReflTransGen (RefStep cfg') start target →
+          FrameReachable cfg' frame.index target ∧ Relation.ReflTransGen (RefStep cfg) start target := by
+        intro target htrg
+        induction htrg with
+        | refl =>
+          exact ⟨(FrameReachable_iff_reflTransGen cfg' frame.index start).mpr
+            ⟨start, hroot, Relation.ReflTransGen.refl⟩, Relation.ReflTransGen.refl⟩
+        | tail hprev hstep ih =>
+          obtain ⟨ihreach, ihrtg⟩ := ih
+          obtain ⟨oidb, hbeq⟩ := hstep.exists_oid_left
+          subst hbeq
+          have hbne : oidb ≠ yoid := hoidm_ne' oidb ihreach
+          have heqB := hobjAtEq oidb hbne
+          obtain ⟨objv, hobjAt, hcontains⟩ := hstep
+          refine ⟨FrameReachable.step hobjAt hcontains ihreach, ihrtg.tail ⟨objv, ?_, hcontains⟩⟩
+          rw [heqB]; exact hobjAt
+      obtain ⟨_, hdown⟩ := main_down ref hrtg
+      exact ⟨start, hroot_down, hdown⟩
+  · -- SWAP-REGION-OBJECT
+    have hyloc0 : (Reference.OId yoid).loc? cfg = some (Location.Rgn rid) := by
+      rw [← hyoid, ← hyrloc]; exact hyrl
+    have frame_transport_down : ∀ fr : FrameWithIndex, fr ∈ cfg'.stackWithIndex →
+        fr.index < cfg.stack.dropLast.length → fr ∈ cfg.stackWithIndex := by
+      intro fr hfr hltfr
+      obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hfr
+      have hidx_n : fr.index = n := by rw [← hfeq]
+      have hltn : n < cfg.stack.dropLast.length := by rw [← hidx_n]; exact hltfr
+      have e1 : cfg.stack[n]? = cfg.stack.dropLast[n]? := by
+        conv_lhs => rw [stack_eq0]; rw [List.getElem?_append_left hltn]
+      have e2 : cfg'.stack[n]? = cfg.stack.dropLast[n]? := by
+        rw [hcfg']; dsimp only; rw [List.getElem?_append_left hltn]
+      have hfr_get? : cfg'.stack[n]? = some fr.toFrame := by
+        rw [show fr.toFrame = cfg'.stack[n] from by rw [← hfeq]]
+        exact List.getElem?_eq_getElem hn
+      have hcfgn : cfg.stack[n]? = some fr.toFrame := by rw [e1, ← e2, hfr_get?]
+      obtain ⟨h1, heq⟩ := List.getElem?_eq_some_iff.mp hcfgn
+      unfold RuntimeConfig.stackWithIndex
+      exact List.mem_mapIdx.mpr ⟨n, h1, by rw [heq, ← hidx_n]⟩
+    have frame_transport_up : ∀ fr : FrameWithIndex, fr ∈ cfg.stackWithIndex →
+        fr.index < cfg.stack.dropLast.length → fr ∈ cfg'.stackWithIndex := by
+      intro fr hfr hltfr
+      obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hfr
+      have hidx_n : fr.index = n := by rw [← hfeq]
+      have hltn : n < cfg.stack.dropLast.length := by rw [← hidx_n]; exact hltfr
+      have e1 : cfg.stack[n]? = cfg.stack.dropLast[n]? := by
+        conv_lhs => rw [stack_eq0]; rw [List.getElem?_append_left hltn]
+      have e2 : cfg'.stack[n]? = cfg.stack.dropLast[n]? := by
+        rw [hcfg']; dsimp only; rw [List.getElem?_append_left hltn]
+      have hfr_get? : cfg.stack[n]? = some fr.toFrame := by
+        rw [show fr.toFrame = cfg.stack[n] from by rw [← hfeq]]
+        exact List.getElem?_eq_getElem hn
+      have hcfg'n : cfg'.stack[n]? = some fr.toFrame := by rw [e2, ← e1, hfr_get?]
+      obtain ⟨h1, heq⟩ := List.getElem?_eq_some_iff.mp hcfg'n
+      unfold RuntimeConfig.stackWithIndex
+      exact List.mem_mapIdx.mpr ⟨n, h1, by rw [heq, ← hidx_n]⟩
+    have hridne : ∀ fr : FrameWithIndex, fr ∈ cfg.stackWithIndex → fr.index < frame0.index →
+        fr.regionId ≠ rid := by
+      intro fr hfr hfrlt hc
+      have hidxeq := merge_corollary_regionId_unique_index vcfg.s1 hfr hframe0_mem (by rw [hc, hrid])
+      exact absurd hidxeq (Nat.ne_of_lt hfrlt)
+    have hheap_eq_at : ∀ fr : FrameWithIndex, fr ∈ cfg.stackWithIndex → fr.index < frame0.index →
+        cfg'.heap.lookup fr.regionId = cfg.heap.lookup fr.regionId := by
+      intro fr hfr hfrlt
+      rw [hcfg']; dsimp only
+      exact AList.lookup_insert_ne (hridne fr hfr hfrlt)
+    have hfrRootIff : ∀ start, FrameRoot cfg frame.index start ↔ FrameRoot cfg' frame.index start := by
+      intro start
+      unfold FrameRoot
+      constructor
+      · rintro (⟨fr, hfr, hidx, var, hlookup⟩ | ⟨fr, hfr, hidx, region1, hlookup, hstart⟩)
+        · exact Or.inl ⟨fr, frame_transport_up fr hfr (hidx ▸ hlt), hidx, var, hlookup⟩
+        · exact Or.inr ⟨fr, frame_transport_up fr hfr (hidx ▸ hlt), hidx, region1,
+            by rw [hheap_eq_at fr hfr (hidx ▸ hltd)]; exact hlookup, hstart⟩
+      · rintro (⟨fr, hfr, hidx, var, hlookup⟩ | ⟨fr, hfr, hidx, region1, hlookup, hstart⟩)
+        · exact Or.inl ⟨fr, frame_transport_down fr hfr (hidx ▸ hlt), hidx, var, hlookup⟩
+        · have hfrCfg : fr ∈ cfg.stackWithIndex := frame_transport_down fr hfr (hidx ▸ hlt)
+          exact Or.inr ⟨fr, hfrCfg, hidx, region1,
+            by rw [← hheap_eq_at fr hfrCfg (hidx ▸ hltd)]; exact hlookup, hstart⟩
+    have hoidm_ne : ∀ oidx, FrameReachable cfg frame.index (Reference.OId oidx) → oidx ≠ yoid := by
+      intro oidx hreachx heq
+      rw [heq] at hreachx
+      have := FrameReachable_owner_index_le cfg vcfg frame hreachx rid hyloc0 frame0 hframe0_mem hrid.symm
+      exact absurd this (Nat.not_le.mpr hltd)
+    have hoidm_ne' : ∀ oidx, FrameReachable cfg' frame.index (Reference.OId oidx) → oidx ≠ yoid := by
+      intro oidx hreachx heq
+      rw [heq] at hreachx
+      have hyloc0' : (Reference.OId yoid).loc? cfg' = some (Location.Rgn rid) := by
+        have e := swap_corollary_region_stack_loc_eq vcfg (rid := rid) (yoid := yoid) (region := region)
+          (obj := obj) (field := yf.field) (newVal := Reference.OId xoid) (frame0 := frame0)
+          (newVarMap := frame0.varMap.insert x yfRef) hframe0 hregion hobj yoid
+        rw [← hcfg'] at e
+        rw [← e]; exact hyloc0
+      obtain ⟨fr0, hfr0, hidx0, hrid0, _⟩ := swap_corollary_frame_transport_up h frame0 hframe0_mem
+      have hfr0rid : fr0.regionId = rid := by rw [hrid0, ← hrid]
+      have hownerbound := FrameReachable_owner_index_le cfg' vcfg' frame hreachx rid hyloc0' fr0 hfr0 hfr0rid
+      rw [hidx0] at hownerbound
+      exact absurd hownerbound (Nat.not_le.mpr hltd)
+    have hobjAtEq : ∀ oid', oid' ≠ yoid →
+        (Reference.OId oid').objAt? cfg = (Reference.OId oid').objAt? cfg' := by
+      intro oid' hne
+      have e := swap_corollary_region_stack_objAt_eq_of_ne vcfg (rid := rid) (yoid := yoid) (region := region)
+        (obj := obj) (field := yf.field) (newVal := Reference.OId xoid) (frame0 := frame0)
+        (newVarMap := frame0.varMap.insert x yfRef) hframe0 hregion hobj (oid' := oid') hne
+      rw [← hcfg'] at e; exact e
+    constructor
+    · rintro ⟨start, hroot, hrtg⟩
+      have main_up : ∀ target : Reference, Relation.ReflTransGen (RefStep cfg) start target →
+          FrameReachable cfg frame.index target ∧ Relation.ReflTransGen (RefStep cfg') start target := by
+        intro target htrg
+        induction htrg with
+        | refl =>
+          exact ⟨(FrameReachable_iff_reflTransGen cfg frame.index start).mpr
+            ⟨start, hroot, Relation.ReflTransGen.refl⟩, Relation.ReflTransGen.refl⟩
+        | tail hprev hstep ih =>
+          obtain ⟨ihreach, ihrtg⟩ := ih
+          obtain ⟨oidb, hbeq⟩ := hstep.exists_oid_left
+          subst hbeq
+          have hbne : oidb ≠ yoid := hoidm_ne oidb ihreach
+          have heqB := hobjAtEq oidb hbne
+          obtain ⟨objv, hobjAt, hcontains⟩ := hstep
+          refine ⟨FrameReachable.step hobjAt hcontains ihreach, ihrtg.tail ⟨objv, ?_, hcontains⟩⟩
+          rw [← heqB]; exact hobjAt
+      obtain ⟨_, hup⟩ := main_up ref hrtg
+      exact ⟨start, (hfrRootIff start).mp hroot, hup⟩
+    · rintro ⟨start, hroot, hrtg⟩
+      have hroot_down := (hfrRootIff start).mpr hroot
+      have main_down : ∀ target : Reference, Relation.ReflTransGen (RefStep cfg') start target →
+          FrameReachable cfg' frame.index target ∧ Relation.ReflTransGen (RefStep cfg) start target := by
+        intro target htrg
+        induction htrg with
+        | refl =>
+          exact ⟨(FrameReachable_iff_reflTransGen cfg' frame.index start).mpr
+            ⟨start, hroot, Relation.ReflTransGen.refl⟩, Relation.ReflTransGen.refl⟩
+        | tail hprev hstep ih =>
+          obtain ⟨ihreach, ihrtg⟩ := ih
+          obtain ⟨oidb, hbeq⟩ := hstep.exists_oid_left
+          subst hbeq
+          have hbne : oidb ≠ yoid := hoidm_ne' oidb ihreach
+          have heqB := hobjAtEq oidb hbne
+          obtain ⟨objv, hobjAt, hcontains⟩ := hstep
+          refine ⟨FrameReachable.step hobjAt hcontains ihreach, ihrtg.tail ⟨objv, ?_, hcontains⟩⟩
+          rw [heqB]; exact hobjAt
+      obtain ⟨_, hdown⟩ := main_down ref hrtg
+      exact ⟨start, hroot_down, hdown⟩
+  · -- SWAP-REGION-REGION
+    have hyloc0 : (Reference.OId yoid).loc? cfg = some (Location.Rgn rid) := by
+      rw [← hyoid, ← hyrloc]; exact hyrl
+    have frame_transport_down : ∀ fr : FrameWithIndex, fr ∈ cfg'.stackWithIndex →
+        fr.index < cfg.stack.dropLast.length → fr ∈ cfg.stackWithIndex := by
+      intro fr hfr hltfr
+      obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hfr
+      have hidx_n : fr.index = n := by rw [← hfeq]
+      have hltn : n < cfg.stack.dropLast.length := by rw [← hidx_n]; exact hltfr
+      have e1 : cfg.stack[n]? = cfg.stack.dropLast[n]? := by
+        conv_lhs => rw [stack_eq0]; rw [List.getElem?_append_left hltn]
+      have e2 : cfg'.stack[n]? = cfg.stack.dropLast[n]? := by
+        rw [hcfg']; dsimp only; rw [List.getElem?_append_left hltn]
+      have hfr_get? : cfg'.stack[n]? = some fr.toFrame := by
+        rw [show fr.toFrame = cfg'.stack[n] from by rw [← hfeq]]
+        exact List.getElem?_eq_getElem hn
+      have hcfgn : cfg.stack[n]? = some fr.toFrame := by rw [e1, ← e2, hfr_get?]
+      obtain ⟨h1, heq⟩ := List.getElem?_eq_some_iff.mp hcfgn
+      unfold RuntimeConfig.stackWithIndex
+      exact List.mem_mapIdx.mpr ⟨n, h1, by rw [heq, ← hidx_n]⟩
+    have frame_transport_up : ∀ fr : FrameWithIndex, fr ∈ cfg.stackWithIndex →
+        fr.index < cfg.stack.dropLast.length → fr ∈ cfg'.stackWithIndex := by
+      intro fr hfr hltfr
+      obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hfr
+      have hidx_n : fr.index = n := by rw [← hfeq]
+      have hltn : n < cfg.stack.dropLast.length := by rw [← hidx_n]; exact hltfr
+      have e1 : cfg.stack[n]? = cfg.stack.dropLast[n]? := by
+        conv_lhs => rw [stack_eq0]; rw [List.getElem?_append_left hltn]
+      have e2 : cfg'.stack[n]? = cfg.stack.dropLast[n]? := by
+        rw [hcfg']; dsimp only; rw [List.getElem?_append_left hltn]
+      have hfr_get? : cfg.stack[n]? = some fr.toFrame := by
+        rw [show fr.toFrame = cfg.stack[n] from by rw [← hfeq]]
+        exact List.getElem?_eq_getElem hn
+      have hcfg'n : cfg'.stack[n]? = some fr.toFrame := by rw [e2, ← e1, hfr_get?]
+      obtain ⟨h1, heq⟩ := List.getElem?_eq_some_iff.mp hcfg'n
+      unfold RuntimeConfig.stackWithIndex
+      exact List.mem_mapIdx.mpr ⟨n, h1, by rw [heq, ← hidx_n]⟩
+    have hridne : ∀ fr : FrameWithIndex, fr ∈ cfg.stackWithIndex → fr.index < frame0.index →
+        fr.regionId ≠ rid := by
+      intro fr hfr hfrlt hc
+      have hidxeq := merge_corollary_regionId_unique_index vcfg.s1 hfr hframe0_mem (by rw [hc, hrid])
+      exact absurd hidxeq (Nat.ne_of_lt hfrlt)
+    have hheap_eq_at : ∀ fr : FrameWithIndex, fr ∈ cfg.stackWithIndex → fr.index < frame0.index →
+        cfg'.heap.lookup fr.regionId = cfg.heap.lookup fr.regionId := by
+      intro fr hfr hfrlt
+      rw [hcfg']; dsimp only
+      exact AList.lookup_insert_ne (hridne fr hfr hfrlt)
+    have hfrRootIff : ∀ start, FrameRoot cfg frame.index start ↔ FrameRoot cfg' frame.index start := by
+      intro start
+      unfold FrameRoot
+      constructor
+      · rintro (⟨fr, hfr, hidx, var, hlookup⟩ | ⟨fr, hfr, hidx, region1, hlookup, hstart⟩)
+        · exact Or.inl ⟨fr, frame_transport_up fr hfr (hidx ▸ hlt), hidx, var, hlookup⟩
+        · exact Or.inr ⟨fr, frame_transport_up fr hfr (hidx ▸ hlt), hidx, region1,
+            by rw [hheap_eq_at fr hfr (hidx ▸ hltd)]; exact hlookup, hstart⟩
+      · rintro (⟨fr, hfr, hidx, var, hlookup⟩ | ⟨fr, hfr, hidx, region1, hlookup, hstart⟩)
+        · exact Or.inl ⟨fr, frame_transport_down fr hfr (hidx ▸ hlt), hidx, var, hlookup⟩
+        · have hfrCfg : fr ∈ cfg.stackWithIndex := frame_transport_down fr hfr (hidx ▸ hlt)
+          exact Or.inr ⟨fr, hfrCfg, hidx, region1,
+            by rw [← hheap_eq_at fr hfrCfg (hidx ▸ hltd)]; exact hlookup, hstart⟩
+    have hoidm_ne : ∀ oidx, FrameReachable cfg frame.index (Reference.OId oidx) → oidx ≠ yoid := by
+      intro oidx hreachx heq
+      rw [heq] at hreachx
+      have := FrameReachable_owner_index_le cfg vcfg frame hreachx rid hyloc0 frame0 hframe0_mem hrid.symm
+      exact absurd this (Nat.not_le.mpr hltd)
+    have hoidm_ne' : ∀ oidx, FrameReachable cfg' frame.index (Reference.OId oidx) → oidx ≠ yoid := by
+      intro oidx hreachx heq
+      rw [heq] at hreachx
+      have hyloc0' : (Reference.OId yoid).loc? cfg' = some (Location.Rgn rid) := by
+        have e := swap_corollary_region_stack_loc_eq vcfg (rid := rid) (yoid := yoid) (region := region)
+          (obj := obj) (field := yf.field) (newVal := Reference.RId xrid) (frame0 := frame0)
+          (newVarMap := frame0.varMap.insert x yfRef) hframe0 hregion hobj yoid
+        rw [← hcfg'] at e
+        rw [← e]; exact hyloc0
+      obtain ⟨fr0, hfr0, hidx0, hrid0, _⟩ := swap_corollary_frame_transport_up h frame0 hframe0_mem
+      have hfr0rid : fr0.regionId = rid := by rw [hrid0, ← hrid]
+      have hownerbound := FrameReachable_owner_index_le cfg' vcfg' frame hreachx rid hyloc0' fr0 hfr0 hfr0rid
+      rw [hidx0] at hownerbound
+      exact absurd hownerbound (Nat.not_le.mpr hltd)
+    have hobjAtEq : ∀ oid', oid' ≠ yoid →
+        (Reference.OId oid').objAt? cfg = (Reference.OId oid').objAt? cfg' := by
+      intro oid' hne
+      have e := swap_corollary_region_stack_objAt_eq_of_ne vcfg (rid := rid) (yoid := yoid) (region := region)
+        (obj := obj) (field := yf.field) (newVal := Reference.RId xrid) (frame0 := frame0)
+        (newVarMap := frame0.varMap.insert x yfRef) hframe0 hregion hobj (oid' := oid') hne
+      rw [← hcfg'] at e; exact e
+    constructor
+    · rintro ⟨start, hroot, hrtg⟩
+      have main_up : ∀ target : Reference, Relation.ReflTransGen (RefStep cfg) start target →
+          FrameReachable cfg frame.index target ∧ Relation.ReflTransGen (RefStep cfg') start target := by
+        intro target htrg
+        induction htrg with
+        | refl =>
+          exact ⟨(FrameReachable_iff_reflTransGen cfg frame.index start).mpr
+            ⟨start, hroot, Relation.ReflTransGen.refl⟩, Relation.ReflTransGen.refl⟩
+        | tail hprev hstep ih =>
+          obtain ⟨ihreach, ihrtg⟩ := ih
+          obtain ⟨oidb, hbeq⟩ := hstep.exists_oid_left
+          subst hbeq
+          have hbne : oidb ≠ yoid := hoidm_ne oidb ihreach
+          have heqB := hobjAtEq oidb hbne
+          obtain ⟨objv, hobjAt, hcontains⟩ := hstep
+          refine ⟨FrameReachable.step hobjAt hcontains ihreach, ihrtg.tail ⟨objv, ?_, hcontains⟩⟩
+          rw [← heqB]; exact hobjAt
+      obtain ⟨_, hup⟩ := main_up ref hrtg
+      exact ⟨start, (hfrRootIff start).mp hroot, hup⟩
+    · rintro ⟨start, hroot, hrtg⟩
+      have hroot_down := (hfrRootIff start).mpr hroot
+      have main_down : ∀ target : Reference, Relation.ReflTransGen (RefStep cfg') start target →
+          FrameReachable cfg' frame.index target ∧ Relation.ReflTransGen (RefStep cfg) start target := by
+        intro target htrg
+        induction htrg with
+        | refl =>
+          exact ⟨(FrameReachable_iff_reflTransGen cfg' frame.index start).mpr
+            ⟨start, hroot, Relation.ReflTransGen.refl⟩, Relation.ReflTransGen.refl⟩
+        | tail hprev hstep ih =>
+          obtain ⟨ihreach, ihrtg⟩ := ih
+          obtain ⟨oidb, hbeq⟩ := hstep.exists_oid_left
+          subst hbeq
+          have hbne : oidb ≠ yoid := hoidm_ne' oidb ihreach
+          have heqB := hobjAtEq oidb hbne
+          obtain ⟨objv, hobjAt, hcontains⟩ := hstep
+          refine ⟨FrameReachable.step hobjAt hcontains ihreach, ihrtg.tail ⟨objv, ?_, hcontains⟩⟩
+          rw [heqB]; exact hobjAt
+      obtain ⟨_, hdown⟩ := main_down ref hrtg
+      exact ⟨start, hroot_down, hdown⟩
+  · -- SWAP-REGION-BRIDGE
+    have hyloc0 : (Reference.OId yoid).loc? cfg = some (Location.Rgn yrid) := by
+      rw [← hyoid, ← hyrloc]; exact hyrl
+    have hswi_eq : cfg'.stackWithIndex = cfg.stackWithIndex := by
+      unfold RuntimeConfig.stackWithIndex
+      rw [show cfg'.stack = cfg.stack from by rw [hcfg']]
+    have hridne : ∀ fr : FrameWithIndex, fr ∈ cfg.stackWithIndex → fr.index < frame0.index →
+        fr.regionId ≠ yrid := by
+      intro fr hfr hfrlt hc
+      have hidxeq := merge_corollary_regionId_unique_index vcfg.s1 hfr hframe0_mem (by rw [hc, hyridEq])
+      exact absurd hidxeq (Nat.ne_of_lt hfrlt)
+    have hheap_eq_at : ∀ fr : FrameWithIndex, fr ∈ cfg.stackWithIndex → fr.index < frame0.index →
+        cfg'.heap.lookup fr.regionId = cfg.heap.lookup fr.regionId := by
+      intro fr hfr hfrlt
+      rw [hcfg']; dsimp only
+      exact AList.lookup_insert_ne (hridne fr hfr hfrlt)
+    have hfrRootIff : ∀ start, FrameRoot cfg frame.index start ↔ FrameRoot cfg' frame.index start := by
+      intro start
+      unfold FrameRoot
+      constructor
+      · rintro (⟨fr, hfr, hidx, var, hlookup⟩ | ⟨fr, hfr, hidx, region1, hlookup, hstart⟩)
+        · exact Or.inl ⟨fr, hswi_eq ▸ hfr, hidx, var, hlookup⟩
+        · exact Or.inr ⟨fr, hswi_eq ▸ hfr, hidx, region1,
+            by rw [hheap_eq_at fr hfr (hidx ▸ hltd)]; exact hlookup, hstart⟩
+      · rintro (⟨fr, hfr, hidx, var, hlookup⟩ | ⟨fr, hfr, hidx, region1, hlookup, hstart⟩)
+        · exact Or.inl ⟨fr, hswi_eq ▸ hfr, hidx, var, hlookup⟩
+        · have hfrCfg : fr ∈ cfg.stackWithIndex := hswi_eq ▸ hfr
+          exact Or.inr ⟨fr, hfrCfg, hidx, region1,
+            by rw [← hheap_eq_at fr hfrCfg (hidx ▸ hltd)]; exact hlookup, hstart⟩
+    have hoidm_ne : ∀ oidx, FrameReachable cfg frame.index (Reference.OId oidx) → oidx ≠ yoid := by
+      intro oidx hreachx heq
+      rw [heq] at hreachx
+      have := FrameReachable_owner_index_le cfg vcfg frame hreachx yrid hyloc0 frame0 hframe0_mem hyridEq.symm
+      exact absurd this (Nat.not_le.mpr hltd)
+    have hoidm_ne' : ∀ oidx, FrameReachable cfg' frame.index (Reference.OId oidx) → oidx ≠ yoid := by
+      intro oidx hreachx heq
+      rw [heq] at hreachx
+      have hyloc0' : (Reference.OId yoid).loc? cfg' = some (Location.Rgn yrid) := by
+        have e := swap_corollary_region_loc_eq (rid := yrid) (yoid := yoid) (region := region)
+          (newRegion := ({ region with bridgeObjectId := yfoid, objMap := region.objMap.insert yoid (obj.insert yf.field (Reference.OId region.bridgeObjectId)) } : Region))
+          (obj := obj) (v := obj.insert yf.field (Reference.OId region.bridgeObjectId)) vcfg hregion hobj rfl yoid
+        rw [← hcfg'] at e
+        rw [← e]; exact hyloc0
+      have hframe0_mem' : frame0 ∈ cfg'.stackWithIndex := hswi_eq ▸ hframe0_mem
+      have := FrameReachable_owner_index_le cfg' vcfg' frame hreachx yrid hyloc0' frame0 hframe0_mem' hyridEq.symm
+      exact absurd this (Nat.not_le.mpr hltd)
+    have hobjAtEq : ∀ oid', oid' ≠ yoid →
+        (Reference.OId oid').objAt? cfg = (Reference.OId oid').objAt? cfg' := by
+      intro oid' hne
+      have e := swap_corollary_region_objAt_eq_of_ne vcfg (rid := yrid) (yoid := yoid) (region := region)
+        (obj := obj) (field := yf.field) (newVal := Reference.OId region.bridgeObjectId) (newBridge := yfoid)
+        hregion hobj (oid' := oid') hne
+      rw [← hcfg'] at e; exact e
+    constructor
+    · rintro ⟨start, hroot, hrtg⟩
+      have main_up : ∀ target : Reference, Relation.ReflTransGen (RefStep cfg) start target →
+          FrameReachable cfg frame.index target ∧ Relation.ReflTransGen (RefStep cfg') start target := by
+        intro target htrg
+        induction htrg with
+        | refl =>
+          exact ⟨(FrameReachable_iff_reflTransGen cfg frame.index start).mpr
+            ⟨start, hroot, Relation.ReflTransGen.refl⟩, Relation.ReflTransGen.refl⟩
+        | tail hprev hstep ih =>
+          obtain ⟨ihreach, ihrtg⟩ := ih
+          obtain ⟨oidb, hbeq⟩ := hstep.exists_oid_left
+          subst hbeq
+          have hbne : oidb ≠ yoid := hoidm_ne oidb ihreach
+          have heqB := hobjAtEq oidb hbne
+          obtain ⟨objv, hobjAt, hcontains⟩ := hstep
+          refine ⟨FrameReachable.step hobjAt hcontains ihreach, ihrtg.tail ⟨objv, ?_, hcontains⟩⟩
+          rw [← heqB]; exact hobjAt
+      obtain ⟨_, hup⟩ := main_up ref hrtg
+      exact ⟨start, (hfrRootIff start).mp hroot, hup⟩
+    · rintro ⟨start, hroot, hrtg⟩
+      have hroot_down := (hfrRootIff start).mpr hroot
+      have main_down : ∀ target : Reference, Relation.ReflTransGen (RefStep cfg') start target →
+          FrameReachable cfg' frame.index target ∧ Relation.ReflTransGen (RefStep cfg) start target := by
+        intro target htrg
+        induction htrg with
+        | refl =>
+          exact ⟨(FrameReachable_iff_reflTransGen cfg' frame.index start).mpr
+            ⟨start, hroot, Relation.ReflTransGen.refl⟩, Relation.ReflTransGen.refl⟩
+        | tail hprev hstep ih =>
+          obtain ⟨ihreach, ihrtg⟩ := ih
+          obtain ⟨oidb, hbeq⟩ := hstep.exists_oid_left
+          subst hbeq
+          have hbne : oidb ≠ yoid := hoidm_ne' oidb ihreach
+          have heqB := hobjAtEq oidb hbne
+          obtain ⟨objv, hobjAt, hcontains⟩ := hstep
+          refine ⟨FrameReachable.step hobjAt hcontains ihreach, ihrtg.tail ⟨objv, ?_, hcontains⟩⟩
+          rw [heqB]; exact hobjAt
+      obtain ⟨_, hdown⟩ := main_down ref hrtg
+      exact ⟨start, hroot_down, hdown⟩
+
 theorem swap_cr3 : ValidReachableConfig cfg →
   swap x yf cfg = some cfg' →
   CR3 cfg' := by
