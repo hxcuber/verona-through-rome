@@ -205,6 +205,58 @@ theorem cr5_step_all : ∀ cmd, CR5_step cmd := by
   | swap x yf => exact cr5_step_swap x yf
   | varAsgn x yf => exact cr5_step_varAsgn x yf
 
+-- `Suspended`'s existential witness for "active" always denotes the actual last element of
+-- `cfg.stackWithIndex`, whose own `.index` is exactly `length - 1` (`mapIdx` assigns indices as
+-- list positions) -- bridges `Suspended` to CR4's own hypothesis form
+-- (`StackReachable_iff_FrameReachable` in `Gc/Reachability/Corollaries.lean` takes
+-- `frame.index < cfg.stackWithIndex.length - 1` directly, not `Suspended`). Same
+-- dropLast-decomposition technique as `cr5_step_exit`/`cr5_step_varAsgn` above.
+theorem Suspended_lt_length_sub_one {cfg : RuntimeConfig} {i : Index} (hsusp : Suspended cfg i) :
+    i < cfg.stackWithIndex.length - 1 := by
+  obtain ⟨frame, hframe, hidx, active, hactive, hlt⟩ := hsusp
+  cases hls : cfg.stack.getLast? with
+  | none =>
+    exfalso
+    have hnil : cfg.stack = [] := List.getLast?_eq_none_iff.mp hls
+    have : cfg.stackWithIndex = [] := by unfold RuntimeConfig.stackWithIndex; rw [hnil]; rfl
+    rw [this] at hactive
+    exact absurd hactive (by simp)
+  | some lastFrame =>
+    have stack_eq : cfg.stack = cfg.stack.dropLast ++ [lastFrame] :=
+      (List.dropLast_append_getLast? lastFrame hls).symm
+    have hgetLast : cfg.stackWithIndex.getLast? =
+        some ({ lastFrame with index := cfg.stack.dropLast.length } : FrameWithIndex) := by
+      unfold RuntimeConfig.stackWithIndex
+      conv_lhs => rw [stack_eq, List.mapIdx_concat]
+      exact List.getLast?_concat
+    rw [hgetLast] at hactive
+    injection hactive with hactiveeq
+    have hlen : cfg.stack.length = cfg.stack.dropLast.length + 1 := by rw [stack_eq]; simp
+    have hlenWI : cfg.stackWithIndex.length = cfg.stack.length := by
+      unfold RuntimeConfig.stackWithIndex; rw [List.length_mapIdx]
+    rw [← hactiveeq] at hlt
+    rw [hlenWI, hlen]
+    simpa using hlt
+
+-- report.pdf CR5, restated with `StackReachable` (Definition 4.3.1) instead of `FrameReachable` --
+-- falls out of `CR5_step` plus CR4 (`StackReachable_iff_FrameReachable`,
+-- `Gc/Reachability/Corollaries.lean`) directly: rewrite `StackReachable` as `FrameReachable` at
+-- the suspended owner frame on each side of the step via CR4, then bridge the two
+-- `FrameReachable` facts with `CR5_step` itself. No new per-operation work -- `hstep` is meant to
+-- be instantiated with `cr5_step_all` (or any single `cr5_step_*` lemma) once available.
+theorem CR5'_step (cmd : Stmt) (hstep : CR5_step cmd)
+    (cfg cfg' : RuntimeConfig) (vrcfg : ValidReachableConfig cfg) (vrcfg' : ValidReachableConfig cfg')
+    (h : step cmd cfg = some cfg')
+    (frame : FrameWithIndex) (hframe : frame ∈ cfg.stackWithIndex) (hframe' : frame ∈ cfg'.stackWithIndex)
+    (hsusp : Suspended cfg frame.index) (hsusp' : Suspended cfg' frame.index)
+    (oid : ObjectId)
+    (hoid : (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId))
+    (hoid' : (Reference.OId oid).loc? cfg' = some (Location.Rgn frame.regionId)) :
+    StackReachable cfg (Reference.OId oid) ↔ StackReachable cfg' (Reference.OId oid) := by
+  rw [StackReachable_iff_FrameReachable cfg vrcfg frame hframe (Suspended_lt_length_sub_one hsusp) oid hoid,
+      StackReachable_iff_FrameReachable cfg' vrcfg' frame hframe' (Suspended_lt_length_sub_one hsusp') oid hoid']
+  exact hstep cfg cfg' vrcfg h frame.index hsusp (Reference.OId oid)
+
 -- Deferred until the single-step case (above) is actually filled in -- only `Suspended`/
 -- `CR5_step`/`cr5_step_all` are live for now. This layer was: a trace of operations
 -- (`Run : List Stmt → RuntimeConfig → Option RuntimeConfig`, folding `step` left to right), a
