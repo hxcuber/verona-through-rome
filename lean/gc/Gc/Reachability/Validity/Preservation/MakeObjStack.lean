@@ -446,6 +446,84 @@ private theorem makeObjStack_corollary_frameRoot_down {cfg cfg' : RuntimeConfig}
     unfold RuntimeConfig.stackWithIndex
     exact List.mem_mapIdx.mpr ⟨n, h1, by rw [heq]⟩
 
+-- `FrameReachable` is completely unaffected at any position strictly before the mutated (last)
+-- one -- the frame-transport argument `makeObjStack_cr3` already builds inline for itself
+-- (`frame_transport_down`/`_up`/its own `FrameRoot` iff), packaged here as its own reusable
+-- theorem since CR5 (`Gc/Reachability/Validity/CR5.lean`) needs exactly this fact, not CR3's
+-- later-frame-implies-earlier-frame shape.
+theorem makeObjStack_corollary_frameReachable_iff_of_lt (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
+    (h : makeObjStack x cfg = some cfg')
+    {fid : Index} (hfid : fid < cfg.stack.dropLast.length) (ref : Reference) :
+    FrameReachable cfg fid ref ↔ FrameReachable cfg' fid ref := by
+  obtain ⟨frame1, hframe1, hcfg'⟩ := makeObjStack_cases h
+  have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame1] :=
+    (List.dropLast_append_getLast? frame1 hframe1).symm
+  set newFrame1 : Frame :=
+    { regionId := frame1.regionId, bridgeVar := frame1.bridgeVar,
+      objMap := AList.insert cfg.freshObjectId ∅ frame1.objMap,
+      varMap := AList.insert x (Reference.OId cfg.freshObjectId) frame1.varMap } with newFrame1_def
+  have hcfg'2 : cfg' = { cfg with stack := cfg.stack.dropLast ++ [newFrame1] } := by
+    rw [hcfg', newFrame1_def]
+  have hheap_eq : cfg'.heap = cfg.heap := by rw [hcfg'2]
+  have frame_transport_down : ∀ fr : FrameWithIndex, fr ∈ cfg'.stackWithIndex →
+      fr.index < cfg.stack.dropLast.length → fr ∈ cfg.stackWithIndex := by
+    intro fr hfr hltfr
+    obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hfr
+    have hidx_n : fr.index = n := by rw [← hfeq]
+    have hlt : n < cfg.stack.dropLast.length := by rw [← hidx_n]; exact hltfr
+    have e1 : cfg.stack[n]? = cfg.stack.dropLast[n]? := by
+      conv_lhs => rw [stack_eq]
+      rw [List.getElem?_append_left hlt]
+    have e2 : cfg'.stack[n]? = cfg.stack.dropLast[n]? := by
+      rw [hcfg'2]; dsimp only
+      rw [List.getElem?_append_left hlt]
+    have hfr_get? : cfg'.stack[n]? = some fr.toFrame := by
+      rw [show fr.toFrame = cfg'.stack[n] from by rw [← hfeq]]
+      exact List.getElem?_eq_getElem hn
+    have hcfgn : cfg.stack[n]? = some fr.toFrame := by rw [e1, ← e2, hfr_get?]
+    obtain ⟨h1, heq⟩ := List.getElem?_eq_some_iff.mp hcfgn
+    unfold RuntimeConfig.stackWithIndex
+    exact List.mem_mapIdx.mpr ⟨n, h1, by rw [heq, ← hidx_n]⟩
+  have frame_transport_up : ∀ fr : FrameWithIndex, fr ∈ cfg.stackWithIndex →
+      fr.index < cfg.stack.dropLast.length → fr ∈ cfg'.stackWithIndex := by
+    intro fr hfr hltfr
+    obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hfr
+    have hidx_n : fr.index = n := by rw [← hfeq]
+    have hlt : n < cfg.stack.dropLast.length := by rw [← hidx_n]; exact hltfr
+    have e1 : cfg.stack[n]? = cfg.stack.dropLast[n]? := by
+      conv_lhs => rw [stack_eq]
+      rw [List.getElem?_append_left hlt]
+    have e2 : cfg'.stack[n]? = cfg.stack.dropLast[n]? := by
+      rw [hcfg'2]; dsimp only
+      rw [List.getElem?_append_left hlt]
+    have hfr_get? : cfg.stack[n]? = some fr.toFrame := by
+      rw [show fr.toFrame = cfg.stack[n] from by rw [← hfeq]]
+      exact List.getElem?_eq_getElem hn
+    have hcfg'n : cfg'.stack[n]? = some fr.toFrame := by rw [e2, ← e1, hfr_get?]
+    obtain ⟨h1, heq⟩ := List.getElem?_eq_some_iff.mp hcfg'n
+    unfold RuntimeConfig.stackWithIndex
+    exact List.mem_mapIdx.mpr ⟨n, h1, by rw [heq, ← hidx_n]⟩
+  have hfrRootIff : ∀ start, FrameRoot cfg fid start ↔ FrameRoot cfg' fid start := by
+    intro start
+    unfold FrameRoot
+    constructor
+    · rintro (⟨fr, hfr, hidx, var, hlookup⟩ | ⟨fr, hfr, hidx, region, hlookup, hstart⟩)
+      · exact Or.inl ⟨fr, frame_transport_up fr hfr (hidx ▸ hfid), hidx, var, hlookup⟩
+      · exact Or.inr ⟨fr, frame_transport_up fr hfr (hidx ▸ hfid), hidx, region,
+          hheap_eq ▸ hlookup, hstart⟩
+    · rintro (⟨fr, hfr, hidx, var, hlookup⟩ | ⟨fr, hfr, hidx, region, hlookup, hstart⟩)
+      · exact Or.inl ⟨fr, frame_transport_down fr hfr (hidx ▸ hfid), hidx, var, hlookup⟩
+      · exact Or.inr ⟨fr, frame_transport_down fr hfr (hidx ▸ hfid), hidx, region,
+          hheap_eq ▸ hlookup, hstart⟩
+  rw [FrameReachable_iff_reflTransGen, FrameReachable_iff_reflTransGen]
+  constructor
+  · rintro ⟨start, hroot, hrtg⟩
+    exact ⟨start, (hfrRootIff start).mp hroot,
+      hrtg.mono (fun a b hab => (makeObjStack_corollary_refStep_iff vcfg vcfg' h a b).mp hab)⟩
+  · rintro ⟨start, hroot, hrtg⟩
+    exact ⟨start, (hfrRootIff start).mpr hroot,
+      hrtg.mono (fun a b hab => (makeObjStack_corollary_refStep_iff vcfg vcfg' h a b).mpr hab)⟩
+
 theorem makeObjStack_cr3 : ValidReachableConfig cfg →
   makeObjStack x cfg = some cfg' →
   CR3 cfg' := by
