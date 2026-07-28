@@ -52,7 +52,36 @@ theorem cr5_step_enter (xf : FieldAccess) (a : VarName) : CR5_step (Stmt.enter x
   exact enter_corollary_frameReachable_iff vcfg vcfg' h frame0 hframe0 ref
 
 theorem cr5_step_exit : CR5_step Stmt.exit := by
-  sorry
+  intro cfg cfg' vrcfg h i hsusp ref
+  obtain ⟨frame, hframe, hidx, active, hactive, hlt⟩ := hsusp
+  have vcfg := vrcfg.toValidConfig
+  have vcfg' := exit_valid vcfg h
+  obtain ⟨poppedFrame, region, hlen, hlast, hlookupPopped, hopenPopped, hcfg'⟩ := exit_cases h
+  have hstackeq := exit_corollary_stackWithIndex_eq hlast
+  have hgetLast : cfg.stackWithIndex.getLast? =
+      some ({ poppedFrame with index := cfg.stack.dropLast.length } : FrameWithIndex) := by
+    rw [hstackeq]
+    exact List.getLast?_concat
+  rw [hgetLast] at hactive
+  injection hactive with hactiveeq
+  subst hactiveeq
+  dsimp only at hlt
+  rw [hstackeq] at hframe
+  rw [List.mem_append] at hframe
+  rcases hframe with hold | hpop
+  · have hframe0' : frame ∈ cfg'.stackWithIndex := by
+      rw [hcfg']
+      unfold RuntimeConfig.stackWithIndex
+      dsimp only
+      exact hold
+    subst hidx
+    exact exit_corollary_frameReachable_iff vcfg vcfg' h frame hframe0' ref
+  · exfalso
+    rw [List.mem_singleton] at hpop
+    rw [hpop] at hidx
+    dsimp only at hidx
+    rw [hidx] at hlt
+    exact lt_irrefl _ hlt
 
 theorem cr5_step_fieldAsgn (xf : FieldAccess) (y : VarName) : CR5_step (Stmt.fieldAsgn xf y) := by
   sorry

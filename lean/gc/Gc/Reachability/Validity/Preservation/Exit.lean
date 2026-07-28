@@ -4,7 +4,7 @@ import Gc.Model.Preservation.Common
 import Gc.Reachability.Validity.Reachable
 import Gc.Reachability.Corollaries
 
-private theorem exit_corollary_stackWithIndex_eq {cfg : RuntimeConfig} {poppedFrame : Frame}
+theorem exit_corollary_stackWithIndex_eq {cfg : RuntimeConfig} {poppedFrame : Frame}
     (hlast : cfg.stack.getLast? = some poppedFrame) :
     cfg.stackWithIndex = cfg.stack.dropLast.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) ++
       [({ poppedFrame with index := cfg.stack.dropLast.length } : FrameWithIndex)] := by
@@ -294,7 +294,7 @@ private theorem exit_corollary_frameRoot_alive {cfg' : RuntimeConfig} (vcfg' : V
     apply List.mem_append_right
     exact heap_objectIds_of_mem hregionMem (AList.mem_keys.mpr hbridgeMem)
 
-private theorem exit_corollary_frameReachable_iff (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
+theorem exit_corollary_frameReachable_iff (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
     (h : exit cfg = some cfg')
     (frame0 : FrameWithIndex) (hframe0' : frame0 ∈ cfg'.stackWithIndex) (ref : Reference) :
     FrameReachable cfg frame0.index ref ↔ FrameReachable cfg' frame0.index ref := by
