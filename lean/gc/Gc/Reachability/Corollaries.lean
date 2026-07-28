@@ -4,6 +4,7 @@ import Gc.Model.Validity
 import Gc.Model.Preservation.Common
 import Gc.Reachability.Semantics
 import Gc.Reachability.Path
+import Gc.Reachability.Validity.Reachable
 
 -- Generalized over `ref` (rather than fixing `ref := Reference.OId oid` up front) so that
 -- `induction h` below works directly: `h`'s type is stated over a bare-variable index, and
@@ -713,3 +714,24 @@ theorem resolveFA_frameReach {cfg : RuntimeConfig} {y : FieldAccess} {oid : Obje
               exact ⟨frameY, hframeYMem, FrameReachable.step hobjAt0 (List.contains_iff_mem.mpr
                 (AList.mem_lookup_iff.mp (Option.mem_def.mpr hyf) |> (List.mem_map_of_mem (f := (·.2))) )
                 ) hreachY0⟩
+
+theorem StackReachable_iff_FrameReachable (cfg : RuntimeConfig) (vrcfg : ValidReachableConfig cfg)
+    (frame : FrameWithIndex) (hframemem : frame ∈ cfg.stackWithIndex)
+    (_hframesus : frame.index < cfg.stackWithIndex.length - 1)
+    (oid : ObjectId) (hoid : (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId)) :
+    StackReachable cfg (Reference.OId oid) ↔
+    FrameReachable cfg frame.index (Reference.OId oid) := by
+  constructor
+  · intro hstackreachable
+    unfold StackReachable at hstackreachable
+    obtain ⟨frame', hframe'mem, hframe'framereachable⟩ := hstackreachable
+    have cr3 := vrcfg.cr3
+    unfold CR3 at cr3
+    have hle := FrameReachable_owner_index_le cfg vrcfg.toValidConfig frame' hframe'framereachable
+      frame.regionId hoid frame hframemem rfl
+    rcases hle.lt_or_eq with hlt | heq
+    · exact cr3 frame hframemem frame' hframe'mem hlt oid hoid hframe'framereachable
+    · have hframeq : frame = frame' := swap_corollary_stackWithIndex_index_inj hframemem hframe'mem heq
+      rw [hframeq]; exact hframe'framereachable
+  · intro hframereachable
+    exists frame
