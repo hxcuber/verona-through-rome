@@ -98,14 +98,20 @@ private theorem swap_corollary_object_insert_refs_mem {obj : Object} {field : Fi
 
 -- The mutated container's own new content on the REGION-touching branches (mirrors
 -- fieldAsgn_corollary_region_objAt_mutated): computed directly from the region-level insert at the
--- already-present key `yoid` (the container).
+-- already-present key `yoid` (the container). Generalized over `newBridge : ObjectId` so the same
+-- proof covers both an untouched `bridgeObjectId` (non-bridge callers pass `region.bridgeObjectId`)
+-- and SWAP-REGION-BRIDGE's simultaneous bridge change (`Reference.objAt?`/
+-- `swap_corollary_region_loc_eq` never read `bridgeObjectId` at all, so folding it into `newRegion`
+-- doesn't change the proof shape).
 private theorem swap_corollary_region_objAt_mutated {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
     {rid yoid : ObjectId} {region : Region} {obj : Object} {field : FieldName} {newVal : Reference}
+    {newBridge : ObjectId}
     (hregion : cfg.heap.lookup rid = some region) (hobj : region.objMap.lookup yoid = some obj)
     (hlocm : (Reference.OId yoid).loc? cfg = some (Location.Rgn rid))
-    (hcfg' : cfg' = { cfg with heap := cfg.heap.insert rid ({ region with objMap := region.objMap.insert yoid (obj.insert field newVal) } : Region) }) :
+    (hcfg' : cfg' = { cfg with heap := cfg.heap.insert rid ({ region with bridgeObjectId := newBridge, objMap := region.objMap.insert yoid (obj.insert field newVal) } : Region) }) :
     (Reference.OId yoid).objAt? cfg' = some (obj.insert field newVal) := by
-  set newRegion : Region := { region with objMap := region.objMap.insert yoid (obj.insert field newVal) }
+  set newRegion : Region :=
+    { region with bridgeObjectId := newBridge, objMap := region.objMap.insert yoid (obj.insert field newVal) }
     with newRegion_def
   have hlocEq := swap_corollary_region_loc_eq (rid := rid) (yoid := yoid) (region := region)
     (newRegion := newRegion) (obj := obj) (v := obj.insert field newVal) vcfg hregion hobj
@@ -124,91 +130,21 @@ private theorem swap_corollary_region_objAt_mutated {cfg cfg' : RuntimeConfig} (
 
 -- REGION-touching branches: for any oid' *other* than the mutated container, `objAt?` is
 -- unaffected. Mirrors fieldAsgn_corollary_region_objAt_eq_of_ne, using swap's own (already
--- unconditional-in-oid') `swap_corollary_region_loc_eq`.
+-- unconditional-in-oid') `swap_corollary_region_loc_eq`. Generalized over `newBridge` for the same
+-- reason as `swap_corollary_region_objAt_mutated` above.
 private theorem swap_corollary_region_objAt_eq_of_ne {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
     {rid yoid : ObjectId} {region : Region} {obj : Object} {field : FieldName} {newVal : Reference}
+    {newBridge : ObjectId}
     (hregion : cfg.heap.lookup rid = some region) (hobj : region.objMap.lookup yoid = some obj)
     {oid' : ObjectId} (hne : oid' ≠ yoid) :
     (Reference.OId oid').objAt? cfg =
-      (Reference.OId oid').objAt? ({ cfg with heap := cfg.heap.insert rid ({ region with objMap := region.objMap.insert yoid (obj.insert field newVal) } : Region) }) := by
+      (Reference.OId oid').objAt? ({ cfg with heap := cfg.heap.insert rid ({ region with bridgeObjectId := newBridge, objMap := region.objMap.insert yoid (obj.insert field newVal) } : Region) }) := by
   have hlocEq := swap_corollary_region_loc_eq (rid := rid) (yoid := yoid) (region := region)
-    (newRegion := { region with objMap := region.objMap.insert yoid (obj.insert field newVal) })
+    (newRegion := { region with bridgeObjectId := newBridge, objMap := region.objMap.insert yoid (obj.insert field newVal) })
     (obj := obj) (v := obj.insert field newVal) vcfg hregion hobj rfl oid'
-  set newRegion : Region := { region with objMap := region.objMap.insert yoid (obj.insert field newVal) }
-    with newRegion_def
-  set cfg2 : RuntimeConfig := { cfg with heap := cfg.heap.insert rid newRegion } with cfg2_def
-  cases hloc : (Reference.OId oid').loc? cfg with
-  | none =>
-    unfold Reference.objAt?
-    dsimp only
-    rw [hloc, ← hlocEq, hloc]
-  | some loc =>
-    have hloc2 : (Reference.OId oid').loc? cfg2 = some loc := by rw [← hlocEq]; exact hloc
-    cases loc with
-    | Stk fid0 =>
-      have hswi_eq : cfg2.stackWithIndex = cfg.stackWithIndex := by
-        unfold RuntimeConfig.stackWithIndex
-        congr 1
-      unfold Reference.objAt?
-      dsimp only
-      rw [hloc, hloc2, hswi_eq]
-    | Rgn rid0 =>
-      unfold Reference.objAt?
-      dsimp only
-      rw [hloc, hloc2]
-      dsimp only
-      by_cases hrideq : rid0 = rid
-      · subst hrideq
-        have hlookup2 : cfg2.heap.lookup rid0 = some newRegion := by
-          rw [cfg2_def]; exact AList.lookup_insert (a := rid0) (b := newRegion) cfg.heap
-        rw [hregion, hlookup2, newRegion_def]
-        exact (AList.lookup_insert_ne hne).symm
-      · have hlookup2 : cfg2.heap.lookup rid0 = cfg.heap.lookup rid0 := by
-          rw [cfg2_def]; exact AList.lookup_insert_ne hrideq
-        rw [hlookup2]
-
--- SWAP-REGION-BRIDGE analogue of swap_corollary_region_objAt_mutated: the mutated region's own
--- `bridgeObjectId` *also* changes here (unlike SWAP-REGION-OBJECT/SWAP-REGION-REGION), but
--- `Reference.objAt?`/`swap_corollary_region_loc_eq` never read `bridgeObjectId` at all, so the
--- exact same proof shape applies with `newBridge` simply folded into `newRegion`.
-private theorem swap_corollary_region_bridge_objAt_mutated {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
-    {rid yoid : ObjectId} {region : Region} {obj : Object} {field : FieldName} {newVal : Reference}
-    {newBridge : ObjectId}
-    (hregion : cfg.heap.lookup rid = some region) (hobj : region.objMap.lookup yoid = some obj)
-    (hlocm : (Reference.OId yoid).loc? cfg = some (Location.Rgn rid)) :
-    (Reference.OId yoid).objAt? ({ cfg with heap := cfg.heap.insert rid ({ region with bridgeObjectId := newBridge, objMap := region.objMap.insert yoid (obj.insert field newVal) } : Region) } : RuntimeConfig) =
-      some (obj.insert field newVal) := by
   set newRegion : Region :=
     { region with bridgeObjectId := newBridge, objMap := region.objMap.insert yoid (obj.insert field newVal) }
     with newRegion_def
-  have hlocEq := swap_corollary_region_loc_eq (rid := rid) (yoid := yoid) (region := region)
-    (newRegion := newRegion) (obj := obj) (v := obj.insert field newVal) vcfg hregion hobj
-    (by rw [newRegion_def]) yoid
-  rw [hlocEq] at hlocm
-  unfold Reference.objAt?
-  dsimp only
-  rw [hlocm]
-  dsimp only
-  have hlookup2 : ({ cfg with heap := cfg.heap.insert rid newRegion } : RuntimeConfig).heap.lookup rid = some newRegion := by
-    dsimp only
-    exact AList.lookup_insert (a := rid) (b := newRegion) cfg.heap
-  rw [hlookup2, newRegion_def]
-  exact AList.lookup_insert (a := yoid) (b := obj.insert field newVal) region.objMap
-
--- SWAP-REGION-BRIDGE analogue of swap_corollary_region_objAt_eq_of_ne, folding in `newBridge`.
-private theorem swap_corollary_region_bridge_objAt_eq_of_ne {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
-    {rid yoid : ObjectId} {region : Region} {obj : Object} {field : FieldName} {newVal : Reference}
-    {newBridge : ObjectId}
-    (hregion : cfg.heap.lookup rid = some region) (hobj : region.objMap.lookup yoid = some obj)
-    {oid' : ObjectId} (hne : oid' ≠ yoid) :
-    (Reference.OId oid').objAt? cfg =
-      (Reference.OId oid').objAt? ({ cfg with heap := cfg.heap.insert rid ({ region with bridgeObjectId := newBridge, objMap := region.objMap.insert yoid (obj.insert field newVal) } : Region) } : RuntimeConfig) := by
-  set newRegion : Region :=
-    { region with bridgeObjectId := newBridge, objMap := region.objMap.insert yoid (obj.insert field newVal) }
-    with newRegion_def
-  have hlocEq := swap_corollary_region_loc_eq (rid := rid) (yoid := yoid) (region := region)
-    (newRegion := newRegion) (obj := obj) (v := obj.insert field newVal) vcfg hregion hobj
-    (by rw [newRegion_def]) oid'
   set cfg2 : RuntimeConfig := { cfg with heap := cfg.heap.insert rid newRegion } with cfg2_def
   cases hloc : (Reference.OId oid').loc? cfg with
   | none =>
@@ -358,7 +294,7 @@ private theorem swap_corollary_region_stack_objAt_eq_of_ne {cfg : RuntimeConfig}
     (Reference.OId oid').objAt? cfg =
       (Reference.OId oid').objAt? ({ stack := cfg.stack.dropLast ++ [({ frame0 with varMap := newVarMap } : Frame)], heap := cfg.heap.insert rid ({ region with objMap := region.objMap.insert yoid (obj.insert field newVal) } : Region) } : RuntimeConfig) := by
   have step1 := swap_corollary_region_objAt_eq_of_ne vcfg (rid := rid) (yoid := yoid) (region := region)
-    (obj := obj) (field := field) (newVal := newVal) hregion hobj hne
+    (obj := obj) (field := field) (newVal := newVal) (newBridge := region.bridgeObjectId) hregion hobj hne
   have hframe0' : ({ cfg with heap := cfg.heap.insert rid ({ region with objMap := region.objMap.insert yoid (obj.insert field newVal) } : Region) } : RuntimeConfig).stackWithIndex.getLast? = some frame0 :=
     hframe0
   have step2 := swap_corollary_varmap_objAt_eq
@@ -377,7 +313,7 @@ private theorem swap_corollary_region_stack_objAt_mutated {cfg : RuntimeConfig} 
     (Reference.OId yoid).objAt? ({ stack := cfg.stack.dropLast ++ [({ frame0 with varMap := newVarMap } : Frame)], heap := cfg.heap.insert rid ({ region with objMap := region.objMap.insert yoid (obj.insert field newVal) } : Region) } : RuntimeConfig) =
       some (obj.insert field newVal) := by
   have hstep : (Reference.OId yoid).objAt? ({ cfg with heap := cfg.heap.insert rid ({ region with objMap := region.objMap.insert yoid (obj.insert field newVal) } : Region) } : RuntimeConfig) = some (obj.insert field newVal) :=
-    swap_corollary_region_objAt_mutated vcfg hregion hobj hlocm rfl
+    swap_corollary_region_objAt_mutated vcfg (newBridge := region.bridgeObjectId) hregion hobj hlocm rfl
   have hframe0' : ({ cfg with heap := cfg.heap.insert rid ({ region with objMap := region.objMap.insert yoid (obj.insert field newVal) } : Region) } : RuntimeConfig).stackWithIndex.getLast? = some frame0 :=
     hframe0
   have step2 := swap_corollary_varmap_objAt_eq
@@ -495,6 +431,72 @@ private theorem swap_corollary_stack_objAt_eq_of_ne {cfg : RuntimeConfig} {frame
           rw [hLnone, hRnone]
         rw [hfindEq]
 
+-- ROOT escape, shared verbatim by all four `swap_cr3` branches: whatever the mutation places at
+-- the var/bridge root (`yfRef`, the field access `yf`'s OLD value) was already resolvable
+-- pre-mutation via `resolveFA`, exactly like `varAsgn`'s fresh-var escape -- so a chain starting
+-- there already has a natural pre-mutation root `frameY`, from which `frameD` (the region owner
+-- CR3 is being checked against) is reached either directly (if `frameY = frameD`) or by recursing
+-- into `vrcfg.cr3` itself. Nothing here depends on *where* the mutated container lives
+-- (`Stk`/`Rgn`), which is why the same proof serves SWAP-STACK/SWAP-REGION-OBJECT/
+-- SWAP-REGION-REGION/SWAP-REGION-BRIDGE unchanged.
+private theorem swap_corollary_escape {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (vrcfg : ValidReachableConfig cfg) {oid : ObjectId} {yf : FieldAccess} {yfRef : Reference}
+    (hyf : resolveFA yf cfg = some yfRef) {frameD : FrameWithIndex}
+    (hframeDMem : frameD ∈ cfg.stackWithIndex)
+    (hlocDown : (Reference.OId oid).loc? cfg = some (Location.Rgn frameD.regionId)) :
+    ∀ start : Reference, start = yfRef →
+      Relation.ReflTransGen (RefStep cfg) start (Reference.OId oid) →
+      FrameReachable cfg frameD.index (Reference.OId oid) := by
+  intro start hstarteq hrtgS
+  cases yfRef with
+  | RId ridw =>
+    exfalso
+    rw [hstarteq] at hrtgS
+    rcases hrtgS.cases_head with heq | ⟨d, hstep, _⟩
+    · exact absurd heq (by simp)
+    · obtain ⟨oid0, hoid0⟩ := hstep.exists_oid_left
+      exact absurd hoid0 (by simp)
+  | OId oidw =>
+    obtain ⟨frameY, hframeYMem, hreachYw⟩ := resolveFA_frameReach hyf
+    have hreachY : FrameReachable cfg frameY.index (Reference.OId oid) := by
+      rw [FrameReachable_iff_reflTransGen] at hreachYw ⊢
+      obtain ⟨startY, hrootY, hrtgY⟩ := hreachYw
+      exact ⟨startY, hrootY, hrtgY.trans (hstarteq ▸ hrtgS)⟩
+    have hownerbound := FrameReachable_owner_index_le cfg vcfg frameY hreachY frameD.regionId
+      hlocDown frameD hframeDMem rfl
+    by_cases heqidx : frameD.index = frameY.index
+    · have hFYeq : frameY = frameD := swap_corollary_stackWithIndex_index_inj hframeYMem hframeDMem heqidx.symm
+      rw [← hFYeq]; exact hreachY
+    · have hltidx : frameD.index < frameY.index := lt_of_le_of_ne hownerbound heqidx
+      exact vrcfg.cr3 frameD hframeDMem frameY hframeYMem hltidx oid hlocDown hreachY
+
+-- Shared by `main_claim`'s SWAP-STACK/SWAP-REGION-OBJECT/SWAP-REGION-BRIDGE branches (the ones
+-- where the newly-written value `newVal` is `OId`-shaped, so `heqv : Reference.OId oidc = newVal`
+-- is satisfiable -- SWAP-REGION-REGION's `newVal = Reference.RId xrid` makes this case vacuous
+-- instead, via a direct constructor mismatch, so it never calls this lemma): a mid-chain hop using
+-- `newVal` already has `frame0` itself as a valid root (`hxRoot`), so it reaches `frameD` either
+-- directly or by recursing into `vrcfg.cr3`, exactly like `swap_corollary_escape`'s own argument.
+private theorem swap_corollary_root_escape {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (vrcfg : ValidReachableConfig cfg) {oid oidc : ObjectId} {newVal : Reference}
+    {frame0 frameD : FrameWithIndex} (hxRoot : FrameRoot cfg frame0.index newVal)
+    (hframe0_mem : frame0 ∈ cfg.stackWithIndex) (hframeDMem : frameD ∈ cfg.stackWithIndex)
+    (hlocDown : (Reference.OId oid).loc? cfg = some (Location.Rgn frameD.regionId))
+    (heqv : Reference.OId oidc = newVal)
+    (ihchain : Relation.ReflTransGen (RefStep cfg) (Reference.OId oidc) (Reference.OId oid)) :
+    FrameReachable cfg frameD.index (Reference.OId oid) := by
+  have hichainX : Relation.ReflTransGen (RefStep cfg) newVal (Reference.OId oid) := by
+    rw [← heqv]; exact ihchain
+  have hreachY : FrameReachable cfg frame0.index (Reference.OId oid) := by
+    rw [FrameReachable_iff_reflTransGen]
+    exact ⟨newVal, hxRoot, hichainX⟩
+  have hownerbound := FrameReachable_owner_index_le cfg vcfg frame0 hreachY frameD.regionId
+    hlocDown frameD hframeDMem rfl
+  by_cases heqidx : frameD.index = frame0.index
+  · have hFYeq : frame0 = frameD := swap_corollary_stackWithIndex_index_inj hframe0_mem hframeDMem heqidx.symm
+    rw [← hFYeq]; exact hreachY
+  · have hltidx : frameD.index < frame0.index := lt_of_le_of_ne hownerbound heqidx
+    exact vrcfg.cr3 frameD hframeDMem frame0 hframe0_mem hltidx oid hlocDown hreachY
+
 theorem swap_cr3 : ValidReachableConfig cfg →
   swap x yf cfg = some cfg' →
   CR3 cfg' := by
@@ -552,33 +554,7 @@ theorem swap_cr3 : ValidReachableConfig cfg →
       subst heq
       have := FrameReachable_stk_index_le cfg vcfg frame hreachx frame0.index hyloc0
       exact absurd this (Nat.not_le.mpr hframe_lt_frame0)
-    -- ROOT escape: whatever the mutation places at var x (yfRef) was already resolvable
-    -- pre-mutation via resolveFA, exactly like varAsgn's fresh-var escape.
-    have escape : ∀ start : Reference, start = yfRef →
-        Relation.ReflTransGen (RefStep cfg) start (Reference.OId oid) →
-        FrameReachable cfg frameD.index (Reference.OId oid) := by
-      intro start hstarteq hrtgS
-      cases yfRef with
-      | RId ridw =>
-        exfalso
-        rw [hstarteq] at hrtgS
-        rcases hrtgS.cases_head with heq | ⟨d, hstep, _⟩
-        · exact absurd heq (by simp)
-        · obtain ⟨oid0, hoid0⟩ := hstep.exists_oid_left
-          exact absurd hoid0 (by simp)
-      | OId oidw =>
-        obtain ⟨frameY, hframeYMem, hreachYw⟩ := resolveFA_frameReach hyf
-        have hreachY : FrameReachable cfg frameY.index (Reference.OId oid) := by
-          rw [FrameReachable_iff_reflTransGen] at hreachYw ⊢
-          obtain ⟨startY, hrootY, hrtgY⟩ := hreachYw
-          exact ⟨startY, hrootY, hrtgY.trans (hstarteq ▸ hrtgS)⟩
-        have hownerbound := FrameReachable_owner_index_le cfg vcfg frameY hreachY frameD.regionId
-          hlocDown frameD hframeDMem rfl
-        by_cases heqidx : frameD.index = frameY.index
-        · have hFYeq : frameY = frameD := swap_corollary_stackWithIndex_index_inj hframeYMem hframeDMem heqidx.symm
-          rw [← hFYeq]; exact hreachY
-        · have hltidx : frameD.index < frameY.index := lt_of_le_of_ne hownerbound heqidx
-          exact vrcfg.cr3 frameD hframeDMem frameY hframeYMem hltidx oid hlocDown hreachY
+    have escape := swap_corollary_escape vcfg vrcfg hyf hframeDMem hlocDown
     -- MID-CHAIN escape (via main_claim): a hop out of the mutated container yoid, using the
     -- newly-written field value xRef, is already covered by hxRoot (no resolveFA tracing needed,
     -- since xRef is literally frame0's own var x value).
@@ -608,19 +584,7 @@ theorem swap_cr3 : ValidReachableConfig cfg →
               exact List.contains_iff_mem.mp hcontains
             rcases swap_corollary_object_insert_refs_mem hmemc with heqv | hmemold
             · right
-              have hichainX : Relation.ReflTransGen (RefStep cfg) xRef (Reference.OId oid) := by
-                rw [← heqv]; exact ihchain
-              have hreachY : FrameReachable cfg frame0.index (Reference.OId oid) := by
-                rw [FrameReachable_iff_reflTransGen]
-                exact ⟨xRef, hxRoot, hichainX⟩
-              have hownerbound := FrameReachable_owner_index_le cfg vcfg frame0 hreachY frameD.regionId
-                hlocDown frameD hframeDMem rfl
-              by_cases heqidx : frameD.index = frame0.index
-              · have hFYeq : frame0 = frameD :=
-                  swap_corollary_stackWithIndex_index_inj hframe0_mem hframeDMem heqidx.symm
-                rw [← hFYeq]; exact hreachY
-              · have hltidx : frameD.index < frame0.index := lt_of_le_of_ne hownerbound heqidx
-                exact vrcfg.cr3 frameD hframeDMem frame0 hframe0_mem hltidx oid hlocDown hreachY
+              exact swap_corollary_root_escape vcfg vrcfg hxRoot hframe0_mem hframeDMem hlocDown heqv ihchain
             · left
               have hstep_cfg : RefStep cfg (Reference.OId oida) (Reference.OId oidc) := by
                 rw [haeq]
@@ -799,31 +763,7 @@ theorem swap_cr3 : ValidReachableConfig cfg →
       subst heq
       have := FrameReachable_owner_index_le cfg vcfg frame hreachx rid hyloc0 frame0 hframe0_mem hrid.symm
       exact absurd this (Nat.not_le.mpr hframe_lt_frame0)
-    have escape : ∀ start : Reference, start = yfRef →
-        Relation.ReflTransGen (RefStep cfg) start (Reference.OId oid) →
-        FrameReachable cfg frameD.index (Reference.OId oid) := by
-      intro start hstarteq hrtgS
-      cases yfRef with
-      | RId ridw =>
-        exfalso
-        rw [hstarteq] at hrtgS
-        rcases hrtgS.cases_head with heq | ⟨d, hstep, _⟩
-        · exact absurd heq (by simp)
-        · obtain ⟨oid0, hoid0⟩ := hstep.exists_oid_left
-          exact absurd hoid0 (by simp)
-      | OId oidw =>
-        obtain ⟨frameY, hframeYMem, hreachYw⟩ := resolveFA_frameReach hyf
-        have hreachY : FrameReachable cfg frameY.index (Reference.OId oid) := by
-          rw [FrameReachable_iff_reflTransGen] at hreachYw ⊢
-          obtain ⟨startY, hrootY, hrtgY⟩ := hreachYw
-          exact ⟨startY, hrootY, hrtgY.trans (hstarteq ▸ hrtgS)⟩
-        have hownerbound := FrameReachable_owner_index_le cfg vcfg frameY hreachY frameD.regionId
-          hlocDown frameD hframeDMem rfl
-        by_cases heqidx : frameD.index = frameY.index
-        · have hFYeq : frameY = frameD := swap_corollary_stackWithIndex_index_inj hframeYMem hframeDMem heqidx.symm
-          rw [← hFYeq]; exact hreachY
-        · have hltidx : frameD.index < frameY.index := lt_of_le_of_ne hownerbound heqidx
-          exact vrcfg.cr3 frameD hframeDMem frameY hframeYMem hltidx oid hlocDown hreachY
+    have escape := swap_corollary_escape vcfg vrcfg hyf hframeDMem hlocDown
     have main_claim : ∀ start', Relation.ReflTransGen (RefStep cfg') start' (Reference.OId oid) →
         Relation.ReflTransGen (RefStep cfg) start' (Reference.OId oid) ∨
           FrameReachable cfg frameD.index (Reference.OId oid) := by
@@ -850,19 +790,7 @@ theorem swap_cr3 : ValidReachableConfig cfg →
               exact List.contains_iff_mem.mp hcontains
             rcases swap_corollary_object_insert_refs_mem hmemc with heqv | hmemold
             · right
-              have hichainX : Relation.ReflTransGen (RefStep cfg) (Reference.OId xoid) (Reference.OId oid) := by
-                rw [← heqv]; exact ihchain
-              have hreachY : FrameReachable cfg frame0.index (Reference.OId oid) := by
-                rw [FrameReachable_iff_reflTransGen]
-                exact ⟨Reference.OId xoid, hxRoot, hichainX⟩
-              have hownerbound := FrameReachable_owner_index_le cfg vcfg frame0 hreachY frameD.regionId
-                hlocDown frameD hframeDMem rfl
-              by_cases heqidx : frameD.index = frame0.index
-              · have hFYeq : frame0 = frameD :=
-                  swap_corollary_stackWithIndex_index_inj hframe0_mem hframeDMem heqidx.symm
-                rw [← hFYeq]; exact hreachY
-              · have hltidx : frameD.index < frame0.index := lt_of_le_of_ne hownerbound heqidx
-                exact vrcfg.cr3 frameD hframeDMem frame0 hframe0_mem hltidx oid hlocDown hreachY
+              exact swap_corollary_root_escape vcfg vrcfg hxRoot hframe0_mem hframeDMem hlocDown heqv ihchain
             · left
               have hstep_cfg : RefStep cfg (Reference.OId oida) (Reference.OId oidc) := by
                 rw [haeq]
@@ -1061,31 +989,7 @@ theorem swap_cr3 : ValidReachableConfig cfg →
       subst heq
       have := FrameReachable_owner_index_le cfg vcfg frame hreachx rid hyloc0 frame0 hframe0_mem hrid.symm
       exact absurd this (Nat.not_le.mpr hframe_lt_frame0)
-    have escape : ∀ start : Reference, start = yfRef →
-        Relation.ReflTransGen (RefStep cfg) start (Reference.OId oid) →
-        FrameReachable cfg frameD.index (Reference.OId oid) := by
-      intro start hstarteq hrtgS
-      cases yfRef with
-      | RId ridw =>
-        exfalso
-        rw [hstarteq] at hrtgS
-        rcases hrtgS.cases_head with heq | ⟨d, hstep, _⟩
-        · exact absurd heq (by simp)
-        · obtain ⟨oid0, hoid0⟩ := hstep.exists_oid_left
-          exact absurd hoid0 (by simp)
-      | OId oidw =>
-        obtain ⟨frameY, hframeYMem, hreachYw⟩ := resolveFA_frameReach hyf
-        have hreachY : FrameReachable cfg frameY.index (Reference.OId oid) := by
-          rw [FrameReachable_iff_reflTransGen] at hreachYw ⊢
-          obtain ⟨startY, hrootY, hrtgY⟩ := hreachYw
-          exact ⟨startY, hrootY, hrtgY.trans (hstarteq ▸ hrtgS)⟩
-        have hownerbound := FrameReachable_owner_index_le cfg vcfg frameY hreachY frameD.regionId
-          hlocDown frameD hframeDMem rfl
-        by_cases heqidx : frameD.index = frameY.index
-        · have hFYeq : frameY = frameD := swap_corollary_stackWithIndex_index_inj hframeYMem hframeDMem heqidx.symm
-          rw [← hFYeq]; exact hreachY
-        · have hltidx : frameD.index < frameY.index := lt_of_le_of_ne hownerbound heqidx
-          exact vrcfg.cr3 frameD hframeDMem frameY hframeYMem hltidx oid hlocDown hreachY
+    have escape := swap_corollary_escape vcfg vrcfg hyf hframeDMem hlocDown
     have main_claim : ∀ start', Relation.ReflTransGen (RefStep cfg') start' (Reference.OId oid) →
         Relation.ReflTransGen (RefStep cfg) start' (Reference.OId oid) ∨
           FrameReachable cfg frameD.index (Reference.OId oid) := by
@@ -1297,9 +1201,9 @@ theorem swap_cr3 : ValidReachableConfig cfg →
     have hoidAtM : (Reference.OId yoid).objAt? cfg' =
         some (obj.insert yf.field (Reference.OId region.bridgeObjectId)) := by
       rw [hcfg']
-      exact swap_corollary_region_bridge_objAt_mutated vcfg (rid := yrid) (yoid := yoid) (region := region)
+      exact swap_corollary_region_objAt_mutated vcfg (rid := yrid) (yoid := yoid) (region := region)
         (obj := obj) (field := yf.field) (newVal := Reference.OId region.bridgeObjectId) (newBridge := yfoid)
-        hregion hobj hyloc0
+        hregion hobj hyloc0 rfl
     have hoidAtM_cfg : (Reference.OId yoid).objAt? cfg = some obj := by
       unfold Reference.objAt?
       dsimp only
@@ -1315,31 +1219,7 @@ theorem swap_cr3 : ValidReachableConfig cfg →
       subst heq
       have := FrameReachable_owner_index_le cfg vcfg frame hreachx yrid hyloc0 frame0 hframe0_mem hyridEq.symm
       exact absurd this (Nat.not_le.mpr hframe_lt_frame0)
-    have escape : ∀ start : Reference, start = yfRef →
-        Relation.ReflTransGen (RefStep cfg) start (Reference.OId oid) →
-        FrameReachable cfg frameD.index (Reference.OId oid) := by
-      intro start hstarteq hrtgS
-      cases yfRef with
-      | RId ridw =>
-        exfalso
-        rw [hstarteq] at hrtgS
-        rcases hrtgS.cases_head with heq | ⟨d, hstep, _⟩
-        · exact absurd heq (by simp)
-        · obtain ⟨oid0, hoid0⟩ := hstep.exists_oid_left
-          exact absurd hoid0 (by simp)
-      | OId oidw =>
-        obtain ⟨frameY, hframeYMem, hreachYw⟩ := resolveFA_frameReach hyf
-        have hreachY : FrameReachable cfg frameY.index (Reference.OId oid) := by
-          rw [FrameReachable_iff_reflTransGen] at hreachYw ⊢
-          obtain ⟨startY, hrootY, hrtgY⟩ := hreachYw
-          exact ⟨startY, hrootY, hrtgY.trans (hstarteq ▸ hrtgS)⟩
-        have hownerbound := FrameReachable_owner_index_le cfg vcfg frameY hreachY frameD.regionId
-          hlocDown frameD hframeDMem rfl
-        by_cases heqidx : frameD.index = frameY.index
-        · have hFYeq : frameY = frameD := swap_corollary_stackWithIndex_index_inj hframeYMem hframeDMem heqidx.symm
-          rw [← hFYeq]; exact hreachY
-        · have hltidx : frameD.index < frameY.index := lt_of_le_of_ne hownerbound heqidx
-          exact vrcfg.cr3 frameD hframeDMem frameY hframeYMem hltidx oid hlocDown hreachY
+    have escape := swap_corollary_escape vcfg vrcfg hyf hframeDMem hlocDown
     have main_claim : ∀ start', Relation.ReflTransGen (RefStep cfg') start' (Reference.OId oid) →
         Relation.ReflTransGen (RefStep cfg) start' (Reference.OId oid) ∨
           FrameReachable cfg frameD.index (Reference.OId oid) := by
@@ -1367,20 +1247,7 @@ theorem swap_cr3 : ValidReachableConfig cfg →
               exact List.contains_iff_mem.mp hcontains
             rcases swap_corollary_object_insert_refs_mem hmemc with heqv | hmemold
             · right
-              have hichainX : Relation.ReflTransGen (RefStep cfg)
-                  (Reference.OId region.bridgeObjectId) (Reference.OId oid) := by
-                rw [← heqv]; exact ihchain
-              have hreachY : FrameReachable cfg frame0.index (Reference.OId oid) := by
-                rw [FrameReachable_iff_reflTransGen]
-                exact ⟨Reference.OId region.bridgeObjectId, hxRoot, hichainX⟩
-              have hownerbound := FrameReachable_owner_index_le cfg vcfg frame0 hreachY frameD.regionId
-                hlocDown frameD hframeDMem rfl
-              by_cases heqidx : frameD.index = frame0.index
-              · have hFYeq : frame0 = frameD :=
-                  swap_corollary_stackWithIndex_index_inj hframe0_mem hframeDMem heqidx.symm
-                rw [← hFYeq]; exact hreachY
-              · have hltidx : frameD.index < frame0.index := lt_of_le_of_ne hownerbound heqidx
-                exact vrcfg.cr3 frameD hframeDMem frame0 hframe0_mem hltidx oid hlocDown hreachY
+              exact swap_corollary_root_escape vcfg vrcfg hxRoot hframe0_mem hframeDMem hlocDown heqv ihchain
             · left
               have hstep_cfg : RefStep cfg (Reference.OId oida) (Reference.OId oidc) := by
                 rw [haeq]
@@ -1391,7 +1258,7 @@ theorem swap_cr3 : ValidReachableConfig cfg →
               obtain ⟨objv, hobjAt, hcontains⟩ := hstep
               have heqA : (Reference.OId oida).objAt? cfg = (Reference.OId oida).objAt? cfg' := by
                 rw [hcfg']
-                exact swap_corollary_region_bridge_objAt_eq_of_ne vcfg (rid := yrid) (yoid := yoid)
+                exact swap_corollary_region_objAt_eq_of_ne vcfg (rid := yrid) (yoid := yoid)
                   (region := region) (obj := obj) (field := yf.field)
                   (newVal := Reference.OId region.bridgeObjectId) (newBridge := yfoid) (oid' := oida)
                   hregion hobj haeq
@@ -1456,7 +1323,7 @@ theorem swap_cr3 : ValidReachableConfig cfg →
         have hbne : oidb ≠ yoid := hoidm_ne oidb ihreach
         have heqB : (Reference.OId oidb).objAt? cfg = (Reference.OId oidb).objAt? cfg' := by
           rw [hcfg']
-          exact swap_corollary_region_bridge_objAt_eq_of_ne vcfg (rid := yrid) (yoid := yoid)
+          exact swap_corollary_region_objAt_eq_of_ne vcfg (rid := yrid) (yoid := yoid)
             (region := region) (obj := obj) (field := yf.field)
             (newVal := Reference.OId region.bridgeObjectId) (newBridge := yfoid) (oid' := oidb)
             hregion hobj hbne

@@ -914,18 +914,27 @@ session — e.g. `varAsgn_corollary_frame_transport_up`'s comment said "Mirrors
 fieldAsgn_corollary_frame_transport_down", clearly copied from `FieldAsgn.lean` without updating the name
 — fixed to reference `varAsgn`'s own `_down` instead).
 
-**Left for a future session, not urgent — this is the concrete next task**:
-`Gc/Reachability/Validity/Preservation/Swap.lean` itself still has some branch-local duplication *within*
-the file — `escape`/`hoidm_ne`/`main_claim` are re-derived nearly verbatim in all four `swap_cr3`
-sub-branches (only the container's location — `Stk frame0.index` vs `Rgn rid`/`Rgn yrid` — and the mutated
-field's exact value differ), and the `swap_corollary_region_*`/`_region_bridge_*` corollary families
-(`_loc_eq`/`_objAt_mutated`/`_objAt_eq_of_ne`, six theorems total) differ from each other only in whether
-`bridgeObjectId` is folded into `newRegion`. This is proof-internal golfing (a single more-general
-corollary parametrized over location/optional-bridge-change might replace several of these), not an
-import/location smell like the two passes above, so it's lower priority and riskier to attempt (edits
-inside already-green, intricate proofs rather than pure relocation/wrapper-ization). The
-generalize-over-a-hypothesis-or-projection pattern used successfully in the second pass above (state the
-common proof once, parametrized over whatever varies — a `proj` function, a `hstack'`/`hshape`
-side-condition — then make each call site a thin wrapper) is a reasonable template to try here too, e.g.
-parametrizing `escape`/`main_claim` over the container's `Location` and letting each of the four branches
-supply its own location + mutated-value facts.
+**Branch-local duplication inside `Swap.lean` — done (2026-07-28, same day, via `/lean4:refactor`)**:
+the `swap_corollary_region_*`/`_region_bridge_*` corollary families (`_objAt_mutated`/`_objAt_eq_of_ne`,
+four theorems) were merged pairwise by folding an explicit `newBridge : ObjectId` parameter into
+`swap_corollary_region_objAt_mutated`/`_objAt_eq_of_ne` (non-bridge callers now pass
+`newBridge := region.bridgeObjectId`); the `_bridge_` variants were deleted and their 3 call sites
+repointed. Inside `swap_cr3` itself, the `escape` `have`-block turned out **byte-for-byte identical**
+across all four sub-branches (SWAP-STACK/SWAP-REGION-OBJECT/SWAP-REGION-REGION/SWAP-REGION-BRIDGE) —
+confirmed via a literal `diff`, not just a visual skim — so it was pulled out verbatim as a standalone
+`swap_corollary_escape` (parametrized over `oid`/`yf`/`yfRef`/`hyf`/`frameD`/`hframeDMem`/`hlocDown`; no
+`Location`-parametrization was actually needed since `escape`'s own argument never inspects *where* the
+mutated container lives). Separately, three of the four branches' `main_claim` (SWAP-STACK/
+SWAP-REGION-OBJECT/SWAP-REGION-BRIDGE — SWAP-REGION-REGION's analogous case is vacuous, since its
+`newVal = Reference.RId xrid` can never satisfy `heqv : Reference.OId oidc = newVal`) shared an
+identical ~14-line "root escape" argument (`FrameReachable_owner_index_le` + `by_cases heqidx` +
+`vrcfg.cr3` recursion) differing only in the swapped-in `newVal`/`hxRoot`; extracted as
+`swap_corollary_root_escape`, parametrized over `newVal`, `hxRoot`, `heqv`, `ihchain`. All three batches
+verified individually via `lean_diagnostic_messages` before moving to the next; final full `lake build`
+(1060 jobs) clean, project-wide sorry scan still 0, and `lean_verify` on `swap_cr3`/`swap_reachable_valid`
+still shows only `propext`/`Classical.choice`/`Quot.sound`. Net effect: 1489 → 1356 lines (~9% shorter).
+`hoidm_ne` was deliberately **left alone**: it's already only 5 lines per branch, and unlike `escape`/
+`main_claim`'s root-escape it isn't byte-identical across branches (SWAP-STACK's uses
+`FrameReachable_stk_index_le`, the other three use `FrameReachable_owner_index_le` with a different
+`rid`/`hrid`-direction argument each time) — factoring it would trade a few lines for an extra
+indirection layer with no real duplication removed, so it wasn't worth the risk.
