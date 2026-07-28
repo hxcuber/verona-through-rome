@@ -35,6 +35,18 @@ All commands below assume `cd lean/gc`.
   `lake-manifest.json`; the main dependency is `mathlib`. First builds after a fresh clone can be slow
   because of mathlib — subsequent builds reuse `.lake/build`.
 
+## Workflow
+
+Do all iteration on this project through the `/lean4` skills (`/lean4:prove`, `/lean4:draft`,
+`/lean4:refactor`, `/lean4:golf`, `/lean4:review`, `/lean4:checkpoint`, etc.) and the Lean LSP MCP
+tools (`lean_goal`, `lean_diagnostic_messages`, `lean_multi_attempt`, `lean_verify`, ...) rather than
+shelling out to `lake build`/`grep` and hand-simulating goal states. The LSP tools are faster (no
+full-file recompile per check), give exact goal states instead of guessed ones, and are what this
+repo's whole proof-engineering convention (per-file corollaries, `lean_goal`-confirmed case splits,
+axiom checks via `lean_verify`) already assumes. Fall back to raw `lake build`/`grep` only when
+there's a concrete reason the LSP path doesn't work (e.g. checking the *whole-project* build after a
+cross-file change, or the LSP server is unresponsive/stale) — and say so explicitly when you do.
+
 ## Architecture
 
 The proof development has two layers under `Gc/`:
@@ -743,6 +755,69 @@ planned step" below):
   `FieldAsgn.lean`.
   - Axiom check on `varAsgn_cr3`/`varAsgn_reachable_valid` confirms only
     `propext`/`Classical.choice`/`Quot.sound`.
+- **`Swap.lean`** — **fully proved, zero `sorry`** (finished 2026-07-28, same session as
+  `FieldAsgn`/`VarAsgn` above). This was the last remaining `sorry` anywhere in `Gc/` — its completion
+  means every operation in both `Gc/Model/Preservation/` and `Gc/Reachability/Validity/Preservation/`
+  is now fully proved. `swap_cr3` had to combine **both** prior techniques at once: `fieldAsgn_cr3`'s
+  per-hop `main_claim` induction (swap genuinely mutates a container's own field content, unlike
+  `varAsgn`) *and* `varAsgn_cr3`'s root-escape technique (swap also writes a pre-existing value into a
+  var/bridge root, unlike `fieldAsgn`) — necessary because `swap` is a true two-way exchange, not a
+  one-directional overwrite.
+  - **Mid-chain escape turned out simpler than expected**: for SWAP-STACK/SWAP-REGION-OBJECT/
+    SWAP-REGION-REGION, the value newly written into the mutated container's field is always `x`'s own
+    *old* var value — already a trivial `FrameRoot` witness via `Or.inl ⟨frame0, hframe0_mem, rfl, x,
+    hxr⟩`, no `resolveV`/`resolveFA`-chain tracing needed at all (unlike `fieldAsgn`'s escape, which had
+    to trace an arbitrary `y : VarName`'s resolution). SWAP-REGION-BRIDGE's mid-chain escape is the same
+    shape, using the bridge disjunct (`region.bridgeObjectId`, since `yrid = frame0.regionId` is part of
+    the operation's own precondition) instead of a var. For SWAP-REGION-REGION specifically, the
+    mid-chain escape *never fires at all*: the written value there is `Reference.RId xrid`, which can
+    never match a chain element (`RefStep`'s target must already be shown `OId`-shaped whenever the
+    chain continues or ends at CR3's `OId oid`), so that case closes by a direct constructor-mismatch
+    contradiction.
+  - **Root escape is exactly `varAsgn`'s `resolveFA`-composed technique, reused verbatim** (copied as
+    `swap_corollary_resolveFA_frameReach`, since `yf : FieldAccess` here is exactly like `varAsgn`'s
+    `y`), needed uniformly across all four branches for "the var/bridge slot that gets `yfRef` written
+    into it might itself be the whole chain's root."
+  - **The genuinely new complication**: SWAP-REGION-OBJECT/SWAP-REGION-REGION change the stack (`x`'s
+    var) *and* the heap (the region's field) **simultaneously**, and no single `Gc.Model.Preservation.
+    Swap` corollary covers a combined mutation — each of `swap_corollary_region_loc_eq` and
+    `swap_corollary_stack_varmap_loc_eq` only ever changes one side. Composing them naively via `rw
+    [← hcfg']` fails outright (the two single-mutation corollaries' own stated configs don't
+    syntactically match `cfg'`, which has *both* fields changed at once) — resolved by introducing
+    `swap_corollary_region_stack_loc_eq`/`_objAt_eq_of_ne`/`_objAt_mutated`, each explicitly composing
+    the heap-side and stack-side single-mutation facts via `.trans` against an intermediate
+    `{ cfg with heap := ... }` config, then closing the real goal (`... = cfg'`) via `rw [hcfg']; exact
+    ⟨composed proof⟩` (term-mode `exact`, which checks by defeq, rather than a syntactic `rw`).
+    SWAP-REGION-BRIDGE has an analogous problem one level down — the mutated region's own
+    `bridgeObjectId` *and* `objMap` both change together, and `swap_corollary_region_objAt_mutated`/
+    `_objAt_eq_of_ne` (as reused unchanged from SWAP-REGION-OBJECT) hardcode `bridgeObjectId` unchanged
+    — fixed by writing bridge-aware siblings (`swap_corollary_region_bridge_objAt_mutated`/
+    `_objAt_eq_of_ne`) that fold `newBridge` directly into the composed `newRegion` literal from the
+    start (no separate "bridge-only" transport step needed, since the underlying `Gc.Model.Preservation.
+    Swap.swap_corollary_region_loc_eq` never reads `bridgeObjectId` regardless of what the caller passes
+    for it).
+  - **SWAP-REGION-BRIDGE's root/bridge-disjunct case split** (down *and* up directions) mirrors
+    `varAsgn_cr3`'s own BRIDGE-branch handling almost exactly: `by_cases` on whether a candidate frame's
+    `regionId` equals the touched region's id, using `merge_corollary_regionId_unique_index` (S1
+    uniqueness) to collapse that case to "the frame IS `frame0`" in the DOWN direction (where it's a real
+    possibility) or to a direct contradiction in the UP direction (where the suspended frame's index is
+    already known `< frame0.index`, so it can never coincide with `frame0`).
+  - **Recurring gotcha, worse than usual this session**: composing two implicit-argument-heavy corollary
+    calls via `hframe0' : (...) .stackWithIndex.getLast? = some frame0 := hframe0` (a bare `have` binding
+    with no tactic block, relying on defeq to accept `hframe0` unchanged for a differently-*written* but
+    defeq-equal intermediate config) works fine, but supplying an explicit `newFrame`/`newRegion` as an
+    **implicit** argument (letting Lean infer it from a `rfl`/`hcfg'`-shaped proof term) repeatedly
+    mis-unified to a trivial/wrong value instead of the intended literal — same failure class as
+    `MakeObjStack.lean`'s original gotcha, but here it silently produced a *type-mismatch* several lines
+    later rather than an immediate error, making it harder to localize. Fix used throughout: make the
+    replacement record (`newFrame`/`newRegion`/`newVal`/`field`/`newBridge`) an **explicit** argument (or
+    pass it via named `(newVal := ...)`/`(field := ...)` at every call site) rather than relying on
+    unification to recover it from a hypothesis. Also recurring: the multi-line record-literal parser
+    error inside a `have`'s/theorem's type (same fix as every prior file — collapse the literal onto one
+    line with an explicit `: Region`/`: RuntimeConfig` ascription).
+  - Axiom check on `swap_cr3`/`swap_reachable_valid` confirms only `propext`/`Classical.choice`/
+    `Quot.sound`. Full `lake build` (1058 jobs) and a project-wide sorry scan (0 sorries across 42
+    files) both confirm `Gc/` is now completely `sorry`-free.
 
 Elsewhere:
 
@@ -767,76 +842,43 @@ Elsewhere:
 ## Next planned step
 
 `Gc/Model/` (the runtime model and its operational-semantics preservation proofs) has been **complete**
-since 2026-07-26 — see its own "Current known state" section above. Since then, `Gc/Reachability/`'s CR3
-layer (`Validity/Preservation/*.lean`, see its section above) has been built out to **8 of 9 operations
-done, zero `sorry`**: `Enter`/`Exit`/`MakeObjStack`/`MakeObjRegion`/`MakeRegion`/`Merge` (earlier sessions)
-and `FieldAsgn`/`VarAsgn` (this session, 2026-07-28). **`Swap.lean`'s `swap_cr3` is the only remaining
-`sorry` in the entire `Gc/` tree** (confirmed via `grep -c sorry` across every `.lean` file under `Gc/`,
-2026-07-28). Once it's proved, `Gc/Reachability/Validity/` — CR3 preservation across every `Mutation.lean`
-operation — reaches the same completion milestone `Gc/Model/` already has.
+since 2026-07-26. As of 2026-07-28, `Gc/Reachability/`'s CR3 layer (`Validity/Preservation/*.lean`) is
+now **also complete: all 9 operations proved, zero `sorry`** — `Enter`/`Exit`/`MakeObjStack`/
+`MakeObjRegion`/`MakeRegion`/`Merge` (earlier sessions), `FieldAsgn`/`VarAsgn` (earlier this session), and
+finally `Swap.lean`'s `swap_cr3` (see its own "Current known state" bullet above for how it combines the
+`fieldAsgn_cr3`/`varAsgn_cr3` techniques). A full `lake build` (1058 jobs) and a project-wide sorry scan
+(0 sorries across all 42 `.lean` files under `Gc/`) both confirm the entire proof development is now
+`sorry`-free — this is the first time that's been true since the `Reachability/` layer was started.
 
-**Rough plan for `Swap.lean`'s CR3 proof** (not yet started; based on reading `Gc/Model/Preservation/
-Swap.lean`'s own CR3-relevant corollaries — `swap_corollary_stack_loc_eq`/`_region_loc_eq`/
-`_stack_varmap_loc_eq`, all already fully **unconditional** in `oid'` — and on the technique that worked
-for `FieldAsgn.lean`/`VarAsgn.lean` above):
-
-- `swap` is the hardest of the "content-mutating" operations because it's a genuine **exchange**: `x`'s
-  var value and `yf`'s field value trade places, rather than one overwriting a copy of the other. This
-  means, unlike `FieldAsgn`, there are potentially **two** simultaneously-changing slots to reason about
-  (three, counting the bridge branch's `bridgeObjectId`) — mirroring why the Model-layer's own `swap_H2`
-  needed a genuine additive *identity* rather than a `≤`-bound (see `Swap.lean`'s own bullet above).
-- **Good news, reducing the risk**: `swap`'s `Reference.loc?` transport is *already* the sharpest of any
-  file proved so far — fully **unconditional for every `oid'`** (no `oid ≠ freshObjectId`-style exception
-  at all, since `swap` never allocates a fresh id or adds/removes an `objMap`/heap key anywhere — every
-  insert replaces a value at an already-present key). If `objAt?`/`RefStep` turn out *also* unconditional
-  (plausible — like `FieldAsgn`, the exchanged content only ever changes the two swapped slots' own
-  field/key *value*, never the surrounding key *set* at any level), the proof should reduce to: for each
-  of the four `swap_cases` sub-branches (SWAP-STACK, SWAP-REGION-OBJECT, SWAP-REGION-REGION,
-  SWAP-REGION-BRIDGE), identify the (at most two) slots whose *value* actually changes, and reuse the
-  same `main_claim` shape (`head_induction_on`-based per-hop induction, escaping via
-  `FrameReachable_owner_index_le`/`_stk_index_le` when a hop's source/target pair matches one of the
-  swapped slots) as `fieldAsgn_cr3`.
-- **Where it likely gets harder than `FieldAsgn`**: SWAP-STACK and the SWAP-REGION-* variants change `x`'s
-  var slot (or the region's `bridgeObjectId`) *at the same time* as `yf`'s field/objMap slot — so
-  `main_claim`'s per-hop `by_cases` needs to check against **two** distinguished (source, target) pairs,
-  not one, and the escape may need to fire for *either* of the two newly-placed values (both `x`'s new
-  value landing at `yf`'s old slot, and `yf`'s old value landing at `x`'s old slot) — each via its own
-  `resolveV`/`resolveFA`-provenance fact, probably reusing `varAsgn_corollary_resolveV_frameRoot`/
-  `fieldAsgn_corollary_resolveFA_frameReach`-style helpers again (copied per this repo's per-file
-  convention, or perhaps finally worth promoting to a shared location given this would be their *third*
-  copy). SWAP-REGION-BRIDGE additionally swaps a `bridgeObjectId` (heap-level, mirroring `VarAsgn.lean`'s
-  bridge branch) *simultaneously* with an objMap field write (mirroring `FieldAsgn.lean`) — likely the
-  single hardest sub-case, combining both files' complications in one branch.
-- **Suggested attack order**: SWAP-STACK first (closest to `FieldAsgn`'s STACK branch, just with two
-  slots swapped instead of one field overwritten), then SWAP-REGION-OBJECT/`-REGION` (closest to
-  `FieldAsgn`'s REGION branch), then SWAP-REGION-BRIDGE last (hardest, combines both prior files'
-  techniques). Get `swap_cases`'s four-way case split confirmed via `lean_goal` before writing any real
-  proof (per this repo's established habit), and expect to need `swap_corollary_stack_field_eq_yfRef`/
-  `_region_field_eq_yfRef` (already in `Gc.Model.Preservation.Swap`) for the "compute the exchanged
-  values' exact identity" step, analogous to `fieldAsgn_corollary_stack_objAt_mutated`/`_region_objAt_
-  mutated` from this session.
-
-**After `Swap.lean`: consolidate the duplicated/cross-imported helpers.** Once all 9 operations are done,
-the "per-file self-contained" convention (deliberate throughout `Gc/Model/Preservation/`, so each file
-reads standalone) has started to produce genuine duplication in `Gc/Reachability/Validity/Preservation/`
-that's worth cleaning up rather than perpetuating into a fourth/fifth copy for future operations:
-- `fieldAsgn_corollary_resolveV_frameRoot` and `varAsgn_corollary_resolveV_frameRoot` are byte-for-byte
-  identical proofs, just renamed per-file; `varAsgn_corollary_resolveFA_frameReach` will very likely need
-  a third near-identical copy in `Swap.lean` (`swap`'s `yf : FieldAccess`, exactly like `varAsgn`'s).
-  These should become one shared definition (in `Gc.Reachability.Corollaries`, alongside the other
-  non-operation-specific reachability lemmas) rather than N private copies.
-- More importantly, both `FieldAsgn.lean` and `VarAsgn.lean` currently `import Gc.Model.Preservation.Swap`
-  *purely* to borrow generic, non-swap-specific lemmas — `swap_corollary_stackWithIndex_index_inj`,
-  `swap_corollary_stackWithIndex_find_eq` (and separately get `merge_corollary_regionId_unique_index`
-  transitively, via `Gc.Reachability.Corollaries`'s own `import Gc.Model.Preservation.Merge`, needed
-  there for CR2's proof). These live inside `Swap`/`Merge` only because that's where they were *first*
-  needed, not because they're conceptually about swapping or merging — reaching into a sibling
-  operation's preservation file for a generic frame-index fact is exactly the "importing other proofs"
-  smell worth avoiding. Once `Swap.lean` is done and it's clear which facts are *actually* shared across
-  every operation (not just guessed at), pull these into a proper home — either `Gc.Model.Theorems`/
-  `Gc.Model.Helpers` (if they're really about `stackWithIndex` in general, no `ValidConfig` needed) or a
-  new small `Gc.Model.Preservation.Common`-style file — and have `Swap`/`Merge` import *from* there
-  instead of being the accidental source everyone else imports *from*.
-- This is a refactor to do **after** `Swap.lean`'s CR3 proof is green, not before — doing it mid-flight
-  risks destabilizing the 8 already-finished proofs for a cleanup that's easier to scope correctly once
-  all 9 operations' actual sharing patterns are known.
+**The one remaining piece of unfinished work is a cleanup, not a proof gap: consolidate the duplicated/
+cross-imported helpers** that accumulated across `Gc/Reachability/Validity/Preservation/*.lean` under the
+(deliberate) "per-file self-contained" convention, now that all 9 operations' actual sharing patterns are
+known:
+- `fieldAsgn_corollary_resolveV_frameRoot`, `varAsgn_corollary_resolveV_frameRoot`, and (now)
+  `swap_corollary_resolveV_frameRoot` are byte-for-byte identical proofs, just renamed per-file (and
+  likewise `varAsgn_corollary_resolveFA_frameReach`/`swap_corollary_resolveFA_frameReach`). These should
+  become one shared definition (in `Gc.Reachability.Corollaries`, alongside the other
+  non-operation-specific reachability lemmas) rather than three private copies.
+- More importantly, `FieldAsgn.lean`/`VarAsgn.lean`/`Swap.lean`'s own new corollaries all
+  `import Gc.Model.Preservation.Swap` *purely* to borrow generic, non-swap-specific lemmas —
+  `swap_corollary_stackWithIndex_index_inj`, `swap_corollary_stackWithIndex_find_eq` (and separately get
+  `merge_corollary_regionId_unique_index` transitively, via `Gc.Reachability.Corollaries`'s own
+  `import Gc.Model.Preservation.Merge`, needed there for CR2's proof). These live inside `Swap`/`Merge`
+  only because that's where they were *first* needed, not because they're conceptually about swapping or
+  merging — reaching into a sibling operation's preservation file for a generic frame-index fact is
+  exactly the "importing other proofs" smell worth avoiding. Now that all 9 operations' actual sharing
+  patterns are known, pull these into a proper home — either `Gc.Model.Theorems`/`Gc.Model.Helpers` (if
+  they're really about `stackWithIndex` in general, no `ValidConfig` needed) or a new small
+  `Gc.Model.Preservation.Common`-style file — and have `Swap`/`Merge` import *from* there instead of being
+  the accidental source everyone else imports *from*.
+- `Gc/Reachability/Validity/Preservation/Swap.lean` itself also has some branch-local duplication worth
+  a look during this pass: `escape`/`hoidm_ne`/`main_claim` are re-derived nearly verbatim in all four
+  `swap_cr3` sub-branches (only the container's location — `Stk frame0.index` vs `Rgn rid`/`Rgn yrid` —
+  and the mutated field's exact value differ), and the `swap_corollary_region_*`/`_region_bridge_*`
+  corollary families (`_loc_eq`/`_objAt_mutated`/`_objAt_eq_of_ne`, six theorems total) differ from each
+  other only in whether `bridgeObjectId` is folded into `newRegion` — worth checking whether a single
+  more-general corollary (parametrized over the container's location, or over an optional bridge change)
+  could replace several of these six-ish near-duplicates.
+- This refactor is safe to start now — all 9 operations are proved and green, so there's no proof gap
+  left to accidentally destabilize; the risk is now purely "don't break a passing build," checked the
+  normal way (per-file `lake env lean`/`lean_diagnostic_messages`, then a full `lake build`).
