@@ -15,3 +15,7 @@ Major changes from the report
 - `CR3` is actually a valid configuration invariant that should be preserved with every operation, not just a corollary from the reachability statements. Deciding on what to do with it... update: for now it sits in `ValidReachableConfig`, but at some point it should be revisited to see if it should be merged in `ValidConfig`.
 
 - `fieldAsgn` - fixed a bug with the lean implementation, where in the case that `x` in `x.f` is a region object, it hadn't previously checked that `x` is from the current frame's region, instead only checking that `x` and `y` are from the same region.
+
+- reorganisation - `Mutation.lean` is gone, instead there is a `Mutation` folder, within it is a file for each mutation function, along with a lemma that inverts the function so we get all of its cases for free.
+
+- lemmas common to preservation proofs are now extracted to `Gc/Model/Preservation/Common.lean`, although they are also used in `Gc/Reachability/Validity/Preservation`, so it remains to be seen if they will stay there, but for now it is what it is.
