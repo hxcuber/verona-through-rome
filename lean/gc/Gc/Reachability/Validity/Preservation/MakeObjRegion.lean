@@ -113,7 +113,7 @@ private theorem makeObjRegion_corollary_objAt_eq_of_ne_fresh (vcfg : ValidConfig
 
 -- `RefStep` is completely unaffected between cfg and cfg': the only new content is the freshly
 -- allocated (isolated) object.
-private theorem makeObjRegion_corollary_refStep_iff (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
+theorem makeObjRegion_corollary_refStep_iff (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
     {x : VarName} (h : makeObjRegion x cfg = some cfg') :
     ∀ a b, RefStep cfg a b ↔ RefStep cfg' a b := by
   intro a b
@@ -319,6 +319,98 @@ private theorem makeObjRegion_corollary_frameRoot_down {cfg cfg' : RuntimeConfig
       refine ⟨fr, hmem, hidx, region, ?_, hstart⟩
       rw [hlookup''] at hlookup
       exact hlookup
+
+-- `FrameReachable` is completely unaffected at any position strictly before the mutated (last)
+-- one -- the frame-transport argument `makeObjRegion_cr3` already builds inline for itself
+-- (`frame_transport_down`/`_up`/its own `FrameRoot` iff), packaged here as its own reusable
+-- theorem since CR5 (`Gc/Reachability/Validity/CR5.lean`) needs exactly this fact, not CR3's
+-- later-frame-implies-earlier-frame shape. Mirrors `makeObjStack_corollary_frameReachable_iff_of_lt`.
+theorem makeObjRegion_corollary_frameReachable_iff_of_lt (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
+    (h : makeObjRegion x cfg = some cfg')
+    {fid : Index} (hfid : fid < cfg.stack.dropLast.length) (ref : Reference) :
+    FrameReachable cfg fid ref ↔ FrameReachable cfg' fid ref := by
+  obtain ⟨frame1, region1, hframe1Last, hheapLookup1, hregion1Open, hcfg'⟩ := makeObjRegion_cases h
+  have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame1] := (List.dropLast_append_getLast? frame1 hframe1Last).symm
+  set newRegion1 : Region :=
+    { region1 with objMap := AList.insert cfg.freshObjectId ∅ region1.objMap } with newRegion1_def
+  have hheap_eq : cfg'.heap.lookup frame1.regionId = some newRegion1 := by
+    rw [hcfg']; dsimp only
+    exact AList.lookup_insert (a := frame1.regionId) (b := newRegion1) cfg.heap
+  have frame_transport_down : ∀ fr : FrameWithIndex, fr ∈ cfg'.stackWithIndex →
+      fr.index < cfg.stack.dropLast.length → fr ∈ cfg.stackWithIndex := by
+    intro fr hfr hltfr
+    obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hfr
+    have hidx_n : fr.index = n := by rw [← hfeq]
+    have hlt : n < cfg.stack.dropLast.length := by rw [← hidx_n]; exact hltfr
+    have e1 : cfg.stack[n]? = cfg.stack.dropLast[n]? := by
+      conv_lhs => rw [stack_eq]
+      rw [List.getElem?_append_left hlt]
+    have e2 : cfg'.stack[n]? = cfg.stack.dropLast[n]? := by
+      rw [hcfg']; dsimp only
+      rw [List.getElem?_append_left hlt]
+    have hfr_get? : cfg'.stack[n]? = some fr.toFrame := by
+      rw [show fr.toFrame = cfg'.stack[n] from by rw [← hfeq]]
+      exact List.getElem?_eq_getElem hn
+    have hcfgn : cfg.stack[n]? = some fr.toFrame := by rw [e1, ← e2, hfr_get?]
+    obtain ⟨h1, heq⟩ := List.getElem?_eq_some_iff.mp hcfgn
+    unfold RuntimeConfig.stackWithIndex
+    exact List.mem_mapIdx.mpr ⟨n, h1, by rw [heq, ← hidx_n]⟩
+  have frame_transport_up : ∀ fr : FrameWithIndex, fr ∈ cfg.stackWithIndex →
+      fr.index < cfg.stack.dropLast.length → fr ∈ cfg'.stackWithIndex := by
+    intro fr hfr hltfr
+    obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hfr
+    have hidx_n : fr.index = n := by rw [← hfeq]
+    have hlt : n < cfg.stack.dropLast.length := by rw [← hidx_n]; exact hltfr
+    have e1 : cfg.stack[n]? = cfg.stack.dropLast[n]? := by
+      conv_lhs => rw [stack_eq]
+      rw [List.getElem?_append_left hlt]
+    have e2 : cfg'.stack[n]? = cfg.stack.dropLast[n]? := by
+      rw [hcfg']; dsimp only
+      rw [List.getElem?_append_left hlt]
+    have hfr_get? : cfg.stack[n]? = some fr.toFrame := by
+      rw [show fr.toFrame = cfg.stack[n] from by rw [← hfeq]]
+      exact List.getElem?_eq_getElem hn
+    have hcfg'n : cfg'.stack[n]? = some fr.toFrame := by rw [e2, ← e1, hfr_get?]
+    obtain ⟨h1, heq⟩ := List.getElem?_eq_some_iff.mp hcfg'n
+    unfold RuntimeConfig.stackWithIndex
+    exact List.mem_mapIdx.mpr ⟨n, h1, by rw [heq, ← hidx_n]⟩
+  have hheap_eq_at : ∀ rid, rid ≠ frame1.regionId → cfg'.heap.lookup rid = cfg.heap.lookup rid := by
+    intro rid hrid
+    rw [hcfg']; dsimp only; exact AList.lookup_insert_ne hrid
+  have hfrRootIff : ∀ start, FrameRoot cfg fid start ↔ FrameRoot cfg' fid start := by
+    intro start
+    unfold FrameRoot
+    constructor
+    · rintro (⟨fr, hfr, hidx, var, hlookup⟩ | ⟨fr, hfr, hidx, region, hlookup, hstart⟩)
+      · exact Or.inl ⟨fr, frame_transport_up fr hfr (hidx ▸ hfid), hidx, var, hlookup⟩
+      · right
+        by_cases hrideq : fr.regionId = frame1.regionId
+        · rw [hrideq, hheapLookup1] at hlookup
+          injection hlookup with hlookup_eq
+          refine ⟨fr, frame_transport_up fr hfr (hidx ▸ hfid), hidx, newRegion1, ?_, ?_⟩
+          · rw [hrideq]; exact hheap_eq
+          · rw [hstart, ← hlookup_eq]
+        · refine ⟨fr, frame_transport_up fr hfr (hidx ▸ hfid), hidx, region, ?_, hstart⟩
+          rw [hheap_eq_at fr.regionId hrideq]; exact hlookup
+    · rintro (⟨fr, hfr, hidx, var, hlookup⟩ | ⟨fr, hfr, hidx, region, hlookup, hstart⟩)
+      · exact Or.inl ⟨fr, frame_transport_down fr hfr (hidx ▸ hfid), hidx, var, hlookup⟩
+      · right
+        by_cases hrideq : fr.regionId = frame1.regionId
+        · rw [hrideq, hheap_eq] at hlookup
+          injection hlookup with hlookup_eq
+          refine ⟨fr, frame_transport_down fr hfr (hidx ▸ hfid), hidx, region1, ?_, ?_⟩
+          · rw [hrideq]; exact hheapLookup1
+          · rw [hstart, ← hlookup_eq]
+        · refine ⟨fr, frame_transport_down fr hfr (hidx ▸ hfid), hidx, region, ?_, hstart⟩
+          rw [← hheap_eq_at fr.regionId hrideq]; exact hlookup
+  rw [FrameReachable_iff_reflTransGen, FrameReachable_iff_reflTransGen]
+  constructor
+  · rintro ⟨start, hroot, hrtg⟩
+    exact ⟨start, (hfrRootIff start).mp hroot,
+      hrtg.mono (fun a b hab => (makeObjRegion_corollary_refStep_iff vcfg vcfg' h a b).mp hab)⟩
+  · rintro ⟨start, hroot, hrtg⟩
+    exact ⟨start, (hfrRootIff start).mpr hroot,
+      hrtg.mono (fun a b hab => (makeObjRegion_corollary_refStep_iff vcfg vcfg' h a b).mpr hab)⟩
 
 theorem makeObjRegion_cr3 : ValidReachableConfig cfg →
   makeObjRegion x cfg = some cfg' →
