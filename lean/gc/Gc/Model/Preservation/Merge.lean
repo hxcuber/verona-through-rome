@@ -3,6 +3,7 @@ import Gc.Model.Helpers
 import Gc.Model.Validity
 import Gc.Model.Theorems
 import Gc.Model.Mutation.Merge
+import Gc.Model.Preservation.Common
 
 import Mathlib.Data.List.Infix
 
@@ -818,30 +819,6 @@ theorem merge_corollary_loc_rgn_elim {cfg : RuntimeConfig} {oid : ObjectId} {rid
       injection hloc with hloc
       injection hloc
     | some _ => rw [h2] at hloc; dsimp at hloc; contradiction
-
--- `S1`'s regionId-uniqueness at the `FrameWithIndex` level: two stack frames sharing a `regionId`
--- must be the *same* frame (same index).
-theorem merge_corollary_regionId_unique_index {cfg : RuntimeConfig} (s1 : S1 cfg)
-    {frameZ frameW : FrameWithIndex} (hZ : frameZ ∈ cfg.stackWithIndex) (hW : frameW ∈ cfg.stackWithIndex)
-    (heq : frameZ.regionId = frameW.regionId) : frameZ.index = frameW.index := by
-  unfold RuntimeConfig.stackWithIndex at hZ hW
-  obtain ⟨nZ, hnZ, hZeq⟩ := List.mem_mapIdx.mp hZ
-  obtain ⟨nW, hnW, hWeq⟩ := List.mem_mapIdx.mp hW
-  have hZidx : frameZ.index = nZ := by rw [← hZeq]
-  have hWidx : frameW.index = nW := by rw [← hWeq]
-  have hZregion : frameZ.regionId = cfg.stack[nZ].regionId := by rw [← hZeq]
-  have hWregion : frameW.regionId = cfg.stack[nW].regionId := by rw [← hWeq]
-  unfold S1 at s1
-  have hnZ' : nZ < (cfg.stack.map (fun f => f.regionId)).length := by rwa [List.length_map]
-  have hnW' : nW < (cfg.stack.map (fun f => f.regionId)).length := by rwa [List.length_map]
-  have hgetZ : (cfg.stack.map (fun f => f.regionId))[nZ] = frameZ.regionId := by
-    rw [List.getElem_map]; rw [hZregion]
-  have hgetW : (cfg.stack.map (fun f => f.regionId))[nW] = frameW.regionId := by
-    rw [List.getElem_map]; rw [hWregion]
-  have : nZ = nW := by
-    apply (List.Nodup.getElem_inj_iff s1 (hi := hnZ') (hj := hnW')).mp
-    rw [hgetZ, hgetW, heq]
-  rw [hZidx, hWidx, this]
 
 theorem merge_S3 : ValidConfig cfg →
   merge x cfg = some cfg' →

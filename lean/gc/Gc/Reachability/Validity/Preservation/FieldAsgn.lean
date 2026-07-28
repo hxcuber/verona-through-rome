@@ -1,6 +1,6 @@
 import Gc.Model.Mutation.FieldAsgn
 import Gc.Model.Preservation.FieldAsgn
-import Gc.Model.Preservation.Swap
+import Gc.Model.Preservation.Common
 import Gc.Reachability.Validity.Reachable
 import Gc.Reachability.Corollaries
 
@@ -55,53 +55,33 @@ private theorem fieldAsgn_corollary_stack_length_eq (h : fieldAsgn x yf cfg = so
 -- Any frame membership in cfg'.stackWithIndex transports down to cfg with the SAME index,
 -- regionId, bridgeVar and varMap (though possibly a different record, if fieldAsgn's STACK branch
 -- mutated exactly that position's own objMap) -- which is everything FrameRoot/CR3 ever read off a
--- frame (never its objMap).
+-- frame (never its objMap). Thin wrapper around `Gc.Model.Preservation.Common`'s generic
+-- `stackWithIndex_frame_transport_down_of_shape_eq`, instantiated at `proj := fun f => (f.regionId,
+-- f.bridgeVar, f.varMap)` -- one field wider than `varAsgn`/`swap`'s own instantiation, since here
+-- it's `objMap` (not `varMap`) that's left out.
 private theorem fieldAsgn_corollary_frame_transport_down (h : fieldAsgn x yf cfg = some cfg')
     (fr : FrameWithIndex) (hfr : fr ∈ cfg'.stackWithIndex) :
     ∃ fr0 : FrameWithIndex, fr0 ∈ cfg.stackWithIndex ∧ fr0.index = fr.index ∧
       fr0.regionId = fr.regionId ∧ fr0.bridgeVar = fr.bridgeVar ∧ fr0.varMap = fr.varMap := by
-  obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hfr
-  have hidx_n : fr.index = n := by rw [← hfeq]
-  have hget' : cfg'.stack[n]? = some fr.toFrame := by
-    rw [show fr.toFrame = cfg'.stack[n] from by rw [← hfeq]]
-    exact List.getElem?_eq_getElem hn
-  have hmap_eq := fieldAsgn_corollary_stack_shape_eq h n
-  rw [hget', Option.map_some] at hmap_eq
-  obtain ⟨frameX, hframeX, hridX⟩ := Option.map_eq_some_iff.mp hmap_eq
-  obtain ⟨hh1, heq⟩ := List.getElem?_eq_some_iff.mp hframeX
-  injection hridX with hrid heq23
+  obtain ⟨fr0, hmem, hidx, hproj⟩ :=
+    stackWithIndex_frame_transport_down_of_shape_eq
+      (proj := fun f => (f.regionId, f.bridgeVar, f.varMap)) (fieldAsgn_corollary_stack_shape_eq h) fr hfr
+  injection hproj with hrid heq23
   injection heq23 with hbv hvm
-  refine ⟨{ frameX with index := n }, ?_, ?_, ?_, ?_, ?_⟩
-  · unfold RuntimeConfig.stackWithIndex
-    exact List.mem_mapIdx.mpr ⟨n, hh1, by rw [heq]⟩
-  · rw [hidx_n]
-  · exact hrid
-  · exact hbv
-  · exact hvm
+  exact ⟨fr0, hmem, hidx, hrid, hbv, hvm⟩
 
--- Mirrors fieldAsgn_corollary_frame_transport_down, transporting membership the other way.
+-- Mirrors fieldAsgn_corollary_frame_transport_down, transporting membership the other way (also a
+-- thin wrapper, around `stackWithIndex_frame_transport_up_of_shape_eq`).
 private theorem fieldAsgn_corollary_frame_transport_up (h : fieldAsgn x yf cfg = some cfg')
     (fr : FrameWithIndex) (hfr : fr ∈ cfg.stackWithIndex) :
     ∃ fr0 : FrameWithIndex, fr0 ∈ cfg'.stackWithIndex ∧ fr0.index = fr.index ∧
       fr0.regionId = fr.regionId ∧ fr0.bridgeVar = fr.bridgeVar ∧ fr0.varMap = fr.varMap := by
-  obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hfr
-  have hidx_n : fr.index = n := by rw [← hfeq]
-  have hget : cfg.stack[n]? = some fr.toFrame := by
-    rw [show fr.toFrame = cfg.stack[n] from by rw [← hfeq]]
-    exact List.getElem?_eq_getElem hn
-  have hmap_eq := fieldAsgn_corollary_stack_shape_eq h n
-  rw [hget, Option.map_some] at hmap_eq
-  obtain ⟨frameX, hframeX, hridX⟩ := Option.map_eq_some_iff.mp hmap_eq.symm
-  obtain ⟨hh1, heq⟩ := List.getElem?_eq_some_iff.mp hframeX
-  injection hridX with hrid heq23
+  obtain ⟨fr0, hmem, hidx, hproj⟩ :=
+    stackWithIndex_frame_transport_up_of_shape_eq
+      (proj := fun f => (f.regionId, f.bridgeVar, f.varMap)) (fieldAsgn_corollary_stack_shape_eq h) fr hfr
+  injection hproj with hrid heq23
   injection heq23 with hbv hvm
-  refine ⟨{ frameX with index := n }, ?_, ?_, ?_, ?_, ?_⟩
-  · unfold RuntimeConfig.stackWithIndex
-    exact List.mem_mapIdx.mpr ⟨n, hh1, by rw [heq]⟩
-  · rw [hidx_n]
-  · exact hrid
-  · exact hbv
-  · exact hvm
+  exact ⟨fr0, hmem, hidx, hrid, hbv, hvm⟩
 
 -- fieldAsgn's REGION branch also literally leaves cfg.heap's `bridgeObjectId` untouched at every
 -- key (only the mutated region's `objMap` changes) -- so a `FrameRoot` bridge witness transports
@@ -153,45 +133,6 @@ private theorem fieldAsgn_corollary_frameRoot_iff (h : fieldAsgn x yf cfg = some
       refine Or.inr ⟨fr0, hfr0, hidx0 ▸ hidx, region0, ?_, ?_⟩
       · rw [hrid0]; exact hregion0
       · rw [hstart, hbridge0]
-
--- A successful `resolveV` (which `fieldAsgn`'s own `y : VarName` argument on the STACK branch
--- resolves via, and whose `RId`-shape is already ruled out by `fieldAsgn_cases`) always retrieves
--- a value that's *already* a `FrameRoot` witness somewhere -- directly as a var's value, or as a
--- region's bridge object -- mirrors the case split in `Gc.Model.Preservation.FieldAsgn`'s
--- `fieldAsgn_corollary_resolveV_oid_mem_objectIds`, just concluding a `FrameRoot` witness instead
--- of mere `objectIds` membership.
-private theorem fieldAsgn_corollary_resolveV_frameRoot {cfg : RuntimeConfig} {var : VarName} {oid : ObjectId}
-    (hrv : resolveV var cfg = some (Reference.OId oid)) :
-    ∃ frameY : FrameWithIndex, frameY ∈ cfg.stackWithIndex ∧ FrameRoot cfg frameY.index (Reference.OId oid) := by
-  unfold resolveV at hrv
-  cases hfV : cfg.stackWithIndex.findRev? (fun frame => frame.varMap.keys.contains var ∨ frame.bridgeVar == var) with
-  | none => rw [hfV] at hrv; contradiction
-  | some frameV =>
-    rw [hfV] at hrv
-    dsimp at hrv
-    have hframeV_mem : frameV ∈ cfg.stackWithIndex := by
-      rw [List.findRev?_eq_find?_reverse] at hfV
-      exact List.mem_reverse.mp (List.mem_of_find?_eq_some hfV)
-    cases hlookupV : frameV.varMap.lookup var with
-    | some refV =>
-      rw [hlookupV] at hrv
-      dsimp at hrv
-      rw [Option.some_inj] at hrv
-      subst hrv
-      exact ⟨frameV, hframeV_mem, Or.inl ⟨frameV, hframeV_mem, rfl, var, hlookupV⟩⟩
-    | none =>
-      rw [hlookupV] at hrv
-      dsimp at hrv
-      by_cases hbv : frameV.bridgeVar == var
-      · rw [if_pos hbv] at hrv
-        cases hregionV : cfg.heap.lookup frameV.regionId with
-        | none => rw [hregionV] at hrv; dsimp at hrv; contradiction
-        | some regionV =>
-          rw [hregionV] at hrv
-          dsimp at hrv
-          rw [Option.some_inj, Reference.OId.injEq] at hrv
-          exact ⟨frameV, hframeV_mem, Or.inr ⟨frameV, hframeV_mem, rfl, regionV, hregionV, by rw [hrv]⟩⟩
-      · rw [if_neg hbv] at hrv; contradiction
 
 -- The mutated container's *own* new content on the STACK branch: computed directly from the
 -- `hcfg'` construction (frame0's position is found via index-uniqueness, and the new object's
@@ -439,7 +380,7 @@ theorem fieldAsgn_cr3 : ValidReachableConfig cfg →
             · -- ESCAPE: the mutated container's *new* field write is exactly the value read out
               -- of `yf` -- since that value was already resolvable pre-mutation, its own natural
               -- root gives an independent path to `oid` that doesn't depend on this hop at all.
-              obtain ⟨frameY, hframeYMem, hrootY⟩ := fieldAsgn_corollary_resolveV_frameRoot hyr
+              obtain ⟨frameY, hframeYMem, hrootY⟩ := resolveV_frameRoot hyr
               rw [hceq] at ihchain
               have hreachY : FrameReachable cfg frameY.index (Reference.OId oid) := by
                 rw [FrameReachable_iff_reflTransGen]
@@ -557,7 +498,7 @@ theorem fieldAsgn_cr3 : ValidReachableConfig cfg →
           by_cases haeq : oida = oidm
           · by_cases hceq : oidc = oidy
             · -- ESCAPE
-              obtain ⟨frameY, hframeYMem, hrootY⟩ := fieldAsgn_corollary_resolveV_frameRoot hyr
+              obtain ⟨frameY, hframeYMem, hrootY⟩ := resolveV_frameRoot hyr
               rw [hceq] at ihchain
               have hreachY : FrameReachable cfg frameY.index (Reference.OId oid) := by
                 rw [FrameReachable_iff_reflTransGen]

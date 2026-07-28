@@ -1,7 +1,7 @@
 import Gc.Model.Types
 import Gc.Model.Helpers
 import Gc.Model.Validity
-import Gc.Model.Preservation.Merge
+import Gc.Model.Preservation.Common
 import Gc.Reachability.Semantics
 import Gc.Reachability.Path
 
@@ -601,3 +601,115 @@ theorem Path_from_frame_to_own_region_stays_in_frame (cfg : RuntimeConfig) (hval
   have hge := (Path_from_frame_lower_bound cfg hvalid frame hframe oid hoid path.refs hvalidpath htarget
     ref hmem oidr hoidr).1 fid hfid
   exact le_antisymm hle hge
+
+-- A successful `resolveV` always retrieves a value that's already a `FrameRoot` witness
+-- somewhere -- directly as a var's value, or as a region's bridge object. Shared by every
+-- `Preservation` operation whose semantics resolves a `VarName`/`FieldAccess` root value that was
+-- already present pre-mutation (`VarAsgn`, `FieldAsgn`, `Swap`'s `resolveFA_frameReach` below) --
+-- previously three byte-for-byte-identical private copies, one per file (see CLAUDE.md's "Next
+-- planned step" section for the consolidation rationale).
+theorem resolveV_frameRoot {cfg : RuntimeConfig} {var : VarName} {oid : ObjectId}
+    (hrv : resolveV var cfg = some (Reference.OId oid)) :
+    ∃ frameY : FrameWithIndex, frameY ∈ cfg.stackWithIndex ∧ FrameRoot cfg frameY.index (Reference.OId oid) := by
+  unfold resolveV at hrv
+  cases hfV : cfg.stackWithIndex.findRev? (fun frame => frame.varMap.keys.contains var ∨ frame.bridgeVar == var) with
+  | none => rw [hfV] at hrv; contradiction
+  | some frameV =>
+    rw [hfV] at hrv
+    dsimp at hrv
+    have hframeV_mem : frameV ∈ cfg.stackWithIndex := by
+      rw [List.findRev?_eq_find?_reverse] at hfV
+      exact List.mem_reverse.mp (List.mem_of_find?_eq_some hfV)
+    cases hlookupV : frameV.varMap.lookup var with
+    | some refV =>
+      rw [hlookupV] at hrv
+      dsimp at hrv
+      rw [Option.some_inj] at hrv
+      subst hrv
+      exact ⟨frameV, hframeV_mem, Or.inl ⟨frameV, hframeV_mem, rfl, var, hlookupV⟩⟩
+    | none =>
+      rw [hlookupV] at hrv
+      dsimp at hrv
+      by_cases hbv : frameV.bridgeVar == var
+      · rw [if_pos hbv] at hrv
+        cases hregionV : cfg.heap.lookup frameV.regionId with
+        | none => rw [hregionV] at hrv; dsimp at hrv; contradiction
+        | some regionV =>
+          rw [hregionV] at hrv
+          dsimp at hrv
+          rw [Option.some_inj, Reference.OId.injEq] at hrv
+          exact ⟨frameV, hframeV_mem, Or.inr ⟨frameV, hframeV_mem, rfl, regionV, hregionV, by rw [hrv]⟩⟩
+      · rw [if_neg hbv] at hrv; contradiction
+
+-- A successful `resolveFA` retrieves a value that's already `FrameReachable` from *some* frame:
+-- the root var/bridge value resolves to some container object oid0 (via `resolveV_frameRoot`),
+-- and the field access itself is exactly one more `RefStep` hop from oid0's own object. Shared by
+-- `VarAsgn`/`Swap` (both resolve a `FieldAccess`, unlike `FieldAsgn` whose `y : VarName` only
+-- needs `resolveV_frameRoot` directly) -- previously two identical private copies.
+theorem resolveFA_frameReach {cfg : RuntimeConfig} {y : FieldAccess} {oid : ObjectId}
+    (hyf : resolveFA y cfg = some (Reference.OId oid)) :
+    ∃ frameY : FrameWithIndex, frameY ∈ cfg.stackWithIndex ∧ FrameReachable cfg frameY.index (Reference.OId oid) := by
+  unfold resolveFA at hyf
+  cases hrv : resolveV y.root cfg with
+  | none => rw [hrv] at hyf; contradiction
+  | some ref0 =>
+    rw [hrv] at hyf
+    dsimp at hyf
+    cases ref0 with
+    | RId rid0 => dsimp at hyf; contradiction
+    | OId oid0 =>
+      dsimp at hyf
+      cases hloc0 : (Reference.OId oid0).loc? cfg with
+      | none => rw [hloc0] at hyf; dsimp at hyf; contradiction
+      | some loc0 =>
+        rw [hloc0] at hyf
+        dsimp at hyf
+        obtain ⟨frameY, hframeYMem, hrootY⟩ := resolveV_frameRoot hrv
+        have hreachY0 : FrameReachable cfg frameY.index (Reference.OId oid0) := by
+          rw [FrameReachable_iff_reflTransGen]
+          exact ⟨Reference.OId oid0, hrootY, Relation.ReflTransGen.refl⟩
+        cases loc0 with
+        | Stk fid0 =>
+          dsimp at hyf
+          cases hframe0 : cfg.stackWithIndex.find? (fun frame => frame.index == fid0) with
+          | none => rw [hframe0] at hyf; dsimp at hyf; contradiction
+          | some frame0 =>
+            rw [hframe0] at hyf
+            dsimp at hyf
+            cases hobj0 : frame0.objMap.lookup oid0 with
+            | none => rw [hobj0] at hyf; dsimp at hyf; contradiction
+            | some obj0 =>
+              rw [hobj0] at hyf
+              dsimp at hyf
+              have hobjAt0 : (Reference.OId oid0).objAt? cfg = some obj0 := by
+                unfold Reference.objAt?
+                dsimp only
+                rw [hloc0]
+                dsimp only
+                rw [hframe0]
+                exact hobj0
+              exact ⟨frameY, hframeYMem, FrameReachable.step hobjAt0 (List.contains_iff_mem.mpr
+                (AList.mem_lookup_iff.mp (Option.mem_def.mpr hyf) |> (List.mem_map_of_mem (f := (·.2))) )
+                ) hreachY0⟩
+        | Rgn rid0 =>
+          dsimp at hyf
+          cases hregion0 : cfg.heap.lookup rid0 with
+          | none => rw [hregion0] at hyf; dsimp at hyf; contradiction
+          | some region0 =>
+            rw [hregion0] at hyf
+            dsimp at hyf
+            cases hobj0 : region0.objMap.lookup oid0 with
+            | none => rw [hobj0] at hyf; dsimp at hyf; contradiction
+            | some obj0 =>
+              rw [hobj0] at hyf
+              dsimp at hyf
+              have hobjAt0 : (Reference.OId oid0).objAt? cfg = some obj0 := by
+                unfold Reference.objAt?
+                dsimp only
+                rw [hloc0]
+                dsimp only
+                rw [hregion0]
+                exact hobj0
+              exact ⟨frameY, hframeYMem, FrameReachable.step hobjAt0 (List.contains_iff_mem.mpr
+                (AList.mem_lookup_iff.mp (Option.mem_def.mpr hyf) |> (List.mem_map_of_mem (f := (·.2))) )
+                ) hreachY0⟩

@@ -3,6 +3,7 @@ import Gc.Model.Helpers
 import Gc.Model.Validity
 import Gc.Model.Theorems
 import Gc.Model.Mutation.Swap
+import Gc.Model.Preservation.Common
 
 import Mathlib.Data.List.Infix
 
@@ -356,30 +357,6 @@ theorem swap_H1 : ValidConfig cfg →
       apply h1
       unfold Heap.regions
       exact (List.Sublist.map _ (List.kerase_sublist yrid cfg.heap.entries)).mem hkeraseregion
-
--- Two elements of `cfg.stackWithIndex` with the same `.index` are the same element -- `.index` is
--- assigned to be the element's own position by `mapIdx`, so equal indices means equal positions.
-theorem swap_corollary_stackWithIndex_index_inj {cfg : RuntimeConfig} {f1 f2 : FrameWithIndex}
-    (h1 : f1 ∈ cfg.stackWithIndex) (h2 : f2 ∈ cfg.stackWithIndex) (heq : f1.index = f2.index) :
-    f1 = f2 := by
-  unfold RuntimeConfig.stackWithIndex at h1 h2
-  obtain ⟨n1, hn1, e1⟩ := List.mem_mapIdx.mp h1
-  obtain ⟨n2, hn2, e2⟩ := List.mem_mapIdx.mp h2
-  have hi1 : f1.index = n1 := by rw [← e1]
-  have hi2 : f2.index = n2 := by rw [← e2]
-  have hn : n1 = n2 := by rw [hi1, hi2] at heq; exact heq
-  subst hn
-  rw [← e1, ← e2]
-
--- resolveFA's own `.find? (index==fid)` step recovers exactly the frame already known to have
--- that index, via the index-injectivity fact above plus the generic find?-uniqueness lemma.
-theorem swap_corollary_stackWithIndex_find_eq {cfg : RuntimeConfig} {frame : FrameWithIndex}
-    (hmem : frame ∈ cfg.stackWithIndex) :
-    cfg.stackWithIndex.find? (fun f => f.index == frame.index) = some frame := by
-  apply List.find?_eq_some_of_unique hmem (by simp)
-  intro f' hf'_mem hf'_pred
-  rw [beq_iff_eq] at hf'_pred
-  exact swap_corollary_stackWithIndex_index_inj hf'_mem hmem hf'_pred
 
 -- Traces resolveFA's own computation to show it agrees with the already-known
 -- frame.objMap.lookup yoid = some obj (the SWAP-STACK case's own derivation, independent of

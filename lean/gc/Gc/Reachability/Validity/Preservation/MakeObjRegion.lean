@@ -1,43 +1,24 @@
 import Gc.Model.Mutation.MakeObjRegion
 import Gc.Model.Preservation.MakeObjRegion
-import Gc.Model.Preservation.Swap
-import Gc.Model.Preservation.Exit
+import Gc.Model.Preservation.Common
 import Gc.Reachability.Validity.Reachable
 import Gc.Reachability.Corollaries
 
 -- Every frame's `objMap` is completely unaffected by makeObjRegion (only the last frame's
 -- `varMap` changes, and only the mutated region's `objMap` in the heap changes) -- so the
--- per-position `objMap` is unconditionally the same in cfg and cfg', at every index.
+-- per-position `objMap` is unconditionally the same in cfg and cfg', at every index. Thin wrapper
+-- around `Gc.Model.Preservation.Common`'s generic `stackWithIndex_objMap_get_eq_of_last_varMap_
+-- update` (see `merge_corollary_objMap_get_eq`'s comment for why the same generic lemma applies
+-- here despite a different value being inserted into `varMap`).
 private theorem makeObjRegion_corollary_objMap_get_eq {cfg cfg' : RuntimeConfig} {x : VarName}
     (h : makeObjRegion x cfg = some cfg') (n : ℕ) :
     (cfg.stack[n]?).map Frame.objMap = (cfg'.stack[n]?).map Frame.objMap := by
   obtain ⟨frame, region, hframeLast, hheapLookup, hregionOpen, hcfg'⟩ := makeObjRegion_cases h
-  have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame] := (List.dropLast_append_getLast? frame hframeLast).symm
-  set newFrame : Frame :=
-    { regionId := frame.regionId, bridgeVar := frame.bridgeVar, objMap := frame.objMap,
-      varMap := AList.insert x (Reference.OId cfg.freshObjectId) frame.varMap } with newFrame_def
-  by_cases hlp : n = cfg.stack.dropLast.length
-  · have e1 : cfg.stack[n]? = some frame := by
-      conv_lhs => rw [stack_eq, hlp]
-      simp
-    have e2 : cfg'.stack[n]? = some newFrame := by
-      rw [hcfg', newFrame_def]; dsimp only; rw [hlp]
-      simp
-    rw [e1, e2]
-    rfl
-  · by_cases hlt : n < cfg.stack.dropLast.length
-    · have e1 : cfg.stack[n]? = cfg.stack.dropLast[n]? := by
-        conv_lhs => rw [stack_eq]
-        rw [List.getElem?_append_left hlt]
-      have e2 : cfg'.stack[n]? = cfg.stack.dropLast[n]? := by
-        rw [hcfg']; dsimp only
-        rw [List.getElem?_append_left hlt]
-      rw [e1, e2]
-    · have hlen : cfg.stack.length = cfg.stack.dropLast.length + 1 := by rw [stack_eq]; simp
-      have hlen' : cfg'.stack.length = cfg.stack.dropLast.length + 1 := by rw [hcfg']; simp
-      have e1 : cfg.stack[n]? = none := List.getElem?_eq_none (by omega)
-      have e2 : cfg'.stack[n]? = none := List.getElem?_eq_none (by omega)
-      rw [e1, e2]
+  have hstack' : cfg'.stack = cfg.stack.dropLast ++
+      [({ regionId := frame.regionId, bridgeVar := frame.bridgeVar, objMap := frame.objMap,
+          varMap := AList.insert x (Reference.OId cfg.freshObjectId) frame.varMap } : Frame)] := by
+    rw [hcfg']
+  exact stackWithIndex_objMap_get_eq_of_last_varMap_update hframeLast hstack' n
 
 -- The freshly-created object always resolves into the heap, at the current top frame's own
 -- region (never onto the stack, since no frame's objMap ever changes). It's graph-isolated

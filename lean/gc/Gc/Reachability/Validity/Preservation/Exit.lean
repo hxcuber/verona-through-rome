@@ -1,6 +1,6 @@
 import Gc.Model.Mutation.Exit
 import Gc.Model.Preservation.Exit
-import Gc.Model.Preservation.Swap
+import Gc.Model.Preservation.Common
 import Gc.Reachability.Validity.Reachable
 import Gc.Reachability.Corollaries
 
@@ -49,16 +49,6 @@ private theorem exit_corollary_regionId_ne {cfg : RuntimeConfig} (s1 : S1 cfg) {
   dsimp only at hidxeq
   rw [hidxeq] at hframe_lt
   exact absurd hframe_lt (lt_irrefl _)
-
-private theorem exit_corollary_getElem_index_eq {cfg : RuntimeConfig} {fid : Index} {frame : FrameWithIndex}
-    (h : cfg.stackWithIndex[fid]? = some frame) : frame.index = fid := by
-  unfold RuntimeConfig.stackWithIndex at h
-  rw [List.getElem?_mapIdx, Option.map_eq_some_iff] at h
-  obtain ⟨stackFrame, hfid, hframe_eq⟩ := h
-  obtain ⟨fid_lt_length, stackFrame_eq⟩ := List.getElem?_eq_some_iff.mp hfid
-  have frame_eq : ({cfg.stack[fid] with index := fid} : FrameWithIndex) = frame :=
-    stackFrame_eq ▸ hframe_eq
-  rw [← frame_eq]
 
 private theorem exit_corollary_objAt_loc_some {cfg : RuntimeConfig} {oid : ObjectId} {obj : Object}
     (hobjAt : (Reference.OId oid).objAt? cfg = some obj) : (Reference.OId oid).loc? cfg ≠ none := by
@@ -113,8 +103,8 @@ private theorem exit_corollary_objAt_eq_of_ne_none (vcfg : ValidConfig cfg) (vcf
       dsimp only
       obtain ⟨frame0, hframe0, hmem0⟩ := (oid_loc_stk_iff_in_stack vcfg).mp hloc
       obtain ⟨frame0', hframe0', hmem0'⟩ := (oid_loc_stk_iff_in_stack vcfg').mp hloc'
-      have hidx0 : frame0.index = fid0 := exit_corollary_getElem_index_eq hframe0
-      have hidx0' : frame0'.index = fid0 := exit_corollary_getElem_index_eq hframe0'
+      have hidx0 : frame0.index = fid0 := stackWithIndex_getElem_index_eq hframe0
+      have hidx0' : frame0'.index = fid0 := stackWithIndex_getElem_index_eq hframe0'
       have hmem0mem : frame0 ∈ cfg.stackWithIndex := List.mem_of_getElem? hframe0
       have hmem0mem' : frame0' ∈ cfg'.stackWithIndex := List.mem_of_getElem? hframe0'
       have hmem0mem'' : frame0' ∈ cfg.stackWithIndex :=

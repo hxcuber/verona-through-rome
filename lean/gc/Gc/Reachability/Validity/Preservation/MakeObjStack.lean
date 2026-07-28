@@ -1,19 +1,8 @@
 import Gc.Model.Mutation.MakeObjStack
 import Gc.Model.Preservation.MakeObjStack
-import Gc.Model.Preservation.Swap
-import Gc.Model.Preservation.Exit
+import Gc.Model.Preservation.Common
 import Gc.Reachability.Validity.Reachable
 import Gc.Reachability.Corollaries
-
-private theorem makeObjStack_corollary_getElem_index_eq {cfg : RuntimeConfig} {fid : Index} {frame : FrameWithIndex}
-    (h : cfg.stackWithIndex[fid]? = some frame) : frame.index = fid := by
-  unfold RuntimeConfig.stackWithIndex at h
-  rw [List.getElem?_mapIdx, Option.map_eq_some_iff] at h
-  obtain ⟨stackFrame, hfid, hframe_eq⟩ := h
-  obtain ⟨fid_lt_length, stackFrame_eq⟩ := List.getElem?_eq_some_iff.mp hfid
-  have frame_eq : ({cfg.stack[fid] with index := fid} : FrameWithIndex) = frame :=
-    stackFrame_eq ▸ hframe_eq
-  rw [← frame_eq]
 
 -- makeObjStack only ever inserts a *fresh* key into the last frame's own objMap, so for any
 -- oid ≠ freshObjectId, `loc?` is completely unaffected. Adapts the same `loc_eq_of_ne_fresh`-style
@@ -155,8 +144,8 @@ private theorem makeObjStack_corollary_objAt_eq_of_ne_fresh (vcfg : ValidConfig 
         simp
       have hmem0mem : frame0 ∈ cfg.stackWithIndex := List.mem_of_getElem? hframe0
       have hmem0mem' : frame0' ∈ cfg'.stackWithIndex := List.mem_of_getElem? hframe0'
-      have hidx0 : frame0.index = fid0 := makeObjStack_corollary_getElem_index_eq hframe0
-      have hidx0' : frame0'.index = fid0 := makeObjStack_corollary_getElem_index_eq hframe0'
+      have hidx0 : frame0.index = fid0 := stackWithIndex_getElem_index_eq hframe0
+      have hidx0' : frame0'.index = fid0 := stackWithIndex_getElem_index_eq hframe0'
       have hfind0 : cfg.stackWithIndex.find? (fun f => f.index == fid0) = some frame0 := by
         rw [← hidx0]; exact swap_corollary_stackWithIndex_find_eq hmem0mem
       have hfind0' : cfg'.stackWithIndex.find? (fun f => f.index == fid0) = some frame0' := by

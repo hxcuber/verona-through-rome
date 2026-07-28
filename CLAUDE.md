@@ -850,35 +850,82 @@ finally `Swap.lean`'s `swap_cr3` (see its own "Current known state" bullet above
 (0 sorries across all 42 `.lean` files under `Gc/`) both confirm the entire proof development is now
 `sorry`-free — this is the first time that's been true since the `Reachability/` layer was started.
 
-**The one remaining piece of unfinished work is a cleanup, not a proof gap: consolidate the duplicated/
-cross-imported helpers** that accumulated across `Gc/Reachability/Validity/Preservation/*.lean` under the
-(deliberate) "per-file self-contained" convention, now that all 9 operations' actual sharing patterns are
-known:
-- `fieldAsgn_corollary_resolveV_frameRoot`, `varAsgn_corollary_resolveV_frameRoot`, and (now)
-  `swap_corollary_resolveV_frameRoot` are byte-for-byte identical proofs, just renamed per-file (and
-  likewise `varAsgn_corollary_resolveFA_frameReach`/`swap_corollary_resolveFA_frameReach`). These should
-  become one shared definition (in `Gc.Reachability.Corollaries`, alongside the other
-  non-operation-specific reachability lemmas) rather than three private copies.
-- More importantly, `FieldAsgn.lean`/`VarAsgn.lean`/`Swap.lean`'s own new corollaries all
-  `import Gc.Model.Preservation.Swap` *purely* to borrow generic, non-swap-specific lemmas —
-  `swap_corollary_stackWithIndex_index_inj`, `swap_corollary_stackWithIndex_find_eq` (and separately get
-  `merge_corollary_regionId_unique_index` transitively, via `Gc.Reachability.Corollaries`'s own
-  `import Gc.Model.Preservation.Merge`, needed there for CR2's proof). These live inside `Swap`/`Merge`
-  only because that's where they were *first* needed, not because they're conceptually about swapping or
-  merging — reaching into a sibling operation's preservation file for a generic frame-index fact is
-  exactly the "importing other proofs" smell worth avoiding. Now that all 9 operations' actual sharing
-  patterns are known, pull these into a proper home — either `Gc.Model.Theorems`/`Gc.Model.Helpers` (if
-  they're really about `stackWithIndex` in general, no `ValidConfig` needed) or a new small
-  `Gc.Model.Preservation.Common`-style file — and have `Swap`/`Merge` import *from* there instead of being
-  the accidental source everyone else imports *from*.
-- `Gc/Reachability/Validity/Preservation/Swap.lean` itself also has some branch-local duplication worth
-  a look during this pass: `escape`/`hoidm_ne`/`main_claim` are re-derived nearly verbatim in all four
-  `swap_cr3` sub-branches (only the container's location — `Stk frame0.index` vs `Rgn rid`/`Rgn yrid` —
-  and the mutated field's exact value differ), and the `swap_corollary_region_*`/`_region_bridge_*`
-  corollary families (`_loc_eq`/`_objAt_mutated`/`_objAt_eq_of_ne`, six theorems total) differ from each
-  other only in whether `bridgeObjectId` is folded into `newRegion` — worth checking whether a single
-  more-general corollary (parametrized over the container's location, or over an optional bridge change)
-  could replace several of these six-ish near-duplicates.
-- This refactor is safe to start now — all 9 operations are proved and green, so there's no proof gap
-  left to accidentally destabilize; the risk is now purely "don't break a passing build," checked the
-  normal way (per-file `lake env lean`/`lean_diagnostic_messages`, then a full `lake build`).
+**The consolidation described above is now done (2026-07-28, same day as `swap_cr3`).** A new
+`Gc/Model/Preservation/Common.lean` (imports only `Types`/`Helpers`/`Validity`/`Theorems` plus
+`Mathlib.Data.List.Infix` — the latter turned out load-bearing: dropping it broke a `Nat`-order
+dot-notation lemma, `hlt.trans`, in `Enter.lean`'s `enter_cr3`, since that Mathlib import was previously
+reaching `Enter.lean` transitively through `Gc.Model.Preservation.Swap`) now holds every generic,
+non-operation-specific fact that had accumulated in an arbitrary operation's own file:
+`heap_objectIds_of_mem` (originally in `Exit.lean`; also used by `Merge`/`MakeObjStack`/`MakeObjRegion`/
+`MakeRegion`'s CR3 files, purely via importing `Gc.Model.Preservation.Exit`),
+`swap_corollary_stackWithIndex_index_inj`/`_find_eq` (originally in `Swap.lean`; used by all 9
+`Reachability/Validity/Preservation/*.lean` files), and `merge_corollary_regionId_unique_index`
+(originally in `Merge.lean`; used by `Corollaries.lean` itself plus `Swap`/`Exit`/`VarAsgn`/
+`MakeObjRegion`'s CR3 files). Names were kept identical to their pre-extraction names to avoid a mass
+rename across ~40 call sites — only the *location* and *import path* changed. Every
+`Gc/Reachability/Validity/Preservation/*.lean` file's imports were updated to `import
+Gc.Model.Preservation.Common` directly (dropping `Gc.Model.Preservation.Swap`/`Exit` where that was the
+only reason for the import; `Swap.lean`/`Exit.lean`/`Merge.lean`'s own Reachability-layer files keep their
+legitimate operation-specific import *and* gained the explicit `Common` import, rather than relying on
+getting these facts transitively). `Gc/Reachability/Corollaries.lean` now imports
+`Gc.Model.Preservation.Common` instead of `Gc.Model.Preservation.Merge`.
+
+The triplicated `resolveV_frameRoot`/`resolveFA_frameReach` pair (`fieldAsgn_corollary_resolveV_frameRoot`/
+`varAsgn_corollary_resolveV_frameRoot`/`swap_corollary_resolveV_frameRoot`, and
+`varAsgn_corollary_resolveFA_frameReach`/`swap_corollary_resolveFA_frameReach`) were byte-for-byte
+identical private copies in `FieldAsgn.lean`/`VarAsgn.lean`/`Swap.lean` — these are now a single public
+`resolveV_frameRoot`/`resolveFA_frameReach` pair in `Gc.Reachability.Corollaries` (already imported
+everywhere they're needed), and all call sites across the three files were renamed to the shared,
+un-prefixed names.
+
+Verified via a full `lake build` (1060 jobs, clean) and a project-wide `grep -c sorry` (still 0 across all
+of `Gc/`) after every edit.
+
+**A second consolidation pass (2026-07-28, same day, later session) went beyond import-location smells and
+found genuinely reconstructed proofs** — same theorem, copy-pasted body, in multiple
+`Gc/Reachability/Validity/Preservation/*.lean` files, not just a borrowed lemma:
+- `stackWithIndex_getElem_index_eq` (`Common.lean`): `cfg.stackWithIndex[fid]? = some frame → frame.index
+  = fid`, fully generic (no `cfg'`/mutation involved at all) — was three byte-for-byte-identical private
+  copies (`enter`/`exit`/`makeObjStack_corollary_getElem_index_eq`).
+- `stackWithIndex_frame_transport_down_of_shape_eq`/`_up_of_shape_eq` (`Common.lean`): generalizes over an
+  arbitrary `proj : Frame → α` plus a hypothesis `∀ n, (cfg.stack[n]?).map proj = (cfg'.stack[n]?).map
+  proj`. `varAsgn`/`swap`'s versions were byte-for-byte identical (`proj := fun f => (f.regionId,
+  f.bridgeVar)`); `fieldAsgn`'s used a 3-wide `proj` (adds `f.varMap`) since it's `objMap` fieldAsgn leaves
+  untouched, not `varMap`. All three per-operation files now have a ~5-line wrapper (call the generic
+  lemma with their own `proj` and their own pre-existing `_stack_shape_eq` fact, then `injection` the
+  returned `Prod` equality back into named fields) instead of a ~20-line rebuild.
+- `stackWithIndex_objMap_get_eq_of_last_varMap_update` (`Common.lean`): `merge`/`makeObjRegion`/
+  `makeRegion_corollary_objMap_get_eq` were three copies of the *same* ~25-line argument, differing only in
+  *which* reference got inserted into the last frame's `varMap` — a fact the theorem's own conclusion
+  (about `objMap`, never `varMap`) doesn't even mention. Needed one signature change from the naive
+  version: constrain `cfg'.stack` directly (`hstack' : cfg'.stack = ...`) rather than a full `cfg' = {cfg
+  with stack := ...}` record equality, since `merge`/`makeObjRegion`/`makeRegion` all also change
+  `cfg'.heap` — a full-record hypothesis would reject their actual `cfg'`.
+- **Judgment call that went the other way**: `objAt_fresh` (`makeObjStack`/`makeObjRegion`/
+  `makeRegion_corollary_objAt_fresh`) has the *same statement* across all three but a genuinely *different*
+  proof each time (the fresh object lands in the frame's own `objMap`, a heap region's `objMap`, or a
+  brand-new region, respectively) — correctly left alone, not merged.
+
+All wrapper theorems kept their exact original names/signatures, so zero call sites outside the
+`private theorem` bodies themselves needed to change. Verified via full `lake build` (1060 jobs) after
+every file. Comments directly above each rewritten wrapper were updated to name the `Common.lean` lemma
+they now call (a couple of pre-existing comments were also stale/copy-paste artifacts from before this
+session — e.g. `varAsgn_corollary_frame_transport_up`'s comment said "Mirrors
+fieldAsgn_corollary_frame_transport_down", clearly copied from `FieldAsgn.lean` without updating the name
+— fixed to reference `varAsgn`'s own `_down` instead).
+
+**Left for a future session, not urgent — this is the concrete next task**:
+`Gc/Reachability/Validity/Preservation/Swap.lean` itself still has some branch-local duplication *within*
+the file — `escape`/`hoidm_ne`/`main_claim` are re-derived nearly verbatim in all four `swap_cr3`
+sub-branches (only the container's location — `Stk frame0.index` vs `Rgn rid`/`Rgn yrid` — and the mutated
+field's exact value differ), and the `swap_corollary_region_*`/`_region_bridge_*` corollary families
+(`_loc_eq`/`_objAt_mutated`/`_objAt_eq_of_ne`, six theorems total) differ from each other only in whether
+`bridgeObjectId` is folded into `newRegion`. This is proof-internal golfing (a single more-general
+corollary parametrized over location/optional-bridge-change might replace several of these), not an
+import/location smell like the two passes above, so it's lower priority and riskier to attempt (edits
+inside already-green, intricate proofs rather than pure relocation/wrapper-ization). The
+generalize-over-a-hypothesis-or-projection pattern used successfully in the second pass above (state the
+common proof once, parametrized over whatever varies — a `proj` function, a `hstack'`/`hshape`
+side-condition — then make each call site a thin wrapper) is a reasonable template to try here too, e.g.
+parametrizing `escape`/`main_claim` over the container's `Location` and letting each of the four branches
+supply its own location + mutated-value facts.

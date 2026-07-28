@@ -3,6 +3,7 @@ import Gc.Model.Helpers
 import Gc.Model.Validity
 import Gc.Model.Theorems
 import Gc.Model.Mutation.Exit
+import Gc.Model.Preservation.Common
 
 import Mathlib.Data.List.Infix
 
@@ -28,16 +29,6 @@ theorem heap_oid_unique_key :
     pairwise_disjoint mem1 mem2 hneq
   unfold Region.objectIds at disj
   exact disj in1 in2
-
-theorem heap_objectIds_of_mem {heap : Heap} :
-  (⟨rid, region⟩ : Sigma (fun _ : RegionId => Region)) ∈ heap.entries → oid ∈ region.objMap.keys →
-  oid ∈ heap.objectIds := by
-  intro mem in_region
-  unfold Heap.objectIds
-  apply List.mem_flatten.mpr
-  refine ⟨region.objectIds, List.mem_map_of_mem (f := λ e => e.2.objectIds) mem, ?_⟩
-  unfold Region.objectIds
-  exact in_region
 
 theorem heap_status_update_find_none_iff {heap : Heap} {rid : RegionId} {region : Region}
     {status : Status} {oid : ObjectId} (hlookup : heap.lookup rid = some region) :
