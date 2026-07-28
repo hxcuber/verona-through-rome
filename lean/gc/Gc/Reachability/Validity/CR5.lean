@@ -34,39 +34,7 @@ made public).
 
 -- `i` is suspended in `cfg`: it names an on-stack frame that is not the active (last) one.
 def Suspended (cfg : RuntimeConfig) (i : Index) : Prop :=
-  ∃ frame ∈ cfg.stackWithIndex, frame.index = i ∧
-    ∃ active, cfg.stackWithIndex.getLast? = some active ∧ i < active.index
-
--- `Suspended`'s existential witness for "active" always denotes the actual last element of
--- `cfg.stackWithIndex`, whose own `.index` is exactly `length - 1` (`mapIdx` assigns indices as
--- list positions). Used throughout below to connect `Suspended` to the more concrete
--- `< length - 1`/`< dropLast.length` bounds the per-operation corollaries are stated in terms of.
-theorem Suspended_lt_length_sub_one {cfg : RuntimeConfig} {i : Index} (hsusp : Suspended cfg i) :
-    i < cfg.stackWithIndex.length - 1 := by
-  obtain ⟨frame, hframe, hidx, active, hactive, hlt⟩ := hsusp
-  cases hls : cfg.stack.getLast? with
-  | none =>
-    exfalso
-    have hnil : cfg.stack = [] := List.getLast?_eq_none_iff.mp hls
-    have : cfg.stackWithIndex = [] := by unfold RuntimeConfig.stackWithIndex; rw [hnil]; rfl
-    rw [this] at hactive
-    exact absurd hactive (by simp)
-  | some lastFrame =>
-    have stack_eq : cfg.stack = cfg.stack.dropLast ++ [lastFrame] :=
-      (List.dropLast_append_getLast? lastFrame hls).symm
-    have hgetLast : cfg.stackWithIndex.getLast? =
-        some ({ lastFrame with index := cfg.stack.dropLast.length } : FrameWithIndex) := by
-      unfold RuntimeConfig.stackWithIndex
-      conv_lhs => rw [stack_eq, List.mapIdx_concat]
-      exact List.getLast?_concat
-    rw [hgetLast] at hactive
-    injection hactive with hactiveeq
-    have hlen : cfg.stack.length = cfg.stack.dropLast.length + 1 := by rw [stack_eq]; simp
-    have hlenWI : cfg.stackWithIndex.length = cfg.stack.length := by
-      unfold RuntimeConfig.stackWithIndex; rw [List.length_mapIdx]
-    rw [← hactiveeq] at hlt
-    rw [hlenWI, hlen]
-    simpa using hlt
+  ∃ frame ∈ cfg.stackWithIndex, frame.index = i ∧ i < cfg.stackWithIndex.length - 1
 
 -- Single-step CR5: one `Mutation.lean` operation, applied to a valid+reachable config, cannot
 -- change frame-reachability at any index that was already suspended beforehand.
@@ -84,19 +52,20 @@ theorem cr5_step_enter (xf : FieldAccess) (a : VarName) : CR5_step (Stmt.enter x
 
 theorem cr5_step_exit : CR5_step Stmt.exit := by
   intro cfg cfg' vrcfg h i hsusp ref
-  obtain ⟨frame, hframe, hidx, active, hactive, hlt⟩ := hsusp
+  obtain ⟨frame, hframe, hidx, hlt⟩ := hsusp
   have vcfg := vrcfg.toValidConfig
   have vcfg' := exit_valid vcfg h
-  obtain ⟨poppedFrame, region, hlen, hlast, hlookupPopped, hopenPopped, hcfg'⟩ := exit_cases h
+  obtain ⟨poppedFrame, region, hlen2, hlast, hlookupPopped, hopenPopped, hcfg'⟩ := exit_cases h
   have hstackeq := exit_corollary_stackWithIndex_eq hlast
-  have hgetLast : cfg.stackWithIndex.getLast? =
-      some ({ poppedFrame with index := cfg.stack.dropLast.length } : FrameWithIndex) := by
-    rw [hstackeq]
-    exact List.getLast?_concat
-  rw [hgetLast] at hactive
-  injection hactive with hactiveeq
-  subst hactiveeq
-  dsimp only at hlt
+  have hlenWI : cfg.stackWithIndex.length = cfg.stack.length := by
+    unfold RuntimeConfig.stackWithIndex; rw [List.length_mapIdx]
+  have hlen : cfg.stack.length = cfg.stack.dropLast.length + 1 := by
+    have stack_eq : cfg.stack = cfg.stack.dropLast ++ [poppedFrame] :=
+      (List.dropLast_append_getLast? poppedFrame hlast).symm
+    rw [stack_eq]; simp
+  have hidlt : i < cfg.stack.dropLast.length := by
+    rw [hlenWI, hlen] at hlt
+    simpa using hlt
   rw [hstackeq] at hframe
   rw [List.mem_append] at hframe
   rcases hframe with hold | hpop
@@ -111,15 +80,14 @@ theorem cr5_step_exit : CR5_step Stmt.exit := by
     rw [List.mem_singleton] at hpop
     rw [hpop] at hidx
     dsimp only at hidx
-    rw [hidx] at hlt
-    exact lt_irrefl _ hlt
+    rw [hidx] at hidlt
+    exact lt_irrefl _ hidlt
 
 theorem cr5_step_fieldAsgn (xf : FieldAccess) (y : VarName) : CR5_step (Stmt.fieldAsgn xf y) := by
   intro cfg cfg' vrcfg h i hsusp ref
-  obtain ⟨frame, hframe, hidx, active, hactive, hlt0⟩ := hsusp
+  obtain ⟨frame, hframe, hidx, hlt⟩ := hsusp
   have vcfg := vrcfg.toValidConfig
   have vcfg' := fieldAsgn_valid vcfg h
-  have hlt := Suspended_lt_length_sub_one ⟨frame, hframe, hidx, active, hactive, hlt0⟩
   obtain ⟨frame0, hframe0, _⟩ := fieldAsgn_cases h
   obtain ⟨stack_eq0, hidx00⟩ := fieldAsgn_corollary_stack_eq hframe0
   have hlenWI : cfg.stackWithIndex.length = cfg.stack.length := by
@@ -136,7 +104,7 @@ theorem cr5_step_makeObjRegion (x : VarName) : CR5_step (Stmt.makeObjRegion x) :
   intro cfg cfg' vrcfg h i hsusp ref
   have vcfg := vrcfg.toValidConfig
   have vcfg' := makeObjRegion_valid vcfg h
-  have hlt := Suspended_lt_length_sub_one hsusp
+  obtain ⟨_, _, _, hlt⟩ := hsusp
   obtain ⟨frame1, region1, hframe1Last, hheapLookup1, hregion1Open, hcfg'⟩ := makeObjRegion_cases h
   have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame1] :=
     (List.dropLast_append_getLast? frame1 hframe1Last).symm
@@ -152,7 +120,7 @@ theorem cr5_step_makeObjStack (x : VarName) : CR5_step (Stmt.makeObjStack x) := 
   intro cfg cfg' vrcfg h i hsusp ref
   have vcfg := vrcfg.toValidConfig
   have vcfg' := makeObjStack_valid vcfg h
-  have hlt := Suspended_lt_length_sub_one hsusp
+  obtain ⟨_, _, _, hlt⟩ := hsusp
   obtain ⟨frame1, hframe1, hcfg'⟩ := makeObjStack_cases h
   have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame1] :=
     (List.dropLast_append_getLast? frame1 hframe1).symm
@@ -168,7 +136,7 @@ theorem cr5_step_makeRegion (x : VarName) : CR5_step (Stmt.makeRegion x) := by
   intro cfg cfg' vrcfg h i hsusp ref
   have vcfg := vrcfg.toValidConfig
   have vcfg' := makeRegion_valid vcfg h
-  have hlt := Suspended_lt_length_sub_one hsusp
+  obtain ⟨_, _, _, hlt⟩ := hsusp
   obtain ⟨frame1, hframe1Last, hcfg'⟩ := makeRegion_cases h
   have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame1] :=
     (List.dropLast_append_getLast? frame1 hframe1Last).symm
@@ -183,7 +151,7 @@ theorem cr5_step_makeRegion (x : VarName) : CR5_step (Stmt.makeRegion x) := by
 theorem cr5_step_merge (x : VarName) : CR5_step (Stmt.merge x) := by
   intro cfg cfg' vrcfg h i hsusp ref
   have vcfg := vrcfg.toValidConfig
-  have hlt := Suspended_lt_length_sub_one hsusp
+  obtain ⟨_, _, _, hlt⟩ := hsusp
   obtain ⟨frame1, rid', region1, region', hframe1Last, hxref1, hregion1, hregion', hclosed1, hopen1, hcfg'⟩ :=
     merge_cases h
   have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame1] :=
@@ -198,10 +166,9 @@ theorem cr5_step_merge (x : VarName) : CR5_step (Stmt.merge x) := by
 
 theorem cr5_step_swap (x : VarName) (yf : FieldAccess) : CR5_step (Stmt.swap x yf) := by
   intro cfg cfg' vrcfg h i hsusp ref
-  obtain ⟨frame, hframe, hidx, active, hactive, hlt0⟩ := hsusp
+  obtain ⟨frame, hframe, hidx, hlt⟩ := hsusp
   have vcfg := vrcfg.toValidConfig
   have vcfg' := swap_valid vcfg h
-  have hlt := Suspended_lt_length_sub_one ⟨frame, hframe, hidx, active, hactive, hlt0⟩
   obtain ⟨frame0, hframe0, _, _, _, _, _, _, _, _, _⟩ := swap_cases h
   obtain ⟨stack_eq0, hidx00⟩ := swap_corollary_stack_eq hframe0
   have hlenWI : cfg.stackWithIndex.length = cfg.stack.length := by
@@ -216,7 +183,7 @@ theorem cr5_step_swap (x : VarName) (yf : FieldAccess) : CR5_step (Stmt.swap x y
 
 theorem cr5_step_varAsgn (x : VarName) (yf : FieldAccess) : CR5_step (Stmt.varAsgn x yf) := by
   intro cfg cfg' vrcfg h i hsusp ref
-  obtain ⟨frame, hframe, hidx, active, hactive, hlt⟩ := hsusp
+  obtain ⟨frame, hframe, hidx, hlt⟩ := hsusp
   have vcfg := vrcfg.toValidConfig
   have vcfg' := varAsgn_valid vcfg h
   have hRefStepIff : ∀ a b, RefStep cfg a b ↔ RefStep cfg' a b := by
@@ -227,21 +194,19 @@ theorem cr5_step_varAsgn (x : VarName) (yf : FieldAccess) : CR5_step (Stmt.varAs
   have stack_eq0 : cfg.stack = cfg.stack.dropLast ++ [frame0] :=
     (List.dropLast_append_getLast? frame0 hframe0).symm
   set frame0W : FrameWithIndex := { frame0 with index := cfg.stack.dropLast.length } with frame0W_def
-  have hgetLast : cfg.stackWithIndex.getLast? = some frame0W := by
-    unfold RuntimeConfig.stackWithIndex
-    rw [stack_eq0, List.mapIdx_concat]
-    exact List.getLast?_concat
-  rw [hgetLast] at hactive
-  injection hactive with hactiveeq
-  subst hactiveeq
+  have hlenWI : cfg.stackWithIndex.length = cfg.stack.length := by
+    unfold RuntimeConfig.stackWithIndex; rw [List.length_mapIdx]
+  have hlen : cfg.stack.length = cfg.stack.dropLast.length + 1 := by rw [stack_eq0]; simp
+  have hidlt : i < cfg.stack.dropLast.length := by
+    rw [hlenWI, hlen] at hlt
+    simpa using hlt
   -- `frame` sits strictly before `frame0W` (the mutated/active frame), so it comes from the
   -- untouched `dropLast` part of the stack -- the same literal record on both sides.
   obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hframe
   have hidxn : frame.index = n := by rw [← hfeq]
-  have hlen : cfg.stack.length = cfg.stack.dropLast.length + 1 := by rw [stack_eq0]; simp
   have hnlt : n < cfg.stack.dropLast.length := by
     rw [← hidxn, hidx]
-    exact hlt
+    exact hidlt
   have e1 : cfg.stack[n]? = cfg.stack.dropLast[n]? := by
     conv_lhs => rw [stack_eq0]
     rw [List.getElem?_append_left hnlt]
@@ -270,7 +235,7 @@ theorem cr5_step_varAsgn (x : VarName) (yf : FieldAccess) : CR5_step (Stmt.varAs
     have heqrid' : frame.regionId = frame0W.regionId := heqrid
     have hidxeq := merge_corollary_regionId_unique_index vcfg.s1 hframe hframe0W_mem heqrid'
     rw [hidx] at hidxeq
-    exact absurd hidxeq (Nat.ne_of_lt hlt)
+    exact absurd hidxeq (Nat.ne_of_lt hidlt)
   have hheapEq : cfg'.heap.lookup frame.regionId = cfg.heap.lookup frame.regionId := by
     rcases hcase with
       ⟨oid, rid, region, hyf, hxb, hloc, hridEq, hregion, hcfg'⟩ | ⟨oid, hyf, hxb, hresolve, hcfg'⟩
