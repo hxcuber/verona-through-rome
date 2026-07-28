@@ -141,7 +141,7 @@ private theorem enter_corollary_frameRoot_iff (vcfg : ValidConfig cfg)
       subst heq1
       exact Or.inr ⟨frame1, hframe0, rfl, region1, hheap_eq.symm.trans hlookup1, hstart⟩
 
-private theorem enter_corollary_frameReachable_iff (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
+theorem enter_corollary_frameReachable_iff (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
     (h : enter xf a cfg = some cfg')
     (frame0 : FrameWithIndex) (hframe0 : frame0 ∈ cfg.stackWithIndex) (ref : Reference) :
     FrameReachable cfg frame0.index ref ↔ FrameReachable cfg' frame0.index ref := by
