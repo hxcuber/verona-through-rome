@@ -275,30 +275,54 @@ theorem cr5_step_all : ∀ cmd, CR5_step cmd := by
   | swap x yf => exact cr5_step_swap x yf
   | varAsgn x yf => exact cr5_step_varAsgn x yf
 
--- `Suspended`'s existential witness for "active" always denotes the actual last element of
--- `cfg.stackWithIndex`, whose own `.index` is exactly `length - 1` (`mapIdx` assigns indices as
--- list positions) -- bridges `Suspended` to CR4's own hypothesis form
--- (`StackReachable_iff_FrameReachable` in `Gc/Reachability/Corollaries.lean` takes
--- `frame.index < cfg.stackWithIndex.length - 1` directly, not `Suspended`). Same
--- dropLast-decomposition technique as `cr5_step_exit`/`cr5_step_varAsgn` above.
--- report.pdf CR5, restated with `StackReachable` (Definition 4.3.1) instead of `FrameReachable` --
--- falls out of `CR5_step` plus CR4 (`StackReachable_iff_FrameReachable`,
--- `Gc/Reachability/Corollaries.lean`) directly: rewrite `StackReachable` as `FrameReachable` at
--- the suspended owner frame on each side of the step via CR4, then bridge the two
--- `FrameReachable` facts with `CR5_step` itself. No new per-operation work -- `hstep` is meant to
--- be instantiated with `cr5_step_all` (or any single `cr5_step_*` lemma) once available.
-theorem CR5'_step (cmd : Stmt) (hstep : CR5_step cmd)
+-- report.pdf CR5, restated with `StackReachable` (Definition 4.3.1) instead of `FrameReachable`.
+--
+-- This is NOT literally `CR5_step` with `FrameReachable cfg i` replaced by `StackReachable cfg`
+-- (dropping the `i`): `StackReachable` carries no index, so nothing would pin such a statement to
+-- the suspended frame `i` at all, and it would be straightforwardly FALSE as stated -- e.g. an
+-- object freshly created in the *active* frame is `StackReachable` in `cfg'` but not `cfg`, and
+-- CR5 was never meant to say anything about that (activity in the active region is exactly what's
+-- allowed to change). So, mirroring CR4's own hypothesis shape
+-- (`StackReachable_iff_FrameReachable`, `Gc/Reachability/Corollaries.lean`), the claim has to be
+-- restricted to a specific object `oid` known to live in `i`'s own region -- that restriction is
+-- unavoidable structure, not a formulation choice. Everything else here mirrors `CR5_step`'s own
+-- shape as closely as that restriction allows (same opening `cfg cfg' → ValidReachableConfig cfg →
+-- step cmd cfg = some cfg' → ∀ i, Suspended cfg i → ...`).
+def CR5'_step (cmd : Stmt) : Prop :=
+  ∀ cfg cfg' : RuntimeConfig, ValidReachableConfig cfg → step cmd cfg = some cfg' →
+    ∀ i, Suspended cfg i →
+    ∀ frame ∈ cfg.stackWithIndex, frame.index = i →
+    ∀ oid : ObjectId, (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId) →
+    StackReachable cfg (Reference.OId oid) ↔ StackReachable cfg' (Reference.OId oid)
+
+-- `CR5_step cmd` alone is NOT enough to get `CR5'_step cmd` "for free": CR4 needs to be invoked
+-- at `cfg'` too (not just `cfg`), which needs `frame` to still be present in `cfg'.stackWithIndex`
+-- and `oid`'s location to still be `Rgn frame.regionId` there -- both are genuine facts about the
+-- operation (not decorable away: CR4's own `_hframesus` parameter is unused *in its proof*, but a
+-- real term of its type is still required to call it, and for `exit` specifically that term
+-- doesn't exist when `i` is promoted to the new active frame). Those two facts are purely
+-- structural (no reachability-chain reasoning, unlike `CR5_step` itself) but still need their own
+-- per-operation argument -- essentially the scaffolding half of what `cr5_step_enter`/
+-- `cr5_step_exit`/etc. already compute on their way to the real conclusion, split out here as
+-- explicit hypotheses rather than derived, until that per-operation work is done.
+theorem cr5'_step_of_cr5_step (cmd : Stmt) (hstep : CR5_step cmd)
     (cfg cfg' : RuntimeConfig) (vrcfg : ValidReachableConfig cfg) (vrcfg' : ValidReachableConfig cfg')
     (h : step cmd cfg = some cfg')
+    (i : Index) (hsusp : Suspended cfg i)
     (frame : FrameWithIndex) (hframe : frame ∈ cfg.stackWithIndex) (hframe' : frame ∈ cfg'.stackWithIndex)
-    (hsusp : Suspended cfg frame.index) (hsusp' : Suspended cfg' frame.index)
+    (hidx : frame.index = i) (hsusp' : Suspended cfg' i)
     (oid : ObjectId)
     (hoid : (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId))
     (hoid' : (Reference.OId oid).loc? cfg' = some (Location.Rgn frame.regionId)) :
     StackReachable cfg (Reference.OId oid) ↔ StackReachable cfg' (Reference.OId oid) := by
-  rw [StackReachable_iff_FrameReachable cfg vrcfg frame hframe (Suspended_lt_length_sub_one hsusp) oid hoid,
-      StackReachable_iff_FrameReachable cfg' vrcfg' frame hframe' (Suspended_lt_length_sub_one hsusp') oid hoid']
-  exact hstep cfg cfg' vrcfg h frame.index hsusp (Reference.OId oid)
+  have hframe_lt : frame.index < cfg.stackWithIndex.length - 1 := by
+    rw [hidx]; exact Suspended_lt_length_sub_one hsusp
+  have hframe'_lt : frame.index < cfg'.stackWithIndex.length - 1 := by
+    rw [hidx]; exact Suspended_lt_length_sub_one hsusp'
+  rw [StackReachable_iff_FrameReachable cfg vrcfg frame hframe hframe_lt oid hoid,
+      StackReachable_iff_FrameReachable cfg' vrcfg' frame hframe' hframe'_lt oid hoid']
+  rw [hidx]
+  exact hstep cfg cfg' vrcfg h i hsusp (Reference.OId oid)
 
 -- Deferred until the single-step case (above) is actually filled in -- only `Suspended`/
 -- `CR5_step`/`cr5_step_all` are live for now. This layer was: a trace of operations
