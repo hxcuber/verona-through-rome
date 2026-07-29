@@ -131,6 +131,45 @@ theorem AList.union_eq_append_of_disjoint_keys {α : Type u} {β : α → Type v
   rw [AList.union_entries]
   exact List.kunion_eq_append_of_disjoint_keys h
 
+-- If two distinct list elements `a1 ≠ a2` both witness `b ∈ f a`, `l.flatMap f` contains `b`
+-- at least twice: `a1`/`a2`'s own contributions to the flatMap are disjoint list segments (one
+-- per occurrence of `a1`/`a2` in `l`), so each contributes independently to the total count.
+theorem List.two_le_count_flatMap_of_ne {α β : Type*} [DecidableEq β] {f : α → List β}
+    {l : List α} {a1 a2 : α} (hne : a1 ≠ a2) (hmem1 : a1 ∈ l) (hmem2 : a2 ∈ l)
+    {b : β} (hb1 : b ∈ f a1) (hb2 : b ∈ f a2) :
+    2 ≤ (l.flatMap f).count b := by
+  induction l with
+  | nil => exact absurd hmem1 List.not_mem_nil
+  | cons x xs ih =>
+    rw [List.flatMap_cons, List.count_append]
+    rcases List.mem_cons.mp hmem1 with rfl | hmem1'
+    · rcases List.mem_cons.mp hmem2 with heq | hmem2'
+      · exact absurd heq.symm hne
+      · have h1 : 1 ≤ (f a1).count b := List.count_pos_iff.mpr hb1
+        have h2 : 1 ≤ (xs.flatMap f).count b :=
+          List.count_pos_iff.mpr (List.mem_flatMap.mpr ⟨a2, hmem2', hb2⟩)
+        omega
+    · rcases List.mem_cons.mp hmem2 with rfl | hmem2'
+      · have h1 : 1 ≤ (f a2).count b := List.count_pos_iff.mpr hb2
+        have h2 : 1 ≤ (xs.flatMap f).count b :=
+          List.count_pos_iff.mpr (List.mem_flatMap.mpr ⟨a1, hmem1', hb1⟩)
+        omega
+      · have := ih hmem1' hmem2'
+        omega
+
+-- A single contributing element's own count is always a lower bound on the whole flatMap's count.
+theorem List.count_le_count_flatMap_of_mem {α β : Type*} [DecidableEq β] {f : α → List β}
+    {l : List α} {a : α} (hmem : a ∈ l) {b : β} :
+    (f a).count b ≤ (l.flatMap f).count b := by
+  induction l with
+  | nil => exact absurd hmem List.not_mem_nil
+  | cons x xs ih =>
+    rw [List.flatMap_cons, List.count_append]
+    rcases List.mem_cons.mp hmem with rfl | hmem'
+    · omega
+    · have := ih hmem'
+      omega
+
 theorem List.find?_eq_some_of_unique {α} {p : α → Bool} {l : List α} {e : α}
     (mem : e ∈ l) (pe : p e) (uniq : ∀ x ∈ l, p x → x = e) : l.find? p = some e := by
   obtain ⟨as, bs, hl, e_notin_as⟩ := List.eq_append_cons_of_mem mem
