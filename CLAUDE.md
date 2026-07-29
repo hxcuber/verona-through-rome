@@ -112,15 +112,21 @@ The proof development has two layers under `Gc/`:
 
 ### `Gc/Reachability/` — reachability/liveness definitions (now substantially built out)
 
-- `Semantics.lean` — `RegionReachable` (reachable from a region's bridge object, staying inside the
-  region), `StackReachable`/`FrameReachable` (reachable from stack variables, optionally scoped to one
-  frame's stack-index), and `FrameRoot` (the two ways a `FrameReachable` chain can start: a stack var's
-  value, or a frame's own region's bridge object). Also proves `RegionReachable_iff_reflTransGen`/
-  `FrameReachable_iff_reflTransGen`, converting the inductive props to `Relation.ReflTransGen (RefStep
-  cfg) start ref` form — the representation almost every CR1–CR3 proof actually works with.
+- `Semantics.lean` — `RefStep` (`a` steps to `b` when `b` is a field value of the object `a` currently
+  resolves to, via `Reference.objAt?`) and its `RefStep.exists_oid_left` lemma (moved here from
+  `Gc/Model/Helpers.lean` on 2026-07-29 — reachability-specific, not a core model helper, so it now
+  sits next to the inductive props defined in terms of it), `RegionReachable` (reachable from a region's
+  bridge object, staying inside the region), `StackReachable`/`FrameReachable` (reachable from stack
+  variables, optionally scoped to one frame's stack-index), and `FrameRoot` (the two ways a
+  `FrameReachable` chain can start: a stack var's value, or a frame's own region's bridge object). Also
+  proves `RegionReachable_iff_reflTransGen`/`FrameReachable_iff_reflTransGen`, converting the inductive
+  props to `Relation.ReflTransGen (RefStep cfg) start ref` form — the representation almost every
+  CR1–CR3 proof actually works with.
 - `Path.lean` — a thin `Path`/`ValidPath` wrapper (`path.refs : List Reference`, valid when consecutive
   refs are linked by `RefStep`) used specifically by the CR2 proof, which needs to reason about *every*
-  element of a chain (via `List.IsChain` induction), not just its endpoints.
+  element of a chain (via `List.IsChain` induction), not just its endpoints. Imports
+  `Gc.Reachability.Semantics` for `RefStep` (picked up 2026-07-29 when `RefStep` moved out of
+  `Gc/Model/Helpers.lean`).
 - `Corollaries/` — the reusable, non-operation-specific reachability lemmas. Originally a single
   ~1000-line `Corollaries.lean`; **split 2026-07-29** into `Corollaries/{Common,CR1,CR2,CR4}.lean`
   (mirroring the `Model/Preservation/Common.lean` consolidation pattern) once it had grown into a

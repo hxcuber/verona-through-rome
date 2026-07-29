@@ -3,17 +3,6 @@ import Gc.Model.Helpers
 import Gc.Model.Validity
 import Mathlib.Logic.Relation
 
--- `a` steps to `b` when `b` is a field value of the object `a` currently resolves to
-def RefStep (cfg : RuntimeConfig) (a b : Reference) : Prop :=
-  ∃ obj, a.objAt? cfg = some obj ∧ obj.refs.contains b
-
-theorem RefStep.exists_oid_left {cfg : RuntimeConfig} {a b : Reference}
-    (h : RefStep cfg a b) : ∃ oid, a = Reference.OId oid := by
-  obtain ⟨obj, hobj, _⟩ := h
-  cases a with
-  | RId rid => simp [Reference.objAt?] at hobj
-  | OId oid => exact ⟨oid, rfl⟩
-
 -- what does it mean for an object to be reachable in a region?
 inductive RegionReachable : RuntimeConfig → RegionId → Reference → Prop where
 -- the object is the bridge object
@@ -44,6 +33,17 @@ inductive FrameReachable : RuntimeConfig → Index → Reference → Prop where
 
 def StackReachable (cfg : RuntimeConfig) (ref : Reference) : Prop :=
     ∃ frame ∈ cfg.stackWithIndex, FrameReachable cfg frame.index ref
+
+-- `a` steps to `b` when `b` is a field value of the object `a` currently resolves to
+def RefStep (cfg : RuntimeConfig) (a b : Reference) : Prop :=
+  ∃ obj, a.objAt? cfg = some obj ∧ obj.refs.contains b
+
+theorem RefStep.exists_oid_left {cfg : RuntimeConfig} {a b : Reference}
+    (h : RefStep cfg a b) : ∃ oid, a = Reference.OId oid := by
+  obtain ⟨obj, hobj, _⟩ := h
+  cases a with
+  | RId rid => simp [Reference.objAt?] at hobj
+  | OId oid => exact ⟨oid, rfl⟩
 
 -- the two ways FrameReachable can start a path: from a stack variable's value, or from
 -- the frame's own region's bridge object
