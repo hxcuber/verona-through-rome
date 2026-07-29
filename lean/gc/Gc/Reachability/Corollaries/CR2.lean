@@ -250,7 +250,7 @@ private theorem Path_from_frame_lower_bound (cfg : RuntimeConfig) (hvalid : Vali
 -- frame F'" is read as: some reference along the path resolves (via `loc?`) into F''s stack
 -- slot. The conclusion states the contrapositive of "F' ≠ F is impossible": whenever a
 -- reference in the path resolves to a stack location at all, that location is F's own.
-theorem Path_from_frame_to_own_region_stays_in_frame (cfg : RuntimeConfig) (hvalid : ValidConfig cfg)
+theorem CR2 (cfg : RuntimeConfig) (hvalid : ValidConfig cfg)
     (frame : FrameWithIndex) (hframe : frame ∈ cfg.stackWithIndex)
     (oid : ObjectId) (hoid : (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId))
     (path : Path) (hvalidpath : ValidPath cfg path)

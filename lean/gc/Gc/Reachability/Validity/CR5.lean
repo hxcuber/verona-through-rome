@@ -5,50 +5,68 @@ import Gc.Reachability.Validity.Preservation
 report.pdf CR5: "Activity in an active region and frame cannot affect the stack-reachability
 of objects within suspended regions."
 
-Unlike CR1-CR4 (`Gc/Reachability/Corollaries.lean`) and CR3's `ValidConfig`-style invariant
-(`Gc/Reachability/Validity/Reachable.lean`), CR5 isn't a property of a single config -- it's a
-claim about *change over a run of the operational semantics*: as long as some frame stays
+Unlike CR1-CR4 (`Gc/Reachability/Corollaries/{CR1,CR2,CR4}.lean`) and CR3's `ValidConfig`-style
+invariant (`Gc/Reachability/Validity/Reachable.lean`), CR5 isn't a property of a single config --
+it's a claim about *change over a run of the operational semantics*: as long as some frame stays
 suspended (never becomes the active/last frame) across a sequence of `Mutation.lean` operations,
 its frame-reachable set never changes across that whole sequence, no matter how long it is or
 what happens inside the active frame/region.
 
-The real report.pdf claim is over an arbitrary-length *run* of operations, but for now this file
-only tackles the single-step layer:
-- `CR5_step`: one `Mutation.lean` operation's worth of the claim, proved once per `Stmt` case
-  (mirrors the `Validity/Preservation/*.lean` per-operation pattern already used for CR3).
-- `cr5_step_all`: dispatches to the 9 per-operation cases.
-The multi-step generalization (a `List Stmt` trace, chaining `CR5_step` via `Iff.trans` as long
-as the frame of interest stays suspended at every intermediate config) is sketched in a comment
-block at the end of the file -- deliberately not live code yet, since it follows for free once
-`cr5_step_all` has no `sorry`s left, and isn't the current focus.
+`CR5_step` is the actual report.pdf statement (in `StackReachable` form, restricted to references
+already `FrameReachable` from the suspended frame -- an unrestricted version is false, see
+`cr5_step_of_helper`'s own comment). It's proved via a helper, `CR5_helper_step`, which is the
+easier-to-prove-per-operation `FrameReachable` form (mirrors the `Validity/Preservation/*.lean`
+per-operation pattern already used for CR3):
+- `cr5_step_of_helper`: upgrades a `CR5_helper_step` fact into the real `CR5_step` fact.
+- `cr5_step_enter` .. `cr5_step_varAsgn`: the 9 per-operation proofs. Each proves the
+  `CR5_helper_step` fact internally (unnamed) and closes with `cr5_step_of_helper` -- there's no
+  separately-named per-operation `CR5_helper_step` fact anymore (traded away deliberately for a
+  cleaner public API; see `cr5_step_all`'s own comment for what that costs the multi-step
+  generalization below).
+- `cr5_step_all`: dispatches the 9 proofs above to all `Stmt` cases.
+
+The real report.pdf claim is over an arbitrary-length *run* of operations, but this file only
+tackles the single-step layer for now -- the multi-step generalization (a `List Stmt` trace,
+chaining single-step facts along it as long as the frame of interest stays suspended at every
+intermediate config) isn't started yet.
 
 `enter`/`exit` are not special-cased here despite changing *which* frame counts as active: the
-suspension hypothesis is evaluated pre-step, so `CR5_step` only ever makes a claim about frames
-that were *already* suspended before the operation runs. `enter_corollary_regionId_ne` (an
+suspension hypothesis is evaluated pre-step, so `CR5_helper_step` only ever makes a claim about
+frames that were *already* suspended before the operation runs. `enter_corollary_regionId_ne` (an
 already-on-stack frame's region can never be the entered/closed one) and S2/S3 (nothing earlier
 can reference into what `exit` pops) are exactly why this should hold uniformly for all 9 cases --
 `enter_corollary_frameReachable_iff`/`exit_corollary_frameReachable_iff` in the corresponding
 `Validity/Preservation` files already prove almost exactly this fact for those two operations
-(currently `private`, so `cr5_step_enter`/`cr5_step_exit` will need their own copies or those
-made public).
+(currently `private`, so `cr5_step_enter`/`cr5_step_exit` will need their own
+copies or those made public).
 -/
 
 -- `i` is suspended in `cfg`: it names an on-stack frame that is not the active (last) one.
 def Suspended (cfg : RuntimeConfig) (i : Index) : Prop :=
   ∃ frame ∈ cfg.stackWithIndex, frame.index = i ∧ i < cfg.stackWithIndex.length - 1
 
--- Single-step CR5: one `Mutation.lean` operation, applied to a valid+reachable config, cannot
--- change frame-reachability at any index that was already suspended beforehand.
-def CR5_step (cmd : Stmt) : Prop :=
+-- Helper for `CR5_step` below: one `Mutation.lean` operation, applied to a valid+reachable
+-- config, cannot change *frame*-reachability at any index that was already suspended beforehand.
+-- Easier to prove per-operation than `CR5_step` itself (see `cr5_step_of_helper`).
+def CR5_helper_step (cmd : Stmt) : Prop :=
   ∀ cfg cfg' : RuntimeConfig, ValidReachableConfig cfg → step cmd cfg = some cfg' →
     ∀ i, Suspended cfg i → ∀ ref, FrameReachable cfg i ref ↔ FrameReachable cfg' i ref
 
-def CR5'_step (cmd : Stmt) : Prop :=
+-- report.pdf CR5, in `StackReachable` form: restricted to references already `FrameReachable`
+-- from the suspended frame in `cfg` (an *unrestricted* `∀ ref, StackReachable cfg ref ↔
+-- StackReachable cfg' ref` is false -- e.g. `makeObjStack` can make a brand-new object
+-- `StackReachable` in `cfg'` via the active frame's own fresh var, without it ever having been
+-- reachable, from anywhere, in `cfg`; that has nothing to do with any suspended region).
+def CR5_step (cmd : Stmt) : Prop :=
   ∀ cfg cfg' : RuntimeConfig, ValidReachableConfig cfg → step cmd cfg = some cfg' →
     ∀ i, Suspended cfg i → ∀ ref, FrameReachable cfg i ref →
     (StackReachable cfg ref ↔ StackReachable cfg' ref)
 
-theorem test (cmd : Stmt) : CR5_step cmd → CR5'_step cmd := by
+-- Upgrades `CR5_helper_step` into the real `CR5_step`: once `ref` is already `FrameReachable`
+-- from the suspended frame, `StackReachable cfg ref` is trivially witnessed by that same frame,
+-- and `StackReachable cfg' ref` falls out of the helper's `FrameReachable cfg' i ref` fact by
+-- unfolding `FrameRoot` for a witness frame -- no `CR4`/`RegionReachable` machinery needed at all.
+theorem cr5_step_of_helper (cmd : Stmt) : CR5_helper_step cmd → CR5_step cmd := by
   intro h cfg cfg' vrcfg hstep i hsusp ref hfr
   have hiff := h cfg cfg' vrcfg hstep i hsusp ref
   obtain ⟨frame, hframe, hidx, _⟩ := hsusp
@@ -63,6 +81,7 @@ theorem test (cmd : Stmt) : CR5_step cmd → CR5'_step cmd := by
     exact ⟨frame, hframe, by rw [hidx]; exact hfr⟩
 
 theorem cr5_step_enter (xf : FieldAccess) (a : VarName) : CR5_step (Stmt.enter xf a) := by
+  apply cr5_step_of_helper
   intro cfg cfg' vrcfg h i hsusp ref
   obtain ⟨frame0, hframe0, hidx, _⟩ := hsusp
   subst hidx
@@ -71,6 +90,7 @@ theorem cr5_step_enter (xf : FieldAccess) (a : VarName) : CR5_step (Stmt.enter x
   exact enter_corollary_frameReachable_iff vcfg vcfg' h frame0 hframe0 ref
 
 theorem cr5_step_exit : CR5_step Stmt.exit := by
+  apply cr5_step_of_helper
   intro cfg cfg' vrcfg h i hsusp ref
   obtain ⟨frame, hframe, hidx, hlt⟩ := hsusp
   have vcfg := vrcfg.toValidConfig
@@ -104,6 +124,7 @@ theorem cr5_step_exit : CR5_step Stmt.exit := by
     exact lt_irrefl _ hidlt
 
 theorem cr5_step_fieldAsgn (xf : FieldAccess) (y : VarName) : CR5_step (Stmt.fieldAsgn xf y) := by
+  apply cr5_step_of_helper
   intro cfg cfg' vrcfg h i hsusp ref
   obtain ⟨frame, hframe, hidx, hlt⟩ := hsusp
   have vcfg := vrcfg.toValidConfig
@@ -121,6 +142,7 @@ theorem cr5_step_fieldAsgn (xf : FieldAccess) (y : VarName) : CR5_step (Stmt.fie
   rwa [hidx] at hres
 
 theorem cr5_step_makeObjRegion (x : VarName) : CR5_step (Stmt.makeObjRegion x) := by
+  apply cr5_step_of_helper
   intro cfg cfg' vrcfg h i hsusp ref
   have vcfg := vrcfg.toValidConfig
   have vcfg' := makeObjRegion_valid vcfg h
@@ -137,6 +159,7 @@ theorem cr5_step_makeObjRegion (x : VarName) : CR5_step (Stmt.makeObjRegion x) :
   exact makeObjRegion_corollary_frameReachable_iff_of_lt vcfg vcfg' h hidlt ref
 
 theorem cr5_step_makeObjStack (x : VarName) : CR5_step (Stmt.makeObjStack x) := by
+  apply cr5_step_of_helper
   intro cfg cfg' vrcfg h i hsusp ref
   have vcfg := vrcfg.toValidConfig
   have vcfg' := makeObjStack_valid vcfg h
@@ -153,6 +176,7 @@ theorem cr5_step_makeObjStack (x : VarName) : CR5_step (Stmt.makeObjStack x) := 
   exact makeObjStack_corollary_frameReachable_iff_of_lt vcfg vcfg' h hidlt ref
 
 theorem cr5_step_makeRegion (x : VarName) : CR5_step (Stmt.makeRegion x) := by
+  apply cr5_step_of_helper
   intro cfg cfg' vrcfg h i hsusp ref
   have vcfg := vrcfg.toValidConfig
   have vcfg' := makeRegion_valid vcfg h
@@ -169,6 +193,7 @@ theorem cr5_step_makeRegion (x : VarName) : CR5_step (Stmt.makeRegion x) := by
   exact makeRegion_corollary_frameReachable_iff_of_lt vcfg vcfg' h hidlt ref
 
 theorem cr5_step_merge (x : VarName) : CR5_step (Stmt.merge x) := by
+  apply cr5_step_of_helper
   intro cfg cfg' vrcfg h i hsusp ref
   have vcfg := vrcfg.toValidConfig
   obtain ⟨_, _, _, hlt⟩ := hsusp
@@ -185,6 +210,7 @@ theorem cr5_step_merge (x : VarName) : CR5_step (Stmt.merge x) := by
   exact merge_corollary_frameReachable_iff_of_lt vcfg h hidlt ref
 
 theorem cr5_step_swap (x : VarName) (yf : FieldAccess) : CR5_step (Stmt.swap x yf) := by
+  apply cr5_step_of_helper
   intro cfg cfg' vrcfg h i hsusp ref
   obtain ⟨frame, hframe, hidx, hlt⟩ := hsusp
   have vcfg := vrcfg.toValidConfig
@@ -202,6 +228,7 @@ theorem cr5_step_swap (x : VarName) (yf : FieldAccess) : CR5_step (Stmt.swap x y
   rwa [hidx] at hres
 
 theorem cr5_step_varAsgn (x : VarName) (yf : FieldAccess) : CR5_step (Stmt.varAsgn x yf) := by
+  apply cr5_step_of_helper
   intro cfg cfg' vrcfg h i hsusp ref
   obtain ⟨frame, hframe, hidx, hlt⟩ := hsusp
   have vcfg := vrcfg.toValidConfig
@@ -289,7 +316,11 @@ theorem cr5_step_varAsgn (x : VarName) (yf : FieldAccess) : CR5_step (Stmt.varAs
   · rintro ⟨start, hroot, hrtg⟩
     exact ⟨start, (hfrRootIff start).mpr hroot, hrtg.mono (fun a b hab => (hRefStepIff a b).mpr hab)⟩
 
--- Every operation satisfies CR5_step -- the layer-1 statement, in full generality.
+-- Every operation satisfies CR5_step -- the layer-1 statement, in full generality. Each of the 9
+-- cases already closes with `cr5_step_of_helper` internally (see each proof's own `apply
+-- cr5_step_of_helper` first line), so there's no separately-named `CR5_helper_step` dispatcher
+-- anymore -- if a future multi-step generalization ends up needing that iff-chaining form again,
+-- it'll have to be re-derived (each op's proof still proves it internally, just not under a name).
 theorem cr5_step_all : ∀ cmd, CR5_step cmd := by
   intro cmd
   cases cmd with
@@ -302,42 +333,3 @@ theorem cr5_step_all : ∀ cmd, CR5_step cmd := by
   | merge x => exact cr5_step_merge x
   | swap x yf => exact cr5_step_swap x yf
   | varAsgn x yf => exact cr5_step_varAsgn x yf
-
--- Deferred until the single-step case (above) is actually filled in -- only `Suspended`/
--- `CR5_step`/`cr5_step_all` are live for now. This layer was: a trace of operations
--- (`Run : List Stmt → RuntimeConfig → Option RuntimeConfig`, folding `step` left to right), a
--- "stays suspended at every intermediate config" predicate (`AllSuspended`), and the actual
--- report.pdf CR5 statement chaining `cr5_step_all` along the trace via `Iff.trans` (a
--- straightforward induction once `cr5_step_all` has no `sorry`s left -- no further
--- per-operation work needed). Kept here as prose so it's easy to resurrect.
---
--- def Run : List Stmt → RuntimeConfig → Option RuntimeConfig
---   | [], cfg => some cfg
---   | cmd :: rest, cfg => (step cmd cfg).bind (Run rest)
---
--- def AllSuspended : List Stmt → RuntimeConfig → Index → Prop
---   | [], cfg, i => Suspended cfg i
---   | cmd :: rest, cfg, i =>
---       Suspended cfg i ∧ ∃ cfg', step cmd cfg = some cfg' ∧ AllSuspended rest cfg' i
---
--- theorem CR5 : ∀ (cmds : List Stmt) (cfg cfg' : RuntimeConfig) (i : Index),
---     ValidReachableConfig cfg → Run cmds cfg = some cfg' → AllSuspended cmds cfg i →
---     ∀ ref, FrameReachable cfg i ref ↔ FrameReachable cfg' i ref := by
---   intro cmds
---   induction cmds with
---   | nil =>
---     intro cfg cfg' i _ hrun _ ref
---     unfold Run at hrun
---     injection hrun with hcfgeq
---     rw [hcfgeq]
---   | cons cmd rest ih =>
---     intro cfg cfg' i hvalid hrun hsusp ref
---     obtain ⟨hsusp0, cfg1, hstep, hsuspRest⟩ := hsusp
---     unfold Run at hrun
---     rw [hstep] at hrun
---     dsimp only [Option.bind] at hrun
---     have hvalid1 : ValidReachableConfig cfg1 :=
---       allPreserve_ValidReachableConfig cmd cfg cfg1 hstep hvalid
---     have hiff1 := cr5_step_all cmd cfg cfg1 hvalid hstep i hsusp0 ref
---     have hiff2 := ih cfg1 cfg' i hvalid1 hrun hsuspRest ref
---     exact hiff1.trans hiff2

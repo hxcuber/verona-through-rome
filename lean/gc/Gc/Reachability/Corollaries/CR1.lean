@@ -22,7 +22,7 @@ private theorem RegionReachable_implies_FrameReachable_aux (cfg : RuntimeConfig)
 -- an associated frame F, then R's region object is represented by the bridge variable in frame
 -- F. Then, there is a path from the bridge variable to o, so o is frame-reachable." `R` is
 -- `frame.regionId` throughout (see RegionReachable_implies_FrameReachable_aux's comment for why).
-theorem RegionReachable_implies_FrameReachable :
+theorem CR1 :
   frame ∈ cfg.stackWithIndex ->
   RegionReachable cfg frame.regionId ref ->
   FrameReachable cfg frame.index ref := by

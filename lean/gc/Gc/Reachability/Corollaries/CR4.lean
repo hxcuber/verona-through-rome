@@ -165,7 +165,7 @@ private theorem two_region_refs_mem_heap_refs (cfg : RuntimeConfig)
   rwa [hheap_eq] at hcount
 
 -- Core CR4 argument for an object directly resident in the suspended region, reused both by
--- `StackReachable_iff_FrameReachable`'s own `OId` case and by its `RId` case (once an `RId`'s
+-- `CR4`'s own `OId` case and by its `RId` case (once an `RId`'s
 -- unique storage location is traced back to an in-region object, see `oid_field_unique` below).
 private theorem stackReachable_iff_frameReachable_oid (cfg : RuntimeConfig)
     (vrcfg : ValidReachableConfig cfg) (frame : FrameWithIndex) (hframemem : frame ∈ cfg.stackWithIndex)
@@ -197,7 +197,7 @@ private theorem stackReachable_iff_frameReachable_oid (cfg : RuntimeConfig)
 -- active/last frame) -- kept only to stay faithful to the report's statement.
 -- turns out this is irrespective of the frame, so we do not need a hypothesis saying that the
 -- frame is suspended.
-theorem StackReachable_iff_FrameReachable (cfg : RuntimeConfig) (vrcfg : ValidReachableConfig cfg)
+theorem CR4 (cfg : RuntimeConfig) (vrcfg : ValidReachableConfig cfg)
     (frame : FrameWithIndex) (hframemem : frame ∈ cfg.stackWithIndex)
     (ref : Reference) (href : RegionReachable cfg frame.regionId ref) :
     StackReachable cfg ref ↔
