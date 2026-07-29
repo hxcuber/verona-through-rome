@@ -904,9 +904,10 @@ private theorem stackReachable_iff_frameReachable_oid (cfg : RuntimeConfig)
 -- own `step` constructor already allows this, since only its *source* needs to be `OId`-shaped.
 -- `_hframesus` isn't needed by the proof (CR3 already forces it vacuously when `frame` is the
 -- active/last frame) -- kept only to stay faithful to the report's statement.
+-- turns out this is irrespective of the frame, so we do not need a hypothesis saying that the
+-- frame is suspended.
 theorem StackReachable_iff_FrameReachable (cfg : RuntimeConfig) (vrcfg : ValidReachableConfig cfg)
     (frame : FrameWithIndex) (hframemem : frame ∈ cfg.stackWithIndex)
-    (_hframesus : frame.index < cfg.stackWithIndex.length - 1)
     (ref : Reference) (href : RegionReachable cfg frame.regionId ref) :
     StackReachable cfg ref ↔
     FrameReachable cfg frame.index ref := by

@@ -42,6 +42,25 @@ def CR5_step (cmd : Stmt) : Prop :=
   ∀ cfg cfg' : RuntimeConfig, ValidReachableConfig cfg → step cmd cfg = some cfg' →
     ∀ i, Suspended cfg i → ∀ ref, FrameReachable cfg i ref ↔ FrameReachable cfg' i ref
 
+def CR5'_step (cmd : Stmt) : Prop :=
+  ∀ cfg cfg' : RuntimeConfig, ValidReachableConfig cfg → step cmd cfg = some cfg' →
+    ∀ i, Suspended cfg i → ∀ ref, FrameReachable cfg i ref →
+    (StackReachable cfg ref ↔ StackReachable cfg' ref)
+
+theorem test (cmd : Stmt) : CR5_step cmd → CR5'_step cmd := by
+  intro h cfg cfg' vrcfg hstep i hsusp ref hfr
+  have hiff := h cfg cfg' vrcfg hstep i hsusp ref
+  obtain ⟨frame, hframe, hidx, _⟩ := hsusp
+  constructor
+  · intro _
+    have hfr' : FrameReachable cfg' i ref := hiff.mp hfr
+    obtain ⟨start, hroot, _⟩ := (FrameReachable_iff_reflTransGen cfg' i ref).mp hfr'
+    rcases hroot with ⟨frame', hframe'mem, hidx', _⟩ | ⟨frame', hframe'mem, hidx', _⟩
+    · exact ⟨frame', hframe'mem, by rw [hidx']; exact hfr'⟩
+    · exact ⟨frame', hframe'mem, by rw [hidx']; exact hfr'⟩
+  · intro _
+    exact ⟨frame, hframe, by rw [hidx]; exact hfr⟩
+
 theorem cr5_step_enter (xf : FieldAccess) (a : VarName) : CR5_step (Stmt.enter xf a) := by
   intro cfg cfg' vrcfg h i hsusp ref
   obtain ⟨frame0, hframe0, hidx, _⟩ := hsusp
