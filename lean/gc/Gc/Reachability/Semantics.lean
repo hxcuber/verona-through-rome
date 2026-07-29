@@ -3,6 +3,17 @@ import Gc.Model.Helpers
 import Gc.Model.Validity
 import Mathlib.Logic.Relation
 
+-- `a` steps to `b` when `b` is a field value of the object `a` currently resolves to
+def RefStep (cfg : RuntimeConfig) (a b : Reference) : Prop :=
+  ∃ obj, a.objAt? cfg = some obj ∧ obj.refs.contains b
+
+theorem RefStep.exists_oid_left {cfg : RuntimeConfig} {a b : Reference}
+    (h : RefStep cfg a b) : ∃ oid, a = Reference.OId oid := by
+  obtain ⟨obj, hobj, _⟩ := h
+  cases a with
+  | RId rid => simp [Reference.objAt?] at hobj
+  | OId oid => exact ⟨oid, rfl⟩
+
 -- what does it mean for an object to be reachable in a region?
 inductive RegionReachable : RuntimeConfig → RegionId → Reference → Prop where
 -- the object is the bridge object
