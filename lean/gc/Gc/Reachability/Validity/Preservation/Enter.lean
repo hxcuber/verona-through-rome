@@ -141,11 +141,11 @@ private theorem enter_corollary_frameRoot_iff (vcfg : ValidConfig cfg)
       subst heq1
       exact Or.inr ⟨frame1, hframe0, rfl, region1, hheap_eq.symm.trans hlookup1, hstart⟩
 
-theorem enter_corollary_frameReachable_iff (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
+theorem enter_corollary_frameReferencable_iff (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
     (h : enter xf a cfg = some cfg')
     (frame0 : FrameWithIndex) (hframe0 : frame0 ∈ cfg.stackWithIndex) (ref : Reference) :
-    FrameReachable cfg frame0.index ref ↔ FrameReachable cfg' frame0.index ref := by
-  rw [FrameReachable_iff_reflTransGen, FrameReachable_iff_reflTransGen]
+    FrameReferencable cfg frame0.index ref ↔ FrameReferencable cfg' frame0.index ref := by
+  rw [FrameReferencable_iff_reflTransGen, FrameReferencable_iff_reflTransGen]
   constructor
   · rintro ⟨start, hroot, hrtg⟩
     exact ⟨start, (enter_corollary_frameRoot_iff vcfg h frame0 hframe0 start).mp hroot,
@@ -206,16 +206,16 @@ theorem enter_cr3 : ValidReachableConfig cfg →
   · -- Old/old case: transport everything down to `cfg`, apply `vrcfg.cr3`, transport back up.
     have hlocDown : (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId) := by
       rw [enter_corollary_2 vcfg h oid]; exact hloc
-    have hreachDown : FrameReachable cfg frame'.index (Reference.OId oid) :=
-      (enter_corollary_frameReachable_iff vcfg vcfg' h frame' hframe'Old (Reference.OId oid)).mpr hreach
-    have hconcDown : FrameReachable cfg frame.index (Reference.OId oid) :=
+    have hreachDown : FrameReferencable cfg frame'.index (Reference.OId oid) :=
+      (enter_corollary_frameReferencable_iff vcfg vcfg' h frame' hframe'Old (Reference.OId oid)).mpr hreach
+    have hconcDown : FrameReferencable cfg frame.index (Reference.OId oid) :=
       vrcfg.cr3 frame hframeOld frame' hframe'Old hlt oid hlocDown hreachDown
-    exact (enter_corollary_frameReachable_iff vcfg vcfg' h frame hframeOld (Reference.OId oid)).mp hconcDown
+    exact (enter_corollary_frameReferencable_iff vcfg vcfg' h frame hframeOld (Reference.OId oid)).mp hconcDown
   · -- `frame'` is the fresh, empty frame: its only possible root is its own region's bridge
-    -- object, giving `RegionReachable cfg' rid oid`, forcing `oid`'s region to be `rid` --
+    -- object, giving `RegionReferencable cfg' rid oid`, forcing `oid`'s region to be `rid` --
     -- contradicting `frame.regionId ≠ rid` (frame is old) together with `hloc`'s region `frame.regionId`.
     exfalso
-    rw [FrameReachable_iff_reflTransGen] at hreach
+    rw [FrameReferencable_iff_reflTransGen] at hreach
     obtain ⟨start, hroot, hrtg⟩ := hreach
     have hnewFrameWI : ({ regionId := rid, bridgeVar := a, objMap := ∅, varMap := ∅, index := cfg.stack.length } :
         FrameWithIndex) ∈ cfg'.stackWithIndex := by
@@ -247,10 +247,10 @@ theorem enter_cr3 : ValidReachableConfig cfg →
       have hlookup1open : cfg'.heap.lookup rid = some { region with status := Status.Open } := by
         rw [hcfg']; dsimp only; rw [AList.lookup_insert]
       rw [hstart_eq] at hrtg
-      have hoidReach : RegionReachable cfg' rid (Reference.OId oid) :=
-        (RegionReachable_iff_reflTransGen cfg' rid (Reference.OId oid)).mpr
+      have hoidReach : RegionReferencable cfg' rid (Reference.OId oid) :=
+        (RegionReferencable_iff_reflTransGen cfg' rid (Reference.OId oid)).mpr
           ⟨{ region with status := Status.Open }, hlookup1open, hrtg⟩
-      have hoidLoc := RegionReachable_stays_in_region vcfg' hoidReach
+      have hoidLoc := RegionReferencable_stays_in_region vcfg' hoidReach
       rw [hoidLoc, Option.some.injEq, Location.Rgn.injEq] at hloc
       exact enter_corollary_regionId_ne vcfg rid region hclosed hlookupRid frame hframeOld hloc.symm
 

@@ -14,8 +14,8 @@ Preservation/*.lean` files. Extracted from the original monolithic `Corollaries.
 -- Generalized over `ref` (rather than fixing `ref := Reference.OId oid` up front) so that
 -- `induction h` below works directly: `h`'s type is stated over a bare-variable index, and
 -- the `∀ oid, ref = Reference.OId oid → ...` hypothesis is vacuous in a hypothetical `RId` case.
-private theorem RegionReachable_stays_in_region_aux (cfg : RuntimeConfig) (hvalid : ValidConfig cfg)
-    (rid : RegionId) (ref : Reference) (h : RegionReachable cfg rid ref) :
+private theorem RegionReferencable_stays_in_region_aux (cfg : RuntimeConfig) (hvalid : ValidConfig cfg)
+    (rid : RegionId) (ref : Reference) (h : RegionReferencable cfg rid ref) :
     ∀ oid, ref = Reference.OId oid → ref.loc? cfg = some (Location.Rgn rid) := by
   induction h with
   | bridge hlookup hbridge =>
@@ -41,22 +41,22 @@ private theorem RegionReachable_stays_in_region_aux (cfg : RuntimeConfig) (hvali
     rw [href'] at href_in_region_refs ⊢
     exact hvalid.h3 _ oid' region hlookup href_in_region_refs
 
-theorem RegionReachable_stays_in_region : ValidConfig cfg ->
-  RegionReachable cfg rid (Reference.OId oid) ->
+theorem RegionReferencable_stays_in_region : ValidConfig cfg ->
+  RegionReferencable cfg rid (Reference.OId oid) ->
   (Reference.OId oid).loc? cfg = some (Location.Rgn rid) := by
-  -- per case anaylsis on the RegionReachable inductive definition
+  -- per case anaylsis on the RegionReferencable inductive definition
   -- bridge case is trivial, as the bridge object is in the region
   -- step case -> the IH gives (OId oid).loc? cfg = some (Rgn rid); objAt? succeeding at
   -- oid means oid.loc? cfg is some loc (either Rgn or Stk), so H3 pins loc = Rgn rid
   -- (a frame-resident object would contradict H3, since the IH already places oid in rid)
   intro hvalid h
-  exact RegionReachable_stays_in_region_aux cfg hvalid rid _ h oid rfl
+  exact RegionReferencable_stays_in_region_aux cfg hvalid rid _ h oid rfl
 
--- CR3 helper: the exact same H3 argument as `RegionReachable_stays_in_region_aux`'s `step` case
+-- CR3 helper: the exact same H3 argument as `RegionReferencable_stays_in_region_aux`'s `step` case
 -- (a region's own refs can never point anywhere but back into that same region), just proved for
 -- an arbitrary `ReflTransGen` start instead of one rooted at a region's bridge object specifically
 -- -- so it applies to a chain that enters a region from *any* stack-held reference partway through,
--- not only from `RegionReachable`'s own bridge-rooted starting point. `head_induction_on` fixes the
+-- not only from `RegionReferencable`'s own bridge-rooted starting point. `head_induction_on` fixes the
 -- target (here `Reference.OId oid`) and walks forward from an arbitrary start one hop at a time,
 -- which is exactly the shape needed: propagate "resolves into `rid`" *forward*, hop by hop, from
 -- wherever a chain element first resolves into `rid` all the way to the fixed final target.
@@ -113,7 +113,7 @@ theorem ReflTransGen_rgn_confined (cfg : RuntimeConfig) (hvalid : ValidConfig cf
 -- own bound applies unchanged.
 -- `start`'s own bound, directly from `FrameRoot`'s two disjuncts (no chain induction needed).
 -- Used by `Corollaries/CR2.lean`'s own path-based upper bound, and by `ReflTransGen_upper_bound`/
--- `FrameReachable_owner_index_le`/`FrameReachable_stk_index_le` below.
+-- `FrameReferencable_owner_index_le`/`FrameReferencable_stk_index_le` below.
 theorem FrameRoot_upper_bound (cfg : RuntimeConfig) (hvalid : ValidConfig cfg)
     (frame : FrameWithIndex) (start : Reference) (hroot : FrameRoot cfg frame.index start) :
     ∀ oidr, start = Reference.OId oidr →
@@ -230,7 +230,7 @@ theorem RefStep_upper_bound_step (cfg : RuntimeConfig) (hvalid : ValidConfig cfg
 -- `ReflTransGen`-flavored restatement of `Path_from_frame_upper_bound`: any owner of a region
 -- reached along a chain rooted at `frameY` has index ≤ `frameY.index` (mirrors the Rgn-side of the
 -- same S2/S3 upper-bound argument used for CR2, just phrased via `Relation.ReflTransGen` instead
--- of an explicit `List`/`Path`, since that's what CR3's `FrameReachable_iff_reflTransGen` produces).
+-- of an explicit `List`/`Path`, since that's what CR3's `FrameReferencable_iff_reflTransGen` produces).
 -- Used by CR3 proofs of the Preservation/*.lean operations that write a *pre-existing* reference
 -- value into a new slot (VarAsgn/FieldAsgn/Swap): if that value resolves into a suspended region
 -- `rid`, its owner cannot be *later* than wherever the value was read from.
@@ -256,24 +256,24 @@ theorem ReflTransGen_upper_bound (cfg : RuntimeConfig) (hvalid : ValidConfig cfg
 -- Packages `ReflTransGen_upper_bound` together with `FrameRoot_upper_bound` for the common case
 -- where the chain is rooted via an actual `FrameRoot` (rather than an arbitrary already-known
 -- bound on `start`).
-theorem FrameReachable_owner_index_le (cfg : RuntimeConfig) (hvalid : ValidConfig cfg)
-    (frameY : FrameWithIndex) {oid : ObjectId} (hreach : FrameReachable cfg frameY.index (Reference.OId oid))
+theorem FrameReferencable_owner_index_le (cfg : RuntimeConfig) (hvalid : ValidConfig cfg)
+    (frameY : FrameWithIndex) {oid : ObjectId} (hreach : FrameReferencable cfg frameY.index (Reference.OId oid))
     (rid : RegionId) (hoid_rgn : (Reference.OId oid).loc? cfg = some (Location.Rgn rid))
     (frameOwner : FrameWithIndex) (hframeOwnerMem : frameOwner ∈ cfg.stackWithIndex)
     (hframeOwnerRid : frameOwner.regionId = rid) :
     frameOwner.index ≤ frameY.index := by
-  rw [FrameReachable_iff_reflTransGen] at hreach
+  rw [FrameReferencable_iff_reflTransGen] at hreach
   obtain ⟨start, hroot, hrtg⟩ := hreach
   exact (ReflTransGen_upper_bound cfg hvalid frameY hrtg (FrameRoot_upper_bound cfg hvalid frameY start hroot)
     oid rfl).2 frameOwner hframeOwnerMem rid hoid_rgn hframeOwnerRid
 
--- Stk-side analogue of `FrameReachable_owner_index_le`: an object `FrameReachable` from `frameY`
+-- Stk-side analogue of `FrameReferencable_owner_index_le`: an object `FrameReferencable` from `frameY`
 -- that resolves onto the stack itself can only resolve at or before `frameY.index`.
-theorem FrameReachable_stk_index_le (cfg : RuntimeConfig) (hvalid : ValidConfig cfg)
-    (frameY : FrameWithIndex) {oid : ObjectId} (hreach : FrameReachable cfg frameY.index (Reference.OId oid))
+theorem FrameReferencable_stk_index_le (cfg : RuntimeConfig) (hvalid : ValidConfig cfg)
+    (frameY : FrameWithIndex) {oid : ObjectId} (hreach : FrameReferencable cfg frameY.index (Reference.OId oid))
     (fid : Index) (hoid_stk : (Reference.OId oid).loc? cfg = some (Location.Stk fid)) :
     fid ≤ frameY.index := by
-  rw [FrameReachable_iff_reflTransGen] at hreach
+  rw [FrameReferencable_iff_reflTransGen] at hreach
   obtain ⟨start, hroot, hrtg⟩ := hreach
   exact (ReflTransGen_upper_bound cfg hvalid frameY hrtg (FrameRoot_upper_bound cfg hvalid frameY start hroot)
     oid rfl).1 fid hoid_stk
@@ -362,14 +362,14 @@ theorem resolveV_frameRoot {cfg : RuntimeConfig} {var : VarName} {oid : ObjectId
           exact ⟨frameV, hframeV_mem, Or.inr ⟨frameV, hframeV_mem, rfl, regionV, hregionV, by rw [hrv]⟩⟩
       · rw [if_neg hbv] at hrv; contradiction
 
--- A successful `resolveFA` retrieves a value that's already `FrameReachable` from *some* frame:
+-- A successful `resolveFA` retrieves a value that's already `FrameReferencable` from *some* frame:
 -- the root var/bridge value resolves to some container object oid0 (via `resolveV_frameRoot`),
 -- and the field access itself is exactly one more `RefStep` hop from oid0's own object. Shared by
 -- `VarAsgn`/`Swap` (both resolve a `FieldAccess`, unlike `FieldAsgn` whose `y : VarName` only
 -- needs `resolveV_frameRoot` directly) -- previously two identical private copies.
 theorem resolveFA_frameReach {cfg : RuntimeConfig} {y : FieldAccess} {oid : ObjectId}
     (hyf : resolveFA y cfg = some (Reference.OId oid)) :
-    ∃ frameY : FrameWithIndex, frameY ∈ cfg.stackWithIndex ∧ FrameReachable cfg frameY.index (Reference.OId oid) := by
+    ∃ frameY : FrameWithIndex, frameY ∈ cfg.stackWithIndex ∧ FrameReferencable cfg frameY.index (Reference.OId oid) := by
   unfold resolveFA at hyf
   cases hrv : resolveV y.root cfg with
   | none => rw [hrv] at hyf; contradiction
@@ -386,8 +386,8 @@ theorem resolveFA_frameReach {cfg : RuntimeConfig} {y : FieldAccess} {oid : Obje
         rw [hloc0] at hyf
         dsimp at hyf
         obtain ⟨frameY, hframeYMem, hrootY⟩ := resolveV_frameRoot hrv
-        have hreachY0 : FrameReachable cfg frameY.index (Reference.OId oid0) := by
-          rw [FrameReachable_iff_reflTransGen]
+        have hreachY0 : FrameReferencable cfg frameY.index (Reference.OId oid0) := by
+          rw [FrameReferencable_iff_reflTransGen]
           exact ⟨Reference.OId oid0, hrootY, Relation.ReflTransGen.refl⟩
         cases loc0 with
         | Stk fid0 =>
@@ -409,7 +409,7 @@ theorem resolveFA_frameReach {cfg : RuntimeConfig} {y : FieldAccess} {oid : Obje
                 dsimp only
                 rw [hframe0]
                 exact hobj0
-              exact ⟨frameY, hframeYMem, FrameReachable.step hobjAt0 (List.contains_iff_mem.mpr
+              exact ⟨frameY, hframeYMem, FrameReferencable.step hobjAt0 (List.contains_iff_mem.mpr
                 (AList.mem_lookup_iff.mp (Option.mem_def.mpr hyf) |> (List.mem_map_of_mem (f := (·.2))) )
                 ) hreachY0⟩
         | Rgn rid0 =>
@@ -431,6 +431,6 @@ theorem resolveFA_frameReach {cfg : RuntimeConfig} {y : FieldAccess} {oid : Obje
                 dsimp only
                 rw [hregion0]
                 exact hobj0
-              exact ⟨frameY, hframeYMem, FrameReachable.step hobjAt0 (List.contains_iff_mem.mpr
+              exact ⟨frameY, hframeYMem, FrameReferencable.step hobjAt0 (List.contains_iff_mem.mpr
                 (AList.mem_lookup_iff.mp (Option.mem_def.mpr hyf) |> (List.mem_map_of_mem (f := (·.2))) )
                 ) hreachY0⟩

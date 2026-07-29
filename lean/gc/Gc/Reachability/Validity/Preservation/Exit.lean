@@ -117,7 +117,7 @@ private theorem exit_corollary_objAt_eq_of_ne_none (vcfg : ValidConfig cfg) (vcf
         rw [← hidx0']; exact swap_corollary_stackWithIndex_find_eq hmem0mem'
       rw [hfind0, hfind0', hframe0_eq]
 
--- For a surviving frame (already on `cfg'.stackWithIndex`), FrameReachable agrees between cfg
+-- For a surviving frame (already on `cfg'.stackWithIndex`), FrameReferencable agrees between cfg
 -- and cfg' at that frame's index: roots transport directly (same record, and the popped frame's
 -- region can never be a surviving frame's own region, by exit_corollary_regionId_ne), and the
 -- inductive `step` case transports via exit_corollary_objAt_eq_of_ne_none once we know (via HS1
@@ -216,7 +216,7 @@ private theorem exit_corollary_refStep_down (vcfg : ValidConfig cfg) (vcfg' : Va
   exact ⟨obj, (exit_corollary_objAt_eq_of_ne_none vcfg vcfg' h oid hne').trans hobjAt, hcontains⟩
 
 -- Downward chain transport: immediate from exit_corollary_refStep_down, hop by hop. Safe to
--- induct directly on `ReflTransGen` (unlike `FrameReachable`): its relation/start arguments are
+-- induct directly on `ReflTransGen` (unlike `FrameReferencable`): its relation/start arguments are
 -- genuine *parameters*, not indices, so nothing outside the chain itself needs to be reverted.
 private theorem exit_corollary_reflTransGen_down (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
     (h : exit cfg = some cfg') {start ref : Reference}
@@ -294,11 +294,11 @@ private theorem exit_corollary_frameRoot_alive {cfg' : RuntimeConfig} (vcfg' : V
     apply List.mem_append_right
     exact heap_objectIds_of_mem hregionMem (AList.mem_keys.mpr hbridgeMem)
 
-theorem exit_corollary_frameReachable_iff (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
+theorem exit_corollary_frameReferencable_iff (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
     (h : exit cfg = some cfg')
     (frame0 : FrameWithIndex) (hframe0' : frame0 ∈ cfg'.stackWithIndex) (ref : Reference) :
-    FrameReachable cfg frame0.index ref ↔ FrameReachable cfg' frame0.index ref := by
-  rw [FrameReachable_iff_reflTransGen, FrameReachable_iff_reflTransGen]
+    FrameReferencable cfg frame0.index ref ↔ FrameReferencable cfg' frame0.index ref := by
+  rw [FrameReferencable_iff_reflTransGen, FrameReferencable_iff_reflTransGen]
   constructor
   · rintro ⟨start, hroot, hrtg⟩
     have hroot' := (exit_corollary_frameRoot_iff vcfg h frame0 hframe0' start).mp hroot
@@ -321,11 +321,11 @@ theorem exit_cr3 : ValidReachableConfig cfg →
   have hframe'Old : frame' ∈ cfg.stackWithIndex := exit_corollary_frame_old hlast (by rw [hcfg']) frame' hframe'Mem
   have hlocDown : (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId) :=
     (exit_corollary_1 vcfg h (Reference.OId oid)).mpr hloc
-  have hreachDown : FrameReachable cfg frame'.index (Reference.OId oid) :=
-    (exit_corollary_frameReachable_iff vcfg vcfg' h frame' hframe'Mem (Reference.OId oid)).mpr hreach
-  have hconcDown : FrameReachable cfg frame.index (Reference.OId oid) :=
+  have hreachDown : FrameReferencable cfg frame'.index (Reference.OId oid) :=
+    (exit_corollary_frameReferencable_iff vcfg vcfg' h frame' hframe'Mem (Reference.OId oid)).mpr hreach
+  have hconcDown : FrameReferencable cfg frame.index (Reference.OId oid) :=
     vrcfg.cr3 frame hframeOld frame' hframe'Old hlt oid hlocDown hreachDown
-  exact (exit_corollary_frameReachable_iff vcfg vcfg' h frame hframeMem (Reference.OId oid)).mp hconcDown
+  exact (exit_corollary_frameReferencable_iff vcfg vcfg' h frame hframeMem (Reference.OId oid)).mp hconcDown
 
 theorem exit_reachable_valid : ValidReachableConfig cfg →
   exit cfg = some cfg' →
