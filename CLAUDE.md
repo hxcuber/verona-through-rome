@@ -982,14 +982,11 @@ particular to do a `getLast?`/`injection`/`subst` dance just to extract a fact t
 over for free. Net −35 lines across the 9 proofs; no proof obligations changed (verified via full
 rebuild + axiom check on `cr5_step_all`).
 
-**Not yet done, left for a future session**:
-- **Multi-step CR5** (the actual report.pdf claim, over an arbitrary-length trace, not just one
-  operation): a sketch (`Run`/`AllSuspended`/a `CR5` theorem chaining `cr5_step_all` via `Iff.trans`
-  along a `List Stmt`) existed against the old (pre-rename) `CR5_step` shape, but was deleted as part of
-  the CR5'→CR5 rename since it targeted the now-demoted `CR5_helper_step` form — needs re-deriving
-  against the current `CR5_step`/`cr5_step_of_helper` shape. Expected to still be a short,
-  mostly-mechanical induction now that `cr5_step_all` has no `sorry`s, no further per-operation work
-  anticipated.
+**Not yet done**: multi-step CR5 (chaining `cr5_step_all` over an arbitrary-length `List Stmt` trace,
+the actual report.pdf claim rather than just one operation) — not currently being pursued; deprioritized
+per user direction 2026-07-29. A sketch existed against the old (pre-rename) `CR5_step` shape but was
+deleted as part of the CR5'→CR5 rename above; would need re-deriving against the current shape if picked
+back up.
 
 Elsewhere:
 
@@ -1143,17 +1140,14 @@ work above and were previously undocumented here; see the Architecture section f
   tracked/committed (previously untracked WIP).
 - `Gc/Reachability/Guarantees.lean`/`Invariants.lean` — still empty / no proofs.
 
-**Concretely still open**:
-- **Multi-step CR5**: chain `cr5_step_all` along an arbitrary `List Stmt` trace — the report.pdf-
-  faithful claim over a whole run, not just one operation. Sketch was deleted as part of the CR5'→CR5
-  rename (see `CR5.lean`'s own notes above); needs re-deriving against the current `CR5_step` shape,
-  expected to be a short, mostly-mechanical induction.
+**Concretely still open** (multi-step CR5 deprioritized per user direction 2026-07-29 — not currently
+being pursued, see `CR5.lean`'s own notes above):
 - **report.pdf `CR6`** ("Liveness in a closed region is solely determined by region-reachability" —
   section 4.3.1, the corollary right after CR5, feeding guarantees G4/G5): not yet started anywhere in
   `Gc/`. Unlike CR3/CR5, its core fact ("no on-stack reference resolves into a Closed region") looks like
   it reduces directly to `S3` + `L2` on a single `ValidConfig` — no per-mutation preservation file
   needed — so it likely belongs in `Corollaries/` (a new `CR6.lean`) alongside CR1/CR2/CR4, not
   `Validity/`.
-- Once multi-step CR5 exists, the natural next target after CR6 is report.pdf's `Guarantees.lean`
-  (currently empty) — CR5 (report.pdf: "G3 comes directly as a result of CR5") is specifically the
-  ingredient the concurrent-garbage-detection guarantee (G3) needs.
+- After CR6, the natural next target is report.pdf's `Guarantees.lean` (currently empty) — CR5
+  (report.pdf: "G3 comes directly as a result of CR5") is specifically the ingredient the
+  concurrent-garbage-detection guarantee (G3) needs; CR6 similarly feeds G4/G5.
