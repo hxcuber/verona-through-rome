@@ -2,7 +2,6 @@ import Gc.Model.Mutation.MakeObjRegion
 import Gc.Model.Preservation.MakeObjRegion
 import Gc.Model.Preservation.Common
 import Gc.Reachability.Validity.Reachable
-import Gc.Reachability.Corollaries
 
 -- Every frame's `objMap` is completely unaffected by makeObjRegion (only the last frame's
 -- `varMap` changes, and only the mutated region's `objMap` in the heap changes) -- so the

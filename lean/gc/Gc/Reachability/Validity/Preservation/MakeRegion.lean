@@ -2,7 +2,6 @@ import Gc.Model.Mutation.MakeRegion
 import Gc.Model.Preservation.MakeRegion
 import Gc.Model.Preservation.Common
 import Gc.Reachability.Validity.Reachable
-import Gc.Reachability.Corollaries
 
 private theorem makeRegion_corollary_mem_keys_of_lookup {rid : RegionId} {region : Region} {heap : Heap}
     (hlookup : heap.lookup rid = some region) : rid ∈ heap.keys :=

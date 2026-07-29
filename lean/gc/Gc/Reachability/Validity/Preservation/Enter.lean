@@ -2,7 +2,7 @@ import Gc.Model.Mutation.Enter
 import Gc.Model.Preservation.Enter
 import Gc.Model.Preservation.Common
 import Gc.Reachability.Validity.Reachable
-import Gc.Reachability.Corollaries
+import Gc.Reachability.Corollaries.Common
 
 
 -- Old (already-on-stack) frames' own region can never be the entered region: L2 says every

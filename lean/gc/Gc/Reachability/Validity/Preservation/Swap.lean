@@ -2,7 +2,7 @@ import Gc.Model.Mutation.Swap
 import Gc.Model.Preservation.Swap
 import Gc.Model.Preservation.Common
 import Gc.Reachability.Validity.Reachable
-import Gc.Reachability.Corollaries
+import Gc.Reachability.Corollaries.Common
 
 -- swap's stack-mutating branches (SWAP-STACK/SWAP-REGION-OBJECT/SWAP-REGION-REGION) all replace
 -- the last frame with some `newFrame` built via `{ frame with varMap := ..., objMap := ... }`

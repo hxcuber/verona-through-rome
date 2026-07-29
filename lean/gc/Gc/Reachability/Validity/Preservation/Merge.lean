@@ -2,7 +2,7 @@ import Gc.Model.Mutation.Merge
 import Gc.Model.Preservation.Merge
 import Gc.Model.Preservation.Common
 import Gc.Reachability.Validity.Reachable
-import Gc.Reachability.Corollaries
+import Gc.Reachability.Corollaries.Common
 
 -- Every on-stack frame's region is Open (L2), but `rid'` (the region being merged away) is
 -- Closed -- so no on-stack frame (in particular, no frame reachable via `vcfg.l2`) can ever own

@@ -2,7 +2,6 @@ import Gc.Model.Mutation.MakeObjStack
 import Gc.Model.Preservation.MakeObjStack
 import Gc.Model.Preservation.Common
 import Gc.Reachability.Validity.Reachable
-import Gc.Reachability.Corollaries
 
 -- makeObjStack only ever inserts a *fresh* key into the last frame's own objMap, so for any
 -- oid ≠ freshObjectId, `loc?` is completely unaffected. Adapts the same `loc_eq_of_ne_fresh`-style

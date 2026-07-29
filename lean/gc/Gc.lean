@@ -2,7 +2,10 @@
 -- Import modules here that should be built as part of the library.
 import Gc.Model.Helpers
 import Gc.Model.Mutation.Mutation
-import Gc.Reachability.Corollaries
+import Gc.Reachability.Corollaries.Common
+import Gc.Reachability.Corollaries.CR1
+import Gc.Reachability.Corollaries.CR2
+import Gc.Reachability.Corollaries.CR4
 import Gc.Reachability.Path
 import Gc.Reachability.Validity.Reachable
 import Gc.Reachability.Validity.Start

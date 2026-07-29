@@ -1,4 +1,5 @@
-import Gc.Scratch
+import Gc.Model.Mutation.Stmt
+import Gc.Reachability.Validity.Preservation
 
 /-!
 report.pdf CR5: "Activity in an active region and frame cannot affect the stack-reachability

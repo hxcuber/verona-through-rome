@@ -2,7 +2,7 @@ import Gc.Model.Mutation.FieldAsgn
 import Gc.Model.Preservation.FieldAsgn
 import Gc.Model.Preservation.Common
 import Gc.Reachability.Validity.Reachable
-import Gc.Reachability.Corollaries
+import Gc.Reachability.Corollaries.Common
 
 -- fieldAsgn never touches a frame's `regionId`/`bridgeVar`/`varMap` anywhere: the STACK branch
 -- only replaces a value inside the last frame's own `objMap`, and the REGION branch doesn't touch

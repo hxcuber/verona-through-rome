@@ -2,7 +2,7 @@ import Gc.Model.Mutation.VarAsgn
 import Gc.Model.Preservation.VarAsgn
 import Gc.Model.Preservation.Common
 import Gc.Reachability.Validity.Reachable
-import Gc.Reachability.Corollaries
+import Gc.Reachability.Corollaries.Common
 
 -- varAsgn never touches any `objMap` anywhere -- the BRIDGE branch only replaces a heap region's
 -- `bridgeObjectId` (a scalar field), and the FRESH-VAR branch only replaces the last frame's
