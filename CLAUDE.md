@@ -23,14 +23,15 @@ All commands below assume `cd lean/gc`.
 
 - **Build/check a single file**: `lake build Gc.Model.Theorems` (dotted module path mirrors the file
   path, e.g. `Gc/Model/Preservation/Swap.lean` → `Gc.Model.Preservation.Swap`).
-- **`lake build` (bare, no target) now succeeds end to end**, including `Gc`, `Main`, and the `gc`
-  executable — fixed 2026-07-24. `Gc.lean` no longer imports `Gc/Reachability/Reachability.lean` (it
+- **`lake build` (bare, no target) succeeds end to end**, including `Gc`, `Main`, and the `gc`
+  executable, with zero `sorry`s anywhere under `Gc/` (verified project-wide as of 2026-07-29). The
+  original broken `Gc/Reachability/Reachability.lean` (a fuel-based computational reachability walk that
   pattern-matched on wrong `Location` constructor names — `Location.Stack`/`Location.Region` instead of
-  the real `Location.Stk`/`Location.Rgn` — and never built; that file itself is untouched/still broken,
-  it's just no longer pulled in). `Main.lean`'s undefined `hello` (leftover from the `lake new` template)
-  was replaced with a plain greeting. The only remaining build output is expected `sorry` warnings from
-  the not-yet-started `Preservation` files. Still prefer building the specific module(s) you're touching
-  by qualified name for faster iteration, e.g. `lake build Gc.Model.Theorems`.
+  the real `Location.Stk`/`Location.Rgn` — and never built) was deleted outright rather than just excluded
+  from the build; the inductive `FrameReachable`/`RefStep` machinery in `Gc/Reachability/Semantics.lean`
+  made it redundant. `Main.lean`'s undefined `hello` (leftover from the `lake new` template) was replaced
+  with a plain greeting. Still prefer building the specific module(s) you're touching by qualified name
+  for faster iteration, e.g. `lake build Gc.Model.Theorems`.
 - Toolchain is pinned via `lean-toolchain` (`leanprover/lean4:v4.29.0-rc6`) and dependencies via
   `lake-manifest.json`; the main dependency is `mathlib`. First builds after a fresh clone can be slow
   because of mathlib — subsequent builds reuse `.lake/build`.
@@ -79,17 +80,33 @@ The proof development has two layers under `Gc/`:
   value coincidentally colliding with a *freshly allocated* id later on. `HS1` closes that gap. Adding a
   9th field to `ValidConfig` meant every existing `<op>_valid` constructor across `Preservation/*.lean`
   needed an `hs1 := ...` field — see per-file notes below for what each got.
-- `Mutation.lean` — the operational semantics: each of `varAsgn`, `fieldAsgn`, `swap`, `enter`, `exit`,
-  `makeObjStack`, `makeObjRegion`, `makeRegion`, `merge` takes a `RuntimeConfig` and returns
-  `Option RuntimeConfig` (`none` = the transition is stuck/illegal, e.g. an out-of-region write).
+- `Mutation/` — the operational semantics, one file per operation (`Enter`, `Exit`, `FieldAsgn`,
+  `MakeObjRegion`, `MakeObjStack`, `MakeRegion`, `Merge`, `Swap`, `VarAsgn`; split out of a single
+  `Mutation.lean` file at some point before 2026-07-25 — `Mutation.lean` itself is now just a 9-line
+  aggregator importing all nine). Each `Mutation/<Op>.lean` defines the operation itself (`varAsgn`,
+  `fieldAsgn`, `swap`, `enter`, `exit`, `makeObjStack`, `makeObjRegion`, `makeRegion`, `merge` — each
+  takes a `RuntimeConfig` and returns `Option RuntimeConfig`, `none` meaning the transition is
+  stuck/illegal, e.g. an out-of-region write) **and** a public `<op>_cases` lemma unpacking the `do`-block
+  into its explicit disjunction-of-∃-bundles branches. This case-split lemma used to be reproven ad hoc
+  inside each `Preservation/<Op>.lean` file (see the per-file gotchas below, e.g. `merge_cases`); it now
+  lives once alongside the operation and is reused by both `Gc/Model/Preservation/<Op>.lean` and
+  `Gc/Reachability/Validity/Preservation/<Op>.lean`.
+- `Mutation/Stmt.lean` — reifies a single operation as data: `inductive Stmt` (one constructor per
+  operation, carrying its arguments) plus `step : Stmt → RuntimeConfig → Option RuntimeConfig`
+  dispatching to the real operation. Lets later layers state "for all 9 operations" claims by quantifying
+  over `Stmt` instead of writing 9 separate theorems — used by `Preservation.lean` below and by
+  `Gc/Reachability/Validity/Preservation.lean`/`Validity/CR5.lean`.
 - `Start.lean` — `RuntimeConfig.start` (the initial configuration: one root region, one root frame) and
   a proof that it satisfies `ValidConfig`.
-- `Preservation/*.lean` — one file per `Mutation` operation (`Enter`, `Exit`, `FieldAsgn`,
-  `MakeObjRegion`, `MakeObjStack`, `MakeRegion`, `Merge`, `Swap`, `VarAsgn`). Each proves that the
-  operation preserves `ValidConfig` by discharging the 9 sub-invariants (`<op>_L1` … `<op>_S3`, plus
-  `<op>_HS1`) individually and then combining them into a single `<op>_valid : ValidConfig cfg → op ...
-  cfg = some cfg' → ValidConfig cfg'`. **This is the recurring proof-engineering pattern in the repo** —
-  a new mutation operation is expected to get its own `Preservation/<Op>.lean` following this same shape.
+- `Preservation/*.lean` — one file per `Mutation` operation. Each proves that the operation preserves
+  `ValidConfig` by discharging the 9 sub-invariants (`<op>_L1` … `<op>_S3`, plus `<op>_HS1`) individually
+  and then combining them into a single `<op>_valid : ValidConfig cfg → op ... cfg = some cfg' →
+  ValidConfig cfg'`. **This is the recurring proof-engineering pattern in the repo** — a new mutation
+  operation is expected to get its own `Preservation/<Op>.lean` following this same shape.
+- `Preservation.lean` — aggregator: imports all 9 `Preservation/*.lean` files plus `Mutation/Stmt.lean`
+  and defines `StepPreserves`/`AllPreserve` (a property `P` of configs preserved no matter which `Stmt`
+  ran) and `allPreserve_ValidConfig : AllPreserve ValidConfig`, dispatching to the 9 `<op>_valid` proofs
+  via `cases cmd with` on `Stmt`.
 - `Theorems.lean` — generic `List`/`AList` lemmas (not domain-specific) used as a small helper library
   by the `Preservation` proofs.
 
@@ -102,62 +119,71 @@ The proof development has two layers under `Gc/`:
   `FrameReachable_iff_reflTransGen`, converting the inductive props to `Relation.ReflTransGen (RefStep
   cfg) start ref` form — the representation almost every CR1–CR3 proof actually works with.
 - `Path.lean` — a thin `Path`/`ValidPath` wrapper (`path.refs : List Reference`, valid when consecutive
-  refs are linked by `RefStep`) used specifically by the CR2 proof below, which needs to reason about
-  *every* element of a chain (via `List.IsChain` induction), not just its endpoints.
-- `Corollaries.lean` — the reusable, non-operation-specific reachability lemmas, in four groups:
-  - **CR1** (`RegionReachable_implies_FrameReachable`): if a region has an associated (on-stack) frame,
-    everything region-reachable in it is also frame-reachable from that frame. `RegionReachable_stays_
-    in_region` (H3-driven: once a chain resolves into a region, it never leaves) is proved along the way.
-  - **CR2** (`Path_from_frame_to_own_region_stays_in_frame`): a path rooted at frame F, ending at an
-    object in F's own region, never passes through any *other* frame's stack slot. Built from S2/S3-
-    driven upper/lower index bounds (`Path_from_frame_upper_bound`/`_lower_bound`, `FrameRoot_upper_
-    bound`, `RefStep_upper_bound_step`/`_lower_bound_step`) combined via `le_antisymm`.
-  - **Reusable `ReflTransGen`-flavored machinery** (added 2026-07-28 while proving `fieldAsgn_cr3`, see
-    below): `ReflTransGen_rgn_confined` (once a chain resolves into a region, H3 forces every *later*
-    chain element into that exact same region — the `RefStep`-chain analogue of CR2, but for regions
-    rather than stack slots, and rooted at an arbitrary point rather than a `FrameRoot`); `ReflTransGen_
-    upper_bound` (a `Relation.ReflTransGen`-based restatement of the same S2/S3 upper-bound argument
-    behind CR2, avoiding the `List`/`Path`/`IsChain` detour); `FrameReachable_owner_index_le`/
-    `FrameReachable_stk_index_le` (packaged wrappers: any region/stack-slot reached along a
-    `FrameReachable cfg frameY.index _` chain has an owner-index/slot-index `≤ frameY.index`). The
-    latter two are the actual workhorses `fieldAsgn_cr3`/`varAsgn_cr3` call for their "was this value
-    already visible from *some* frame no later than the suspended owner" argument (see their bullets
-    below).
-  - **CR4** (`StackReachable_iff_FrameReachable`, added 2026-07-28): packages CR3 into a single iff —
-    an object living in a region owned by (on-stack) frame `frame` is stack-wide reachable
-    (`StackReachable`) iff it's already reachable from `frame` alone (`FrameReachable cfg
-    frame.index _`). Drafted by the user as a rough skeleton (one sorry, unfinished backward
-    direction); the sorry (`frame.index < frame'.index`, asserted unconditionally) was actually false
-    as stated, since the witness frame `frame'` could coincide with `frame` itself. Fixed by getting
-    `frame.index ≤ frame'.index` from `FrameReachable_owner_index_le` first, then a `.lt_or_eq` split:
-    the strict case invokes CR3 directly, the equality case collapses `frame' = frame` via
-    `stackWithIndex` index-uniqueness (`swap_corollary_stackWithIndex_index_inj`, from
-    `Gc.Model.Preservation.Common`). Takes an explicit `_hframesus` ("`frame` isn't the active/last
-    frame") hypothesis that the proof doesn't actually need — CR3 is already vacuously satisfied
-    whenever `frame` is the last frame (nothing has a larger index to instantiate `frame'` with), so
-    the equality branch fires there regardless — but it's kept (underscore-prefixed to silence the
-    unused-variable linter, matching `Merge.lean`'s `_hregion'` precedent) purely to stay faithful to
-    report.pdf's own CR4 statement. Backward direction needed no changes: `frame` itself is already a
-    valid `StackReachable` witness.
-- `Reachability.lean` — a fuel-based *computational* reachability walk (`Region.reachableRefs`,
-  `RuntimeConfig.stackReachableRefs`) rather than the inductive props above; **currently fails to
-  build** — it pattern-matches on `Location.Stack`/`Location.Region`, but `Types.lean`'s `Location`
-  constructors are actually named `Location.Stk`/`Location.Rgn`. Not pulled into the default build
-  target, so this doesn't block `lake build`; untouched since the `Validity/` layer below made it
-  effectively redundant (the inductive `FrameReachable`/`RefStep` machinery is what CR3 actually uses).
+  refs are linked by `RefStep`) used specifically by the CR2 proof, which needs to reason about *every*
+  element of a chain (via `List.IsChain` induction), not just its endpoints.
+- `Corollaries/` — the reusable, non-operation-specific reachability lemmas. Originally a single
+  ~1000-line `Corollaries.lean`; **split 2026-07-29** into `Corollaries/{Common,CR1,CR2,CR4}.lean`
+  (mirroring the `Model/Preservation/Common.lean` consolidation pattern) once it had grown into a
+  grab-bag mixing generic machinery with CR-specific proofs — each `Validity/Preservation/*.lean` file's
+  import now points at exactly what it needs (three of the nine needed nothing from it at all). In the
+  same 2026-07-29 session, headline theorems were renamed to bare `CR1`/`CR2`/`CR4` (dropping
+  descriptive suffixes) to match report.pdf's own numbering — the same rename applied to `CR5'`→`CR5`,
+  see `Validity/CR5.lean` below.
+  - **`Common.lean`**: reusable `ReflTransGen`-flavored machinery not specific to any one CR —
+    `RegionReachable_stays_in_region` (H3-driven: once a chain resolves into a region, it never leaves),
+    `ReflTransGen_rgn_confined` (the same fact restated for an arbitrary `ReflTransGen` chain rather
+    than a `RegionReachable` one — the `RefStep`-chain analogue of CR2, but for regions rather than
+    stack slots, and rooted at an arbitrary point rather than a `FrameRoot`), `FrameRoot_upper_bound`/
+    `RefStep_upper_bound_step`/`ReflTransGen_upper_bound` (the S2/S3-driven upper-index-bound argument
+    behind CR2, in both `Path`/`IsChain` and `ReflTransGen` form), `FrameReachable_owner_index_le`/
+    `_stk_index_le` (packaged wrappers: anything reached along a `FrameReachable cfg frameY.index _`
+    chain has owner/slot index `≤ frameY.index` — the actual workhorses several `<op>_cr3`/`CR5_step`
+    proofs call for their "already visible from some no-later frame" argument), and
+    `resolveV_frameRoot`/`resolveFA_frameReach` (promoted 2026-07-28 from three byte-for-byte-identical
+    `private` copies inside `FieldAsgn.lean`/`VarAsgn.lean`/`Swap.lean`'s CR3 files into one shared
+    public pair).
+  - **`CR1.lean`** (bare `CR1`, renamed from `RegionReachable_implies_FrameReachable`): if a region has
+    an associated (on-stack) frame, everything region-reachable in it is also frame-reachable from that
+    frame.
+  - **`CR2.lean`** (bare `CR2`, renamed from `Path_from_frame_to_own_region_stays_in_frame`): a path
+    rooted at frame F, ending at an object in F's own region, never passes through any *other* frame's
+    stack slot. Built from the S2/S3-driven upper/lower index bounds now in `Common.lean`, combined via
+    `le_antisymm`.
+  - **`CR4.lean`** (bare `CR4`, renamed from `StackReachable_iff_FrameReachable`; drafted 2026-07-28,
+    generalized 2026-07-29). Packages CR3 into a single iff — an object living in a region owned by
+    (on-stack) frame `frame` is stack-wide reachable (`StackReachable`) iff it's already reachable from
+    `frame` alone (`FrameReachable cfg frame.index _`). Drafted by the user as a rough skeleton (one
+    sorry, unfinished backward direction); the sorry (`frame.index < frame'.index`, asserted
+    unconditionally) was actually false as stated, since the witness frame `frame'` could coincide with
+    `frame` itself. Fixed by getting `frame.index ≤ frame'.index` from `FrameReachable_owner_index_le`
+    first, then a `.lt_or_eq` split: the strict case invokes CR3 directly, the equality case collapses
+    `frame' = frame` via `stackWithIndex` index-uniqueness (`swap_corollary_stackWithIndex_index_inj`,
+    from `Gc.Model.Preservation.Common`). Takes an explicit `_hframesus` hypothesis the proof doesn't
+    actually need (CR3 is already vacuously satisfied whenever `frame` is the last frame), kept only to
+    stay faithful to report.pdf's own CR4 statement. **Generalized 2026-07-29** from `ref :
+    Reference.OId oid` specifically to an arbitrary `ref : Reference` with hypothesis `RegionReachable
+    cfg frame.regionId ref` — now covers both the original in-region-object case and a new case where
+    `ref` is a region reference (`RId`) one field-hop beyond an in-region object. The `RId` case leans
+    on `H2`'s global uniqueness of a region reference's storage location to trace the chain back to the
+    same in-region object, then reuses the original object-case argument plus one more `RefStep`; needed
+    two new small generic list lemmas in `Model/Theorems.lean` (`List.two_le_count_flatMap_of_ne`,
+    `List.count_le_count_flatMap_of_mem`).
 - `Invariants.lean` — cross-config properties about reachability being preserved for suspended regions
-  and earlier frames across a transition (currently just definitions/comments, no proofs yet).
-  **Correction (2026-07-29): this is NOT superseded by CR3** — an earlier version of this note claimed
-  that, but `suspended_regions_maintain_frame_reachability`/`_region_reachability` here are actually
-  CR5-shaped (an *iff* about a suspended frame's reachability across one transition), not CR3-shaped
-  (CR3 is a one-directional "later frame implies earlier frame" implication within a single config).
-  These two draft defs were the seed for `CR5_step` in `Validity/CR5.lean` (see below).
+  and earlier frames across a transition (currently just definitions/comments, no proofs yet). Its two
+  draft defs (`suspended_regions_maintain_frame_reachability`/`_region_reachability`) were the seed for
+  `CR5_step` in `Validity/CR5.lean` (see below).
 - `Guarantees.lean` — currently an empty file (placeholder for the eventual GC-safety theorems).
 - `Validity/` — a `ValidConfig`-style invariant *specifically* about reachability (`CR3`, see below),
-  plus its own `Preservation/*.lean` mirroring `Gc/Model/Preservation/*.lean`'s per-operation pattern.
-  Also has `CR5.lean` (added 2026-07-29, see its own "Current known state" section below) — not yet
-  folded into the `Preservation/` split, since the user is deliberately undecided on final architecture
-  for this layer.
+  plus its own `Preservation/*.lean` mirroring `Gc/Model/Preservation/*.lean`'s per-operation pattern,
+  and a `Preservation.lean` aggregator (`allPreserve_ValidReachableConfig`, the `Reachability`-layer
+  analogue of `Gc/Model/Preservation.lean`'s `allPreserve_ValidConfig`). Also has `CR5.lean` (see its
+  own "Current known state" section below) — not yet folded into the `Preservation/` split, since the
+  user is deliberately undecided on final architecture for this layer.
+
+Note: an earlier `Gc/Reachability/Reachability.lean` (a fuel-based *computational* reachability walk,
+`Region.reachableRefs`/`RuntimeConfig.stackReachableRefs`, rather than the inductive props above) used
+to exist here but pattern-matched on wrong `Location` constructor names and never built; it has since
+been **deleted entirely** (not just excluded from the build) — see the Commands section above.
 
 ## Current known state (check before assuming something works)
 
@@ -727,13 +753,14 @@ planned step" below):
     `frame` itself already S1-uniquely owns the target region. The case split is then `frameY = frame`
     (trivial) or `frame.index < frameY.index` (recurse into `vrcfg.cr3` itself, using `frameY` as the
     "later frame" this time).
-  - **New reusable facts added to `Corollaries.lean`** to make this precise (see its bullet above):
+  - **New reusable facts added to `Corollaries/Common.lean`** (at the time still the single
+    `Corollaries.lean`, later split — see its bullet above) to make this precise:
     `ReflTransGen_rgn_confined`, `ReflTransGen_upper_bound`, `FrameReachable_owner_index_le`,
     `FrameReachable_stk_index_le`. In the end only the latter two (the packaged wrappers, not the raw
     `ReflTransGen`-level ones) were needed by the final proof — `ReflTransGen_rgn_confined` was built
     first while exploring a more complicated "confinement" approach that turned out unnecessary once the
-    owner's own S1+S3 argument (above) was worked out directly, but is left in `Corollaries.lean` as a
-    genuinely reusable, independently-true fact (not yet needed elsewhere).
+    owner's own S1+S3 argument (above) was worked out directly, but is left in as a genuinely reusable,
+    independently-true fact (not yet needed elsewhere).
   - **Proof shape**: `fieldAsgn_corollary_stack_objAt_eq_of_ne`/`_region_objAt_eq_of_ne` (`objAt?`
     equality for any oid *other than* the mutated container, built on top of the already-unconditional
     `fieldAsgn_corollary_stack_loc_eq`/`_region_loc_eq` from `Gc.Model.Preservation.FieldAsgn`) plus
@@ -840,41 +867,68 @@ planned step" below):
     `Quot.sound`. Full `lake build` (1058 jobs) and a project-wide sorry scan (0 sorries across 42
     files) both confirm `Gc/` is now completely `sorry`-free.
 
-### `Gc/Reachability/Validity/CR5.lean` — CR5 single-step (new, 2026-07-29)
+### `Gc/Reachability/Validity/CR5.lean` — CR5 single-step (added 2026-07-29, restructured same day)
 
 report.pdf CR5: "Activity in an active region and frame cannot affect the stack-reachability of
-objects within suspended regions." Unlike CR1–CR4 (`Corollaries.lean`) and CR3 (a `ValidConfig`-style
-invariant about one config), CR5 is fundamentally a claim about *change across a transition* — so,
-mirroring how CR3 itself is proved, it's formalized as a per-operation single-step fact first:
+objects within suspended regions." Unlike CR1/CR2/CR4 (`Corollaries/{CR1,CR2,CR4}.lean`) and CR3 (a
+`ValidConfig`-style invariant about one config), CR5 is fundamentally a claim about *change across a
+transition* — so, mirroring how CR3 itself is proved, it's formalized as a per-operation single-step
+fact first:
 
 ```
 def Suspended (cfg : RuntimeConfig) (i : Index) : Prop :=
   ∃ frame ∈ cfg.stackWithIndex, frame.index = i ∧ i < cfg.stackWithIndex.length - 1
 
-def CR5_step (cmd : Stmt) : Prop :=
+def CR5_helper_step (cmd : Stmt) : Prop :=
   ∀ cfg cfg' : RuntimeConfig, ValidReachableConfig cfg → step cmd cfg = some cfg' →
     ∀ i, Suspended cfg i → ∀ ref, FrameReachable cfg i ref ↔ FrameReachable cfg' i ref
+
+def CR5_step (cmd : Stmt) : Prop :=
+  ∀ cfg cfg' : RuntimeConfig, ValidReachableConfig cfg → step cmd cfg = some cfg' →
+    ∀ i, Suspended cfg i → ∀ ref, FrameReachable cfg i ref →
+    (StackReachable cfg ref ↔ StackReachable cfg' ref)
 ```
 
-(`Stmt`/`step` come from `Gc/Scratch.lean` — a small `Stmt` sum type + dispatcher over all 9
-`Mutation.lean` operations, plus `allPreserve_ValidConfig`/`allPreserve_ValidReachableConfig` dispatch
-lemmas; not yet folded into the main `Gc/` module tree, but a genuine dependency of `CR5.lean`.)
+(`Stmt`/`step` come from `Gc/Model/Mutation/Stmt.lean` — see the Architecture section above.)
 `enter`/`exit` need no special-casing despite changing *which* frame counts as active: `Suspended` is
-evaluated pre-step, so `CR5_step` only ever claims something about frames *already* suspended before
-the operation runs, and no operation ever touches an already-suspended frame's own stack slot or
+evaluated pre-step, so `CR5_helper_step` only ever claims something about frames *already* suspended
+before the operation runs, and no operation ever touches an already-suspended frame's own stack slot or
 region (only the active/last frame's own).
+
+**Restructured 2026-07-29 (commit `971c61c`), the same session `CR5_step` was first completed for all 9
+operations.** Originally the easier-to-prove `FrameReachable` form above (per-operation, mirroring
+`Validity/Preservation/*.lean`'s CR3 pattern) was itself named `CR5_step`, and a separate
+`StackReachable`-flavored `CR5'_step` (the actual report.pdf-faithful statement) was explored, dropped
+mid-session to keep scope contained, then picked back up and finished. Once `CR5'_step` worked for all 9
+operations it took over the name `CR5_step` (matching report.pdf's own numbering — the same motivation
+as the `Corollaries/` bare-CR-name rename above); the old `FrameReachable`-form `CR5_step` was demoted
+to `CR5_helper_step`. `CR5_step` above is deliberately *restricted* to references already
+`FrameReachable` from the suspended frame — an *unrestricted* `∀ ref, StackReachable cfg ref ↔
+StackReachable cfg' ref` is false (e.g. `makeObjStack` can make a brand-new object `StackReachable` in
+`cfg'` via the active frame's own fresh var, without it ever having been reachable, from anywhere, in
+`cfg`; that has nothing to do with any suspended region). `cr5_step_of_helper : CR5_helper_step cmd →
+CR5_step cmd` does the upgrade: once `ref` is already `FrameReachable` from the suspended frame,
+`StackReachable cfg ref` is trivially witnessed by that same frame, and `StackReachable cfg' ref` falls
+out of the helper's `FrameReachable cfg' i ref` fact by unfolding `FrameRoot` for a witness frame — no
+`CR4`/`RegionReachable` machinery needed at all. Rather than keep the 9 per-operation `CR5_helper_step`
+proofs separately named, each of `cr5_step_enter` .. `cr5_step_varAsgn` now proves the helper fact
+internally (unnamed, via `apply cr5_step_of_helper` as its first line) and its own public signature is
+`CR5_step` directly — the per-op techniques described below are otherwise unchanged from when they were
+named `cr5_step_*` under the old `CR5_step` meaning. The deferred multi-step sketch (see "Not yet done"
+below) was removed at the same time since it targeted the now-renamed helper form and needs
+re-deriving, not patching, against the new shape.
 
 **`CR5_step` is fully proved for all 9 operations, zero `sorry`** (`cr5_step_enter` … `cr5_step_swap`,
 dispatched by `cr5_step_all`). Difficulty roughly tracked what was anticipated going in (easiest to
 hardest: `enter`/`exit` ≈ trivial reuse; `varAsgn`/`makeObjStack`/`makeObjRegion`/`makeRegion`/`merge`
 ≈ easy-to-medium; `fieldAsgn` ≈ medium; `swap` ≈ hardest), and turned out **simpler than the
-corresponding `<op>_cr3` proof in every case**: since `CR5_step` is only ever asked about an
+corresponding `<op>_cr3` proof in every case**: since the helper fact is only ever asked about an
 *already-suspended* frame, the "does a chain reach the mutated container" question that `<op>_cr3`
 needs an escape/induction argument for is instead **provably impossible** here (any object reachable
 from a suspended frame has owner-index strictly below the active/mutated frame's, via
-`FrameReachable_owner_index_le`/`_stk_index_le` from `Corollaries.lean`) — so every proof reduces to a
-plain position-based frame/heap-transport argument plus a straightforward (escape-free) tail-induction
-on the `RefStep` chain in each direction.
+`FrameReachable_owner_index_le`/`_stk_index_le` from `Corollaries/Common.lean`) — so every proof reduces
+to a plain position-based frame/heap-transport argument plus a straightforward (escape-free)
+tail-induction on the `RefStep` chain in each direction.
 
 - **`enter`/`exit`** — direct reuse of `enter_corollary_frameReachable_iff`/
   `exit_corollary_frameReachable_iff` (already proved, unconditionally for `enter`/for any surviving
@@ -919,34 +973,23 @@ on the `RefStep` chain in each direction.
 - Axiom check on `cr5_step_swap`/`cr5_step_all` confirms only `propext`/`Classical.choice`/
   `Quot.sound`. Full project `lake build` (1060 jobs) clean throughout.
 
-**`Suspended` was refactored (2026-07-29, same session)** to drop an "active frame" existential
-witness it originally carried (`∃ active, cfg.stackWithIndex.getLast? = some active ∧ i < active.index`)
-in favor of stating the bound directly (`i < cfg.stackWithIndex.length - 1`) — the two are equivalent,
-but the direct form is exactly what every per-operation corollary above is stated in terms of, so the
-indirect form forced `exit`/`varAsgn` in particular to do a `getLast?`/`injection`/`subst` dance just
-to extract a fact the hypothesis could hand over for free. Net −35 lines across the 9 proofs; no
-proof obligations changed (verified via full rebuild + axiom check on `cr5_step_all`).
+**`Suspended` was refactored (2026-07-29, earlier the same session as the CR5'→CR5 rename above)** to
+drop an "active frame" existential witness it originally carried (`∃ active, cfg.stackWithIndex.getLast?
+= some active ∧ i < active.index`) in favor of stating the bound directly (`i <
+cfg.stackWithIndex.length - 1`) — the two are equivalent, but the direct form is exactly what every
+per-operation corollary above is stated in terms of, so the indirect form forced `exit`/`varAsgn` in
+particular to do a `getLast?`/`injection`/`subst` dance just to extract a fact the hypothesis could hand
+over for free. Net −35 lines across the 9 proofs; no proof obligations changed (verified via full
+rebuild + axiom check on `cr5_step_all`).
 
 **Not yet done, left for a future session**:
 - **Multi-step CR5** (the actual report.pdf claim, over an arbitrary-length trace, not just one
-  operation): sketched as a commented-out block at the end of `CR5.lean` (`Run`/`AllSuspended`/a
-  `CR5` theorem chaining `cr5_step_all` via `Iff.trans` along a `List Stmt`) — deliberately not live
-  code, since once `cr5_step_all` has no `sorry`s (now true) this should follow from a short generic
-  induction, not further per-operation work.
-- **CR5' (the `StackReachable` form of CR5)**: explored and then explicitly reverted per user request
-  ("delete cr5' and all its associated lemmas and comments for now, let's deal with it later") to keep
-  `CR5.lean` scoped to `CR5_step` while the other 8 proofs were still in flight. Two things worth
-  remembering if picked back up: (1) a *literal* "swap `FrameReachable cfg i` for `StackReachable cfg`,
-  drop the `i`" restatement is actually **false** (an object newly created in the *active* frame is
-  `StackReachable` post-step but wasn't pre-step, and CR5 was never meant to constrain that) — any
-  correct restatement needs an explicit `oid`/owner-`frame` restriction, mirroring CR4's own hypothesis
-  shape; (2) deriving it from `CR5_step` + CR4 (`StackReachable_iff_FrameReachable`) is **not** fully
-  "for free" the way it first looks — CR4 needs invoking at `cfg'` too, which needs "the owner frame
-  survives into `cfg'`" and "the object's location survives" as genuine facts, not just decorative ones
-  (CR4's own `_hframesus` parameter is unused *in its proof*, but a real term of its type is still
-  required to call it — and for `exit`'s boundary case, where the suspended frame gets promoted to
-  active, no such term exists, so the naive derivation doesn't typecheck there). As of this writing the
-  user is independently iterating on a `CR5'_step`/`test` draft directly in `CR5.lean`.
+  operation): a sketch (`Run`/`AllSuspended`/a `CR5` theorem chaining `cr5_step_all` via `Iff.trans`
+  along a `List Stmt`) existed against the old (pre-rename) `CR5_step` shape, but was deleted as part of
+  the CR5'→CR5 rename since it targeted the now-demoted `CR5_helper_step` form — needs re-deriving
+  against the current `CR5_step`/`cr5_step_of_helper` shape. Expected to still be a short,
+  mostly-mechanical induction now that `cr5_step_all` has no `sorry`s, no further per-operation work
+  anticipated.
 
 Elsewhere:
 
@@ -1068,25 +1111,49 @@ still shows only `propext`/`Classical.choice`/`Quot.sound`. Net effect: 1489 →
 `rid`/`hrid`-direction argument each time) — factoring it would trade a few lines for an extra
 indirection layer with no real duplication removed, so it wasn't worth the risk.
 
-**Update (2026-07-29): `CR5_step` is now complete for all 9 operations** — see
-`Gc/Reachability/Validity/CR5.lean`'s own "Current known state" section above for the full breakdown.
-This is the *next* layer up from CR1–CR4/CR3 (report.pdf's CR5, formalized first at the single-step
-level, mirroring how CR3 itself was built up before being generalized). Concretely still open:
+**Update (2026-07-29): `CR5_step` completed for all 9 operations, then restructured to match
+report.pdf's own statement (CR5'→CR5 rename), and `CR4` was generalized to cover `RId` references
+too** — see `Gc/Reachability/Validity/CR5.lean`'s and `Gc/Reachability/Corollaries/CR4.lean`'s own
+entries above for the full breakdown. Two more structural changes landed the same day:
 
-- **Multi-step CR5**: chain `cr5_step_all` along an arbitrary `List Stmt` trace (sketch already exists,
-  commented out, at the end of `CR5.lean`). Expected to be a short, mostly-mechanical induction now
-  that `cr5_step_all` has no `sorry`s — no new per-operation work anticipated.
-- **CR5'** (the `StackReachable`-flavored restatement of CR5): deliberately deferred — see `CR5.lean`'s
-  own notes above for what's already been learned (the naive "just drop the index" restatement is
-  false; deriving it from `CR5_step` + CR4 needs two extra genuine per-operation facts, not just
-  hypothesis bookkeeping). The user has an in-progress `CR5'_step`/`test` draft directly in `CR5.lean`
-  as of this writing — check its actual current state before assuming anything about it from this note,
-  since it may have changed since.
-- **`Gc/Scratch.lean`/`Gc/Equivalence/Equivalence.lean`**: both still untracked, uncommitted files (the
-  user's own WIP — `Scratch.lean`'s `Stmt`/`step`/`AllPreserve` scaffolding is a genuine, live
-  dependency of `CR5.lean` now, not just a scratch file; `Equivalence.lean` is still just a one-line
-  stub). Worth deciding where these ultimately live (the user has said they're undecided on
-  architecture here) before the next round of consolidation-style cleanup.
-- Once multi-step CR5 exists, the natural next target is report.pdf's `Guarantees.lean` (currently
-  empty) — CR5 (report.pdf: "G3 comes directly as a result of CR5") is specifically the ingredient the
-  concurrent-garbage-detection guarantee (G3) needs.
+- **`Corollaries.lean` split** into `Corollaries/{Common,CR1,CR2,CR4}.lean`, and CR1/CR2/CR4's headline
+  theorems renamed to bare `CR1`/`CR2`/`CR4` (matching report.pdf's numbering — same motivation as the
+  CR5'→CR5 rename).
+- **`Gc/Scratch.lean` retired.** It wasn't actually scratch — its `Stmt`/`step` dispatcher and
+  `AllPreserve`/`allPreserve_ValidConfig`/`allPreserve_ValidReachableConfig` were genuine, load-bearing
+  dependencies of `CR5.lean`. `Stmt`/`step` moved to `Gc/Model/Mutation/Stmt.lean`; the two
+  `AllPreserve` instances folded into their respective layer's existing `Preservation.lean` aggregator
+  (`Gc/Model/Preservation.lean` / `Gc/Reachability/Validity/Preservation.lean`), which already imports
+  exactly the per-operation facts each dispatcher needs. `Scratch.lean` itself was deleted; no proof or
+  statement content changed.
+
+Both verified via full `lake build` (1066 jobs) plus an explicit build of
+`Gc.Reachability.Validity.CR5` (still outside the default `Gc.lean` target — nothing downstream needs
+it yet), zero live `sorry`.
+
+**Current overall state** (this "Next planned step" section itself had drifted before this pass — the
+`Mutation.lean`→`Mutation/` split and the deletion of the old `Reachability.lean` both predate the CR5
+work above and were previously undocumented here; see the Architecture section for both):
+- `Gc/Model/` — complete, zero `sorry`.
+- `Gc/Reachability/Validity/Reachable.lean` (CR3, all 9 operations) — complete, zero `sorry`.
+- `Gc/Reachability/Corollaries/{CR1,CR2,CR4}.lean` — complete.
+- `Gc/Reachability/Validity/CR5.lean` (`CR5_step`, single-step, all 9 operations) — complete, zero
+  `sorry`.
+- `Gc/Equivalence/Equivalence.lean` — still a genuine one-line stub (`import Gc.Model.Types` only), now
+  tracked/committed (previously untracked WIP).
+- `Gc/Reachability/Guarantees.lean`/`Invariants.lean` — still empty / no proofs.
+
+**Concretely still open**:
+- **Multi-step CR5**: chain `cr5_step_all` along an arbitrary `List Stmt` trace — the report.pdf-
+  faithful claim over a whole run, not just one operation. Sketch was deleted as part of the CR5'→CR5
+  rename (see `CR5.lean`'s own notes above); needs re-deriving against the current `CR5_step` shape,
+  expected to be a short, mostly-mechanical induction.
+- **report.pdf `CR6`** ("Liveness in a closed region is solely determined by region-reachability" —
+  section 4.3.1, the corollary right after CR5, feeding guarantees G4/G5): not yet started anywhere in
+  `Gc/`. Unlike CR3/CR5, its core fact ("no on-stack reference resolves into a Closed region") looks like
+  it reduces directly to `S3` + `L2` on a single `ValidConfig` — no per-mutation preservation file
+  needed — so it likely belongs in `Corollaries/` (a new `CR6.lean`) alongside CR1/CR2/CR4, not
+  `Validity/`.
+- Once multi-step CR5 exists, the natural next target after CR6 is report.pdf's `Guarantees.lean`
+  (currently empty) — CR5 (report.pdf: "G3 comes directly as a result of CR5") is specifically the
+  ingredient the concurrent-garbage-detection guarantee (G3) needs.
