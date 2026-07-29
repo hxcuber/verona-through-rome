@@ -445,15 +445,15 @@ private theorem makeObjStack_corollary_frameRoot_down {cfg cfg' : RuntimeConfig}
     unfold RuntimeConfig.stackWithIndex
     exact List.mem_mapIdx.mpr ⟨n, h1, by rw [heq]⟩
 
--- `FrameReferencable` is completely unaffected at any position strictly before the mutated (last)
+-- `FrameReachable` is completely unaffected at any position strictly before the mutated (last)
 -- one -- the frame-transport argument `makeObjStack_cr3` already builds inline for itself
 -- (`frame_transport_down`/`_up`/its own `FrameRoot` iff), packaged here as its own reusable
 -- theorem since CR5 (`Gc/Reachability/Validity/CR5.lean`) needs exactly this fact, not CR3's
 -- later-frame-implies-earlier-frame shape.
-theorem makeObjStack_corollary_frameReferencable_iff_of_lt (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
+theorem makeObjStack_corollary_frameReachable_iff_of_lt (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
     (h : makeObjStack x cfg = some cfg')
     {fid : Index} (hfid : fid < cfg.stack.dropLast.length) (ref : Reference) :
-    FrameReferencable cfg fid ref ↔ FrameReferencable cfg' fid ref := by
+    FrameReachable cfg fid ref ↔ FrameReachable cfg' fid ref := by
   obtain ⟨frame1, hframe1, hcfg'⟩ := makeObjStack_cases h
   have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame1] :=
     (List.dropLast_append_getLast? frame1 hframe1).symm
@@ -514,7 +514,7 @@ theorem makeObjStack_corollary_frameReferencable_iff_of_lt (vcfg : ValidConfig c
       · exact Or.inl ⟨fr, frame_transport_down fr hfr (hidx ▸ hfid), hidx, var, hlookup⟩
       · exact Or.inr ⟨fr, frame_transport_down fr hfr (hidx ▸ hfid), hidx, region,
           hheap_eq ▸ hlookup, hstart⟩
-  rw [FrameReferencable_iff_reflTransGen, FrameReferencable_iff_reflTransGen]
+  rw [FrameReachable_iff_reflTransGen, FrameReachable_iff_reflTransGen]
   constructor
   · rintro ⟨start, hroot, hrtg⟩
     exact ⟨start, (hfrRootIff start).mp hroot,
@@ -619,7 +619,7 @@ theorem makeObjStack_cr3 : ValidReachableConfig cfg →
   -- Is `frame'` itself at the mutated (last) position, or not?
   by_cases hframe'Last : frame'.index = cfg.stack.dropLast.length
   · -- Last position: trace the reachability chain's root back through the mutation.
-    rw [FrameReferencable_iff_reflTransGen] at hreach
+    rw [FrameReachable_iff_reflTransGen] at hreach
     obtain ⟨start, hroot, hrtg⟩ := hreach
     have hstart_oid : ∃ start_oid, start = Reference.OId start_oid := by
       rcases hrtg.cases_head with heq0 | ⟨c, hstep0, _⟩
@@ -639,8 +639,8 @@ theorem makeObjStack_cr3 : ValidReachableConfig cfg →
       makeObjStack_corollary_frameRoot_down h hstart_ne_fresh hroot
     have hrtg_down : Relation.ReflTransGen (RefStep cfg) (Reference.OId start_oid) (Reference.OId oid) :=
       hrtg.mono (fun a b hab => (makeObjStack_corollary_refStep_iff vcfg vcfg' h a b).mpr hab)
-    have hreachDown : FrameReferencable cfg frame'.index (Reference.OId oid) :=
-      (FrameReferencable_iff_reflTransGen cfg frame'.index (Reference.OId oid)).mpr
+    have hreachDown : FrameReachable cfg frame'.index (Reference.OId oid) :=
+      (FrameReachable_iff_reflTransGen cfg frame'.index (Reference.OId oid)).mpr
         ⟨Reference.OId start_oid, hroot_down, hrtg_down⟩
     have hframe1_get : cfg.stack[cfg.stack.dropLast.length]? = some frame1 := by
       conv_lhs => rw [stack_eq]
@@ -653,13 +653,13 @@ theorem makeObjStack_cr3 : ValidReachableConfig cfg →
     have hlt' : frame.index < ({ frame1 with index := cfg.stack.dropLast.length } : FrameWithIndex).index := by
       dsimp only; rw [← hframe'Last]; exact hlt
     have hreachDown' :
-        FrameReferencable cfg ({ frame1 with index := cfg.stack.dropLast.length } : FrameWithIndex).index
+        FrameReachable cfg ({ frame1 with index := cfg.stack.dropLast.length } : FrameWithIndex).index
           (Reference.OId oid) := by
       dsimp only; rw [← hframe'Last]; exact hreachDown
-    have hconcDown : FrameReferencable cfg frame.index (Reference.OId oid) :=
+    have hconcDown : FrameReachable cfg frame.index (Reference.OId oid) :=
       vrcfg.cr3 frame hframeMemCfg { frame1 with index := cfg.stack.dropLast.length } hframe1WI_mem
         hlt' oid hlocDown hreachDown'
-    rw [FrameReferencable_iff_reflTransGen] at hconcDown ⊢
+    rw [FrameReachable_iff_reflTransGen] at hconcDown ⊢
     obtain ⟨start2, hroot2, hrtg2⟩ := hconcDown
     exact ⟨start2, (frameRoot_iff_nonlast frame.index hframe_lt_dropLast start2).mp hroot2,
       hrtg2.mono (fun a b hab => (makeObjStack_corollary_refStep_iff vcfg vcfg' h a b).mp hab)⟩
@@ -670,14 +670,14 @@ theorem makeObjStack_cr3 : ValidReachableConfig cfg →
       exact Nat.lt_of_le_of_ne (Nat.le_of_lt_succ hframe'_lt2) hframe'Last
     have hframe'MemCfg : frame' ∈ cfg.stackWithIndex :=
       frame_transport_down frame' hframe'Mem hframe'_lt_dropLast
-    have hreachDown : FrameReferencable cfg frame'.index (Reference.OId oid) := by
-      rw [FrameReferencable_iff_reflTransGen] at hreach ⊢
+    have hreachDown : FrameReachable cfg frame'.index (Reference.OId oid) := by
+      rw [FrameReachable_iff_reflTransGen] at hreach ⊢
       obtain ⟨start, hroot, hrtg⟩ := hreach
       exact ⟨start, (frameRoot_iff_nonlast frame'.index hframe'_lt_dropLast start).mpr hroot,
         hrtg.mono (fun a b hab => (makeObjStack_corollary_refStep_iff vcfg vcfg' h a b).mpr hab)⟩
-    have hconcDown : FrameReferencable cfg frame.index (Reference.OId oid) :=
+    have hconcDown : FrameReachable cfg frame.index (Reference.OId oid) :=
       vrcfg.cr3 frame hframeMemCfg frame' hframe'MemCfg hlt oid hlocDown hreachDown
-    rw [FrameReferencable_iff_reflTransGen] at hconcDown ⊢
+    rw [FrameReachable_iff_reflTransGen] at hconcDown ⊢
     obtain ⟨start2, hroot2, hrtg2⟩ := hconcDown
     exact ⟨start2, (frameRoot_iff_nonlast frame.index hframe_lt_dropLast start2).mp hroot2,
       hrtg2.mono (fun a b hab => (makeObjStack_corollary_refStep_iff vcfg vcfg' h a b).mp hab)⟩

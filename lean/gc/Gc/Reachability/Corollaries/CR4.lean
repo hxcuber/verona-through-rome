@@ -167,17 +167,17 @@ private theorem two_region_refs_mem_heap_refs (cfg : RuntimeConfig)
 -- Core CR4 argument for an object directly resident in the suspended region, reused both by
 -- `CR4`'s own `OId` case and by its `RId` case (once an `RId`'s
 -- unique storage location is traced back to an in-region object, see `oid_field_unique` below).
-private theorem stackReferencable_iff_frameReferencable_oid (cfg : RuntimeConfig)
+private theorem stackReachable_iff_frameReachable_oid (cfg : RuntimeConfig)
     (vrcfg : ValidReachableConfig cfg) (frame : FrameWithIndex) (hframemem : frame ∈ cfg.stackWithIndex)
     (oid : ObjectId) (hoid : (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId)) :
-    StackReferencable cfg (Reference.OId oid) ↔ FrameReferencable cfg frame.index (Reference.OId oid) := by
+    StackReachable cfg (Reference.OId oid) ↔ FrameReachable cfg frame.index (Reference.OId oid) := by
   constructor
   · intro hstackreachable
-    unfold StackReferencable at hstackreachable
+    unfold StackReachable at hstackreachable
     obtain ⟨frame', hframe'mem, hframe'framereachable⟩ := hstackreachable
     have cr3 := vrcfg.cr3
     unfold CR3 at cr3
-    have hle := FrameReferencable_owner_index_le cfg vrcfg.toValidConfig frame' hframe'framereachable
+    have hle := FrameReachable_owner_index_le cfg vrcfg.toValidConfig frame' hframe'framereachable
       frame.regionId hoid frame hframemem rfl
     rcases hle.lt_or_eq with hlt | heq
     · exact cr3 frame hframemem frame' hframe'mem hlt oid hoid hframe'framereachable
@@ -187,11 +187,11 @@ private theorem stackReferencable_iff_frameReferencable_oid (cfg : RuntimeConfig
     exists frame
 
 -- report.pdf CR4, generalized to arbitrary references (not just objects): the hypothesis
--- `RegionReferencable cfg frame.regionId ref` covers both the original OId-restricted case (`ref`
+-- `RegionReachable cfg frame.regionId ref` covers both the original OId-restricted case (`ref`
 -- itself resides in the suspended region -- H3 forces every OId reachable *within* a region to
 -- stay `loc?`-located in that same region, so this case reduces to the original argument via
--- `RegionReferencable_stays_in_region`) and the new case where `ref` is a region reference
--- (`Reference.RId rid'`) sitting one field-hop beyond an in-region object -- `RegionReferencable`'s
+-- `RegionReachable_stays_in_region`) and the new case where `ref` is a region reference
+-- (`Reference.RId rid'`) sitting one field-hop beyond an in-region object -- `RegionReachable`'s
 -- own `step` constructor already allows this, since only its *source* needs to be `OId`-shaped.
 -- `_hframesus` isn't needed by the proof (CR3 already forces it vacuously when `frame` is the
 -- active/last frame) -- kept only to stay faithful to the report's statement.
@@ -199,24 +199,24 @@ private theorem stackReferencable_iff_frameReferencable_oid (cfg : RuntimeConfig
 -- frame is suspended.
 theorem CR4 (cfg : RuntimeConfig) (vrcfg : ValidReachableConfig cfg)
     (frame : FrameWithIndex) (hframemem : frame ∈ cfg.stackWithIndex)
-    (ref : Reference) (href : RegionReferencable cfg frame.regionId ref) :
-    StackReferencable cfg ref ↔
-    FrameReferencable cfg frame.index ref := by
+    (ref : Reference) (href : RegionReachable cfg frame.regionId ref) :
+    StackReachable cfg ref ↔
+    FrameReachable cfg frame.index ref := by
   cases ref with
   | OId oid =>
     have hoid : (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId) :=
-      RegionReferencable_stays_in_region vrcfg.toValidConfig href
-    exact stackReferencable_iff_frameReferencable_oid cfg vrcfg frame hframemem oid hoid
+      RegionReachable_stays_in_region vrcfg.toValidConfig href
+    exact stackReachable_iff_frameReachable_oid cfg vrcfg frame hframemem oid hoid
   | RId rid' =>
     cases href with
     | step hobj hcontains hrr =>
       rename_i oid obj
       have hoid : (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId) :=
-        RegionReferencable_stays_in_region vrcfg.toValidConfig hrr
+        RegionReachable_stays_in_region vrcfg.toValidConfig hrr
       constructor
       · intro hstackreachable
         obtain ⟨frame', hframe'mem, hframe'framereachable⟩ := hstackreachable
-        have hrtg := (FrameReferencable_iff_reflTransGen cfg frame'.index (Reference.RId rid')).mp
+        have hrtg := (FrameReachable_iff_reflTransGen cfg frame'.index (Reference.RId rid')).mp
           hframe'framereachable
         obtain ⟨start, hroot, hchain⟩ := hrtg
         cases hchain with
@@ -269,13 +269,13 @@ theorem CR4 (cfg : RuntimeConfig) (vrcfg : ValidReachableConfig cfg)
                   rw [hobjlookup] at hobjlookup0
                   injection hobjlookup0 with hobj_eq
                   subst hobj_eq
-                  have hoidreach : FrameReferencable cfg frame'.index (Reference.OId oid0) :=
-                    (FrameReferencable_iff_reflTransGen cfg frame'.index (Reference.OId oid0)).mpr
+                  have hoidreach : FrameReachable cfg frame'.index (Reference.OId oid0) :=
+                    (FrameReachable_iff_reflTransGen cfg frame'.index (Reference.OId oid0)).mpr
                       ⟨start, hroot, hprev⟩
-                  have hoidstack : StackReferencable cfg (Reference.OId oid0) := ⟨frame', hframe'mem, hoidreach⟩
+                  have hoidstack : StackReachable cfg (Reference.OId oid0) := ⟨frame', hframe'mem, hoidreach⟩
                   have hoidframe :=
-                    (stackReferencable_iff_frameReferencable_oid cfg vrcfg frame hframemem oid0 hoid).mp hoidstack
-                  exact FrameReferencable.step hobj hcontains hoidframe
+                    (stackReachable_iff_frameReachable_oid cfg vrcfg frame hframemem oid0 hoid).mp hoidstack
+                  exact FrameReachable.step hobj hcontains hoidframe
                 · exfalso
                   have hcount := two_oid_fields_mem_heap_refs cfg frame.regionId region hlookup
                     oid obj hobjlookup oid0 obj0 hobjlookup0 (Ne.symm heqoid) (Reference.RId rid')

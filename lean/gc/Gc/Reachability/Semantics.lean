@@ -4,48 +4,48 @@ import Gc.Model.Validity
 import Mathlib.Logic.Relation
 
 -- what does it mean for an object to be reachable in a region?
-inductive RegionReferencable : RuntimeConfig → RegionId → Reference → Prop where
+inductive RegionReachable : RuntimeConfig → RegionId → Reference → Prop where
 -- the object is the bridge object
 | bridge : cfg.heap.lookup rid = some region →
     region.bridgeObjectId = oid →
-    RegionReferencable cfg rid (Reference.OId oid)
+    RegionReachable cfg rid (Reference.OId oid)
 -- wherever the reachable object actually lives (region or frame, doesn't matter here)
 | step : (Reference.OId oid).objAt? cfg = some obj →
     obj.refs.contains ref →
-    RegionReferencable cfg rid (Reference.OId oid) →
-    RegionReferencable cfg rid ref
+    RegionReachable cfg rid (Reference.OId oid) →
+    RegionReachable cfg rid ref
 
 -- what does it mean for an object to be reachable from a frame?
-inductive FrameReferencable : RuntimeConfig → Index → Reference → Prop where
+inductive FrameReachable : RuntimeConfig → Index → Reference → Prop where
 -- the object is reachable from a variable in the stack
 | var : frame ∈ cfg.stackWithIndex →
     frame.varMap.lookup var = some ref →
-    FrameReferencable cfg frame.index ref
+    FrameReachable cfg frame.index ref
 | bridge : frame ∈ cfg.stackWithIndex →
     cfg.heap.lookup frame.regionId = some region →
     region.bridgeObjectId = oid →
-    FrameReferencable cfg frame.index (Reference.OId oid)
+    FrameReachable cfg frame.index (Reference.OId oid)
 -- the object is referenced by a reachable object, wherever that object actually lives
 | step : (Reference.OId oid).objAt? cfg = some obj →
     obj.refs.contains ref →
-    FrameReferencable cfg fid (Reference.OId oid) →
-    FrameReferencable cfg fid ref
+    FrameReachable cfg fid (Reference.OId oid) →
+    FrameReachable cfg fid ref
 
-def StackReferencable (cfg : RuntimeConfig) (ref : Reference) : Prop :=
-    ∃ frame ∈ cfg.stackWithIndex, FrameReferencable cfg frame.index ref
+def StackReachable (cfg : RuntimeConfig) (ref : Reference) : Prop :=
+    ∃ frame ∈ cfg.stackWithIndex, FrameReachable cfg frame.index ref
 
--- the two ways FrameReferencable can start a path: from a stack variable's value, or from
+-- the two ways FrameReachable can start a path: from a stack variable's value, or from
 -- the frame's own region's bridge object
 def FrameRoot (cfg : RuntimeConfig) (fid : Index) (start : Reference) : Prop :=
   (∃ frame ∈ cfg.stackWithIndex, frame.index = fid ∧ ∃ var, frame.varMap.lookup var = some start) ∨
   (∃ frame ∈ cfg.stackWithIndex, frame.index = fid ∧
     ∃ region, cfg.heap.lookup frame.regionId = some region ∧ start = Reference.OId region.bridgeObjectId)
 
--- RegionReferencable is exactly "reachable from the bridge object by zero or more RefSteps" --
+-- RegionReachable is exactly "reachable from the bridge object by zero or more RefSteps" --
 -- `bridge` is the `refl` case and `step` is the `tail` case, so this is a straight
 -- induction, not a change to the definition itself.
-theorem RegionReferencable_iff_reflTransGen (cfg : RuntimeConfig) (rid : RegionId) (ref : Reference) :
-    RegionReferencable cfg rid ref ↔
+theorem RegionReachable_iff_reflTransGen (cfg : RuntimeConfig) (rid : RegionId) (ref : Reference) :
+    RegionReachable cfg rid ref ↔
       ∃ region, cfg.heap.lookup rid = some region ∧
         Relation.ReflTransGen (RefStep cfg) (Reference.OId region.bridgeObjectId) ref := by
   constructor
@@ -59,16 +59,16 @@ theorem RegionReferencable_iff_reflTransGen (cfg : RuntimeConfig) (rid : RegionI
       exact ⟨region, hlookup, hrtg.tail ⟨_, hobj, hcontains⟩⟩
   · rintro ⟨region, hlookup, hrtg⟩
     induction hrtg with
-    | refl => exact RegionReferencable.bridge hlookup rfl
+    | refl => exact RegionReachable.bridge hlookup rfl
     | tail _ hstep ih =>
       obtain ⟨oid, rfl⟩ := hstep.exists_oid_left
       obtain ⟨obj, hobj, hcontains⟩ := hstep
-      exact RegionReferencable.step hobj hcontains ih
+      exact RegionReachable.step hobj hcontains ih
 
--- Same idea for FrameReferencable, except there are two possible roots (a var's value, or
+-- Same idea for FrameReachable, except there are two possible roots (a var's value, or
 -- the frame's bridge object) instead of one, captured by FrameRoot.
-theorem FrameReferencable_iff_reflTransGen (cfg : RuntimeConfig) (fid : Index) (ref : Reference) :
-    FrameReferencable cfg fid ref ↔
+theorem FrameReachable_iff_reflTransGen (cfg : RuntimeConfig) (fid : Index) (ref : Reference) :
+    FrameReachable cfg fid ref ↔
       ∃ start, FrameRoot cfg fid start ∧ Relation.ReflTransGen (RefStep cfg) start ref := by
   constructor
   · intro h
@@ -85,9 +85,9 @@ theorem FrameReferencable_iff_reflTransGen (cfg : RuntimeConfig) (fid : Index) (
     induction hrtg with
     | refl =>
       rcases hroot with ⟨frame, hmem, hfid, var, hlookup⟩ | ⟨frame, hmem, hfid, region, hlookup, hstart⟩
-      · subst hfid; exact FrameReferencable.var hmem hlookup
-      · subst hfid; subst hstart; exact FrameReferencable.bridge hmem hlookup rfl
+      · subst hfid; exact FrameReachable.var hmem hlookup
+      · subst hfid; subst hstart; exact FrameReachable.bridge hmem hlookup rfl
     | tail _ hstep ih =>
       obtain ⟨oid, rfl⟩ := hstep.exists_oid_left
       obtain ⟨obj, hobj, hcontains⟩ := hstep
-      exact FrameReferencable.step hobj hcontains ih
+      exact FrameReachable.step hobj hcontains ih

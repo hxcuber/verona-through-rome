@@ -414,17 +414,17 @@ private theorem merge_corollary_frameRoot_down (vcfg' : ValidConfig cfg')
         exact List.mem_mapIdx.mpr ⟨n, h1, by rw [heq, ← hidx_n]⟩
       exact ⟨fr, hfr_untouched, hidx, region0, by rw [hlookup'']; exact hlookup, hstart⟩
 
--- `FrameReferencable` is completely unaffected at any position strictly before the mutated (last)
+-- `FrameReachable` is completely unaffected at any position strictly before the mutated (last)
 -- one -- generalizes the frame-transport / heap-lookup argument `merge_cr3` already builds inline
 -- for its own specific `frame` (`frame_transport_down`/`_up`, `hframe_ridne_frame1`/
 -- `hframe_ridne_rid'`) to an arbitrary suspended `fid`, since CR5 (`Gc/Reachability/Validity/
 -- CR5.lean`) needs exactly this fact, not CR3's later-frame-implies-earlier-frame shape. Unlike
 -- `makeObjStack`/`makeObjRegion`/`makeRegion`'s analogues, only `ValidConfig cfg` is needed (no
 -- `cfg'` validity, matching `merge_corollary_refStep_iff`'s own unconditional-in-`cfg'` shape).
-theorem merge_corollary_frameReferencable_iff_of_lt (vcfg : ValidConfig cfg)
+theorem merge_corollary_frameReachable_iff_of_lt (vcfg : ValidConfig cfg)
     (h : merge x cfg = some cfg')
     {fid : Index} (hfid : fid < cfg.stack.dropLast.length) (ref : Reference) :
-    FrameReferencable cfg fid ref ↔ FrameReferencable cfg' fid ref := by
+    FrameReachable cfg fid ref ↔ FrameReachable cfg' fid ref := by
   obtain ⟨frame1, rid', region1, region', hframe1Last, hxref1, hregion1, hregion', hclosed1, hopen1, hcfg'⟩ :=
     merge_cases h
   have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame1] :=
@@ -508,7 +508,7 @@ theorem merge_corollary_frameReferencable_iff_of_lt (vcfg : ValidConfig cfg)
           by rw [hcfg'] at hlookup; dsimp only at hlookup
              rw [AList.lookup_insert_ne (hridne1 fr hfrCfg hidx), AList.lookup_erase_ne (hridne2 fr hfrCfg)] at hlookup
              exact hlookup, hstart⟩
-  rw [FrameReferencable_iff_reflTransGen, FrameReferencable_iff_reflTransGen]
+  rw [FrameReachable_iff_reflTransGen, FrameReachable_iff_reflTransGen]
   constructor
   · rintro ⟨start, hroot, hrtg⟩
     exact ⟨start, (hfrRootIff start).mp hroot,
@@ -612,16 +612,16 @@ theorem merge_cr3 : ValidReachableConfig cfg →
     exact (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region0, by rw [← hheap_eq_frame]; exact hlookup0, hmem0⟩
   -- Vacuousness: no chain from `region'`'s bridge object can ever reach `oid` -- if it did, since
   -- `RefStep` transports unconditionally, the same chain exists in `cfg`, giving
-  -- `RegionReferencable cfg rid' oid`, hence `oid.loc? cfg = Rgn rid'` -- contradicting `hlocDown`
+  -- `RegionReachable cfg rid' oid`, hence `oid.loc? cfg = Rgn rid'` -- contradicting `hlocDown`
   -- (which pins it at `frame.regionId ≠ rid'`).
   have hno_chain_from_region' :
       ¬ Relation.ReflTransGen (RefStep cfg') (Reference.OId region'.bridgeObjectId) (Reference.OId oid) := by
     intro hchain
     have hchain_cfg : Relation.ReflTransGen (RefStep cfg) (Reference.OId region'.bridgeObjectId) (Reference.OId oid) :=
       hchain.mono (fun a b hab => (merge_corollary_refStep_iff vcfg h a b).mpr hab)
-    have hregReach : RegionReferencable cfg rid' (Reference.OId oid) :=
-      (RegionReferencable_iff_reflTransGen cfg rid' (Reference.OId oid)).mpr ⟨region', hregion', hchain_cfg⟩
-    have hloc_rid' := RegionReferencable_stays_in_region vcfg hregReach
+    have hregReach : RegionReachable cfg rid' (Reference.OId oid) :=
+      (RegionReachable_iff_reflTransGen cfg rid' (Reference.OId oid)).mpr ⟨region', hregion', hchain_cfg⟩
+    have hloc_rid' := RegionReachable_stays_in_region vcfg hregReach
     rw [hlocDown, Option.some_inj, Location.Rgn.injEq] at hloc_rid'
     exact hframe_ridne_rid' hloc_rid'
   -- `frame`'s own (untouched) position transports `FrameRoot` upward unconditionally: its record
@@ -643,7 +643,7 @@ theorem merge_cr3 : ValidReachableConfig cfg →
   -- Trace `hreach`'s chain root: it's always `OId`-shaped, and (by the vacuousness fact above)
   -- never `region'.bridgeObjectId`, so it transports down via `frameRoot_down` regardless of
   -- whether `frame'` itself is the mutated (last) position.
-  rw [FrameReferencable_iff_reflTransGen] at hreach
+  rw [FrameReachable_iff_reflTransGen] at hreach
   obtain ⟨start, hroot, hrtg⟩ := hreach
   have hstart_oid : ∃ start_oid, start = Reference.OId start_oid := by
     rcases hrtg.cases_head with heq0 | ⟨c, hstep0, _⟩
@@ -659,8 +659,8 @@ theorem merge_cr3 : ValidReachableConfig cfg →
     merge_corollary_frameRoot_down vcfg' hframe1Last hregion1 hregion' hcfg' hne_start hroot
   have hrtg_down : Relation.ReflTransGen (RefStep cfg) (Reference.OId start_oid) (Reference.OId oid) :=
     hrtg.mono (fun a b hab => (merge_corollary_refStep_iff vcfg h a b).mpr hab)
-  have hreachDown : FrameReferencable cfg frame'.index (Reference.OId oid) :=
-    (FrameReferencable_iff_reflTransGen cfg frame'.index (Reference.OId oid)).mpr
+  have hreachDown : FrameReachable cfg frame'.index (Reference.OId oid) :=
+    (FrameReachable_iff_reflTransGen cfg frame'.index (Reference.OId oid)).mpr
       ⟨Reference.OId start_oid, hroot_down, hrtg_down⟩
   -- Construct the cfg-side witness for `frame'` (last vs non-last), apply `vrcfg.cr3`, transport
   -- the conclusion back up through `frame`'s own untouched position.
@@ -668,13 +668,13 @@ theorem merge_cr3 : ValidReachableConfig cfg →
   · have hlt' : frame.index < ({ frame1 with index := cfg.stack.dropLast.length } : FrameWithIndex).index := by
       dsimp only; rw [← hframe'Last]; exact hlt
     have hreachDown' :
-        FrameReferencable cfg ({ frame1 with index := cfg.stack.dropLast.length } : FrameWithIndex).index
+        FrameReachable cfg ({ frame1 with index := cfg.stack.dropLast.length } : FrameWithIndex).index
           (Reference.OId oid) := by
       dsimp only; rw [← hframe'Last]; exact hreachDown
-    have hconcDown : FrameReferencable cfg frame.index (Reference.OId oid) :=
+    have hconcDown : FrameReachable cfg frame.index (Reference.OId oid) :=
       vrcfg.cr3 frame hframeMemCfg { frame1 with index := cfg.stack.dropLast.length } hlast1_mem
         hlt' oid hlocDown hreachDown'
-    rw [FrameReferencable_iff_reflTransGen] at hconcDown ⊢
+    rw [FrameReachable_iff_reflTransGen] at hconcDown ⊢
     obtain ⟨start2, hroot2, hrtg2⟩ := hconcDown
     exact ⟨start2, frameRoot_up_frame start2 hroot2,
       hrtg2.mono (fun a b hab => (merge_corollary_refStep_iff vcfg h a b).mp hab)⟩
@@ -684,9 +684,9 @@ theorem merge_cr3 : ValidReachableConfig cfg →
       exact Nat.lt_of_le_of_ne (Nat.le_of_lt_succ hframe'_lt2) hframe'Last
     have hframe'MemCfg : frame' ∈ cfg.stackWithIndex :=
       frame_transport_down frame' hframe'Mem hframe'_lt_dropLast
-    have hconcDown : FrameReferencable cfg frame.index (Reference.OId oid) :=
+    have hconcDown : FrameReachable cfg frame.index (Reference.OId oid) :=
       vrcfg.cr3 frame hframeMemCfg frame' hframe'MemCfg hlt oid hlocDown hreachDown
-    rw [FrameReferencable_iff_reflTransGen] at hconcDown ⊢
+    rw [FrameReachable_iff_reflTransGen] at hconcDown ⊢
     obtain ⟨start2, hroot2, hrtg2⟩ := hconcDown
     exact ⟨start2, frameRoot_up_frame start2 hroot2,
       hrtg2.mono (fun a b hab => (merge_corollary_refStep_iff vcfg h a b).mp hab)⟩
