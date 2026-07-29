@@ -319,15 +319,15 @@ private theorem makeObjRegion_corollary_frameRoot_down {cfg cfg' : RuntimeConfig
       rw [hlookup''] at hlookup
       exact hlookup
 
--- `FrameReachable` is completely unaffected at any position strictly before the mutated (last)
+-- `FrameReferencable` is completely unaffected at any position strictly before the mutated (last)
 -- one -- the frame-transport argument `makeObjRegion_cr3` already builds inline for itself
 -- (`frame_transport_down`/`_up`/its own `FrameRoot` iff), packaged here as its own reusable
 -- theorem since CR5 (`Gc/Reachability/Validity/CR5.lean`) needs exactly this fact, not CR3's
--- later-frame-implies-earlier-frame shape. Mirrors `makeObjStack_corollary_frameReachable_iff_of_lt`.
-theorem makeObjRegion_corollary_frameReachable_iff_of_lt (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
+-- later-frame-implies-earlier-frame shape. Mirrors `makeObjStack_corollary_frameReferencable_iff_of_lt`.
+theorem makeObjRegion_corollary_frameReferencable_iff_of_lt (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
     (h : makeObjRegion x cfg = some cfg')
     {fid : Index} (hfid : fid < cfg.stack.dropLast.length) (ref : Reference) :
-    FrameReachable cfg fid ref ↔ FrameReachable cfg' fid ref := by
+    FrameReferencable cfg fid ref ↔ FrameReferencable cfg' fid ref := by
   obtain ⟨frame1, region1, hframe1Last, hheapLookup1, hregion1Open, hcfg'⟩ := makeObjRegion_cases h
   have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame1] := (List.dropLast_append_getLast? frame1 hframe1Last).symm
   set newRegion1 : Region :=
@@ -402,7 +402,7 @@ theorem makeObjRegion_corollary_frameReachable_iff_of_lt (vcfg : ValidConfig cfg
           · rw [hstart, ← hlookup_eq]
         · refine ⟨fr, frame_transport_down fr hfr (hidx ▸ hfid), hidx, region, ?_, hstart⟩
           rw [← hheap_eq_at fr.regionId hrideq]; exact hlookup
-  rw [FrameReachable_iff_reflTransGen, FrameReachable_iff_reflTransGen]
+  rw [FrameReferencable_iff_reflTransGen, FrameReferencable_iff_reflTransGen]
   constructor
   · rintro ⟨start, hroot, hrtg⟩
     exact ⟨start, (hfrRootIff start).mp hroot,
@@ -543,7 +543,7 @@ theorem makeObjRegion_cr3 : ValidReachableConfig cfg →
     rw [makeObjRegion_corollary_loc_eq vcfg h oid hoid_ne_fresh]; exact hloc
   by_cases hframe'Last : frame'.index = cfg.stack.dropLast.length
   · -- Last position: trace the reachability chain's root back through the mutation.
-    rw [FrameReachable_iff_reflTransGen] at hreach
+    rw [FrameReferencable_iff_reflTransGen] at hreach
     obtain ⟨start, hroot, hrtg⟩ := hreach
     have hstart_oid : ∃ start_oid, start = Reference.OId start_oid := by
       rcases hrtg.cases_head with heq0 | ⟨c, hstep0, _⟩
@@ -563,19 +563,19 @@ theorem makeObjRegion_cr3 : ValidReachableConfig cfg →
       makeObjRegion_corollary_frameRoot_down vcfg h hstart_ne_fresh hroot
     have hrtg_down : Relation.ReflTransGen (RefStep cfg) (Reference.OId start_oid) (Reference.OId oid) :=
       hrtg.mono (fun a b hab => (makeObjRegion_corollary_refStep_iff vcfg vcfg' h a b).mpr hab)
-    have hreachDown : FrameReachable cfg frame'.index (Reference.OId oid) :=
-      (FrameReachable_iff_reflTransGen cfg frame'.index (Reference.OId oid)).mpr
+    have hreachDown : FrameReferencable cfg frame'.index (Reference.OId oid) :=
+      (FrameReferencable_iff_reflTransGen cfg frame'.index (Reference.OId oid)).mpr
         ⟨Reference.OId start_oid, hroot_down, hrtg_down⟩
     have hlt' : frame.index < ({ frame1 with index := cfg.stack.dropLast.length } : FrameWithIndex).index := by
       dsimp only; rw [← hframe'Last]; exact hlt
     have hreachDown' :
-        FrameReachable cfg ({ frame1 with index := cfg.stack.dropLast.length } : FrameWithIndex).index
+        FrameReferencable cfg ({ frame1 with index := cfg.stack.dropLast.length } : FrameWithIndex).index
           (Reference.OId oid) := by
       dsimp only; rw [← hframe'Last]; exact hreachDown
-    have hconcDown : FrameReachable cfg frame.index (Reference.OId oid) :=
+    have hconcDown : FrameReferencable cfg frame.index (Reference.OId oid) :=
       vrcfg.cr3 frame hframeMemCfg { frame1 with index := cfg.stack.dropLast.length } hlast1_mem
         hlt' oid hlocDown hreachDown'
-    rw [FrameReachable_iff_reflTransGen] at hconcDown ⊢
+    rw [FrameReferencable_iff_reflTransGen] at hconcDown ⊢
     obtain ⟨start2, hroot2, hrtg2⟩ := hconcDown
     exact ⟨start2, (frameRoot_iff_nonlast frame.index hframe_lt_dropLast start2).mp hroot2,
       hrtg2.mono (fun a b hab => (makeObjRegion_corollary_refStep_iff vcfg vcfg' h a b).mp hab)⟩
@@ -586,14 +586,14 @@ theorem makeObjRegion_cr3 : ValidReachableConfig cfg →
       exact Nat.lt_of_le_of_ne (Nat.le_of_lt_succ hframe'_lt2) hframe'Last
     have hframe'MemCfg : frame' ∈ cfg.stackWithIndex :=
       frame_transport_down frame' hframe'Mem hframe'_lt_dropLast
-    have hreachDown : FrameReachable cfg frame'.index (Reference.OId oid) := by
-      rw [FrameReachable_iff_reflTransGen] at hreach ⊢
+    have hreachDown : FrameReferencable cfg frame'.index (Reference.OId oid) := by
+      rw [FrameReferencable_iff_reflTransGen] at hreach ⊢
       obtain ⟨start, hroot, hrtg⟩ := hreach
       exact ⟨start, (frameRoot_iff_nonlast frame'.index hframe'_lt_dropLast start).mpr hroot,
         hrtg.mono (fun a b hab => (makeObjRegion_corollary_refStep_iff vcfg vcfg' h a b).mpr hab)⟩
-    have hconcDown : FrameReachable cfg frame.index (Reference.OId oid) :=
+    have hconcDown : FrameReferencable cfg frame.index (Reference.OId oid) :=
       vrcfg.cr3 frame hframeMemCfg frame' hframe'MemCfg hlt oid hlocDown hreachDown
-    rw [FrameReachable_iff_reflTransGen] at hconcDown ⊢
+    rw [FrameReferencable_iff_reflTransGen] at hconcDown ⊢
     obtain ⟨start2, hroot2, hrtg2⟩ := hconcDown
     exact ⟨start2, (frameRoot_iff_nonlast frame.index hframe_lt_dropLast start2).mp hroot2,
       hrtg2.mono (fun a b hab => (makeObjRegion_corollary_refStep_iff vcfg vcfg' h a b).mp hab)⟩

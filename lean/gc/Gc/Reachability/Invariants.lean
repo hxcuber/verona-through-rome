@@ -23,8 +23,8 @@ import Gc.Reachability.Semantics
 -- the frame associated with it
 def suspended_regions_maintain_region_reachability (cfg cfg' : RuntimeConfig) : Prop :=
   ∀ rid ∈ cfg.stackWithIndex.dropLast.map (·.regionId),
-  ∀ ref, RegionReachable cfg rid ref ↔ RegionReachable cfg' rid ref
+  ∀ ref, RegionReferencable cfg rid ref ↔ RegionReferencable cfg' rid ref
 
 def suspended_regions_maintain_frame_reachability (cfg cfg' : RuntimeConfig) : Prop :=
   ∀ fid < cfg.stackWithIndex.length - 1,
-  ∀ ref, FrameReachable cfg fid ref ↔ FrameReachable cfg' fid ref
+  ∀ ref, FrameReferencable cfg fid ref ↔ FrameReferencable cfg' fid ref

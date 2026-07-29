@@ -18,8 +18,8 @@ def CR3 (cfg : RuntimeConfig) : Prop :=
   ∀ frame ∈ cfg.stackWithIndex, ∀ frame' ∈ cfg.stackWithIndex,
     frame.index < frame'.index →
     ∀ oid, (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId) →
-    FrameReachable cfg frame'.index (Reference.OId oid) →
-    FrameReachable cfg frame.index (Reference.OId oid)
+    FrameReferencable cfg frame'.index (Reference.OId oid) →
+    FrameReferencable cfg frame.index (Reference.OId oid)
 
 structure ValidReachableConfig (cfg : RuntimeConfig) extends ValidConfig cfg where
   cr3 : CR3 cfg

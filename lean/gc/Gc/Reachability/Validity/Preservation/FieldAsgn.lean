@@ -311,24 +311,24 @@ private theorem fieldAsgn_corollary_region_objAt_mutated {cfg cfg' : RuntimeConf
   rw [hlookup2, newRegion_def]
   exact AList.lookup_insert (a := oid) (b := obj.insert field (Reference.OId oidy)) region.objMap
 
--- `FrameReachable` is completely unaffected at any position strictly before the mutated (last)
+-- `FrameReferencable` is completely unaffected at any position strictly before the mutated (last)
 -- one: `fieldAsgn_corollary_frameRoot_iff` already shows `FrameRoot` is unconditional (fieldAsgn
 -- only ever touches `objMap`, never `varMap`/`bridgeObjectId`), so the only remaining work is the
 -- `RefStep`-chain itself -- which, unlike `fieldAsgn_cr3`'s own `main_claim`, needs NO escape case
 -- here: a chain rooted at a suspended frame can never even reach the mutated container in the
--- first place (`FrameReachable_stk_index_le`/`_owner_index_le` bound any object reachable from a
+-- first place (`FrameReferencable_stk_index_le`/`_owner_index_le` bound any object reachable from a
 -- suspended frame's own index, which is strictly below the mutated container's owner index).
 -- Packaged here as its own reusable theorem since CR5 (`Gc/Reachability/Validity/CR5.lean`) needs
 -- exactly this fact, not CR3's later-frame-implies-earlier-frame shape.
-theorem fieldAsgn_corollary_frameReachable_iff_of_lt (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
+theorem fieldAsgn_corollary_frameReferencable_iff_of_lt (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
     (h : fieldAsgn xf y cfg = some cfg')
     (frame : FrameWithIndex) (hlt : frame.index < cfg.stack.dropLast.length) (ref : Reference) :
-    FrameReachable cfg frame.index ref ↔ FrameReachable cfg' frame.index ref := by
+    FrameReferencable cfg frame.index ref ↔ FrameReferencable cfg' frame.index ref := by
   obtain ⟨frame0, hframe0, hcase⟩ := fieldAsgn_cases h
   obtain ⟨stack_eq0, hidx00⟩ := fieldAsgn_corollary_stack_eq hframe0
   rw [← hidx00] at hlt
   have hframeRootIff := fieldAsgn_corollary_frameRoot_iff h frame.index
-  rw [FrameReachable_iff_reflTransGen, FrameReachable_iff_reflTransGen]
+  rw [FrameReferencable_iff_reflTransGen, FrameReferencable_iff_reflTransGen]
   rcases hcase with
     ⟨oidm, oidy, obj, hxr, hyr, hlocm, hobjm, hcfg'⟩ |
     ⟨oidm, oidy, rid, region, obj, hxr, hyr, hlocm, hregion, hobjm, hyloc, hstatus, hfrid, hcfg'⟩
@@ -337,15 +337,15 @@ theorem fieldAsgn_corollary_frameReachable_iff_of_lt (vcfg : ValidConfig cfg) (v
       have e := fieldAsgn_corollary_stack_loc_eq (field := xf.field) (yRef := Reference.OId oidy) hframe0 hobjm oidm
       rw [← hcfg'] at e
       rw [← e]; exact hlocm
-    have hoidm_ne : ∀ oidx, FrameReachable cfg frame.index (Reference.OId oidx) → oidx ≠ oidm := by
+    have hoidm_ne : ∀ oidx, FrameReferencable cfg frame.index (Reference.OId oidx) → oidx ≠ oidm := by
       intro oidx hreachx heq
       subst heq
-      have := FrameReachable_stk_index_le cfg vcfg frame hreachx frame0.index hlocm
+      have := FrameReferencable_stk_index_le cfg vcfg frame hreachx frame0.index hlocm
       exact absurd this (Nat.not_le.mpr hlt)
-    have hoidm_ne' : ∀ oidx, FrameReachable cfg' frame.index (Reference.OId oidx) → oidx ≠ oidm := by
+    have hoidm_ne' : ∀ oidx, FrameReferencable cfg' frame.index (Reference.OId oidx) → oidx ≠ oidm := by
       intro oidx hreachx heq
       subst heq
-      have := FrameReachable_stk_index_le cfg' vcfg' frame hreachx frame0.index hlocm'
+      have := FrameReferencable_stk_index_le cfg' vcfg' frame hreachx frame0.index hlocm'
       exact absurd this (Nat.not_le.mpr hlt)
     have hobjAtEq : ∀ oid', oid' ≠ oidm →
         (Reference.OId oid').objAt? cfg = (Reference.OId oid').objAt? cfg' := by
@@ -356,11 +356,11 @@ theorem fieldAsgn_corollary_frameReachable_iff_of_lt (vcfg : ValidConfig cfg) (v
     constructor
     · rintro ⟨start, hroot, hrtg⟩
       have main_up : ∀ target : Reference, Relation.ReflTransGen (RefStep cfg) start target →
-          FrameReachable cfg frame.index target ∧ Relation.ReflTransGen (RefStep cfg') start target := by
+          FrameReferencable cfg frame.index target ∧ Relation.ReflTransGen (RefStep cfg') start target := by
         intro target htrg
         induction htrg with
         | refl =>
-          exact ⟨(FrameReachable_iff_reflTransGen cfg frame.index start).mpr
+          exact ⟨(FrameReferencable_iff_reflTransGen cfg frame.index start).mpr
             ⟨start, hroot, Relation.ReflTransGen.refl⟩, Relation.ReflTransGen.refl⟩
         | tail hprev hstep ih =>
           obtain ⟨ihreach, ihrtg⟩ := ih
@@ -369,18 +369,18 @@ theorem fieldAsgn_corollary_frameReachable_iff_of_lt (vcfg : ValidConfig cfg) (v
           have hbne : oidb ≠ oidm := hoidm_ne oidb ihreach
           have heqB := hobjAtEq oidb hbne
           obtain ⟨objv, hobjAt, hcontains⟩ := hstep
-          refine ⟨FrameReachable.step hobjAt hcontains ihreach, ihrtg.tail ⟨objv, ?_, hcontains⟩⟩
+          refine ⟨FrameReferencable.step hobjAt hcontains ihreach, ihrtg.tail ⟨objv, ?_, hcontains⟩⟩
           rw [← heqB]; exact hobjAt
       obtain ⟨_, hup⟩ := main_up ref hrtg
       exact ⟨start, (hframeRootIff start).mp hroot, hup⟩
     · rintro ⟨start, hroot, hrtg⟩
       have hroot_down := (hframeRootIff start).mpr hroot
       have main_down : ∀ target : Reference, Relation.ReflTransGen (RefStep cfg') start target →
-          FrameReachable cfg' frame.index target ∧ Relation.ReflTransGen (RefStep cfg) start target := by
+          FrameReferencable cfg' frame.index target ∧ Relation.ReflTransGen (RefStep cfg) start target := by
         intro target htrg
         induction htrg with
         | refl =>
-          exact ⟨(FrameReachable_iff_reflTransGen cfg' frame.index start).mpr
+          exact ⟨(FrameReferencable_iff_reflTransGen cfg' frame.index start).mpr
             ⟨start, hroot, Relation.ReflTransGen.refl⟩, Relation.ReflTransGen.refl⟩
         | tail hprev hstep ih =>
           obtain ⟨ihreach, ihrtg⟩ := ih
@@ -389,7 +389,7 @@ theorem fieldAsgn_corollary_frameReachable_iff_of_lt (vcfg : ValidConfig cfg) (v
           have hbne : oidb ≠ oidm := hoidm_ne' oidb ihreach
           have heqB := hobjAtEq oidb hbne
           obtain ⟨objv, hobjAt, hcontains⟩ := hstep
-          refine ⟨FrameReachable.step hobjAt hcontains ihreach, ihrtg.tail ⟨objv, ?_, hcontains⟩⟩
+          refine ⟨FrameReferencable.step hobjAt hcontains ihreach, ihrtg.tail ⟨objv, ?_, hcontains⟩⟩
           rw [heqB]; exact hobjAt
       obtain ⟨_, hdown⟩ := main_down ref hrtg
       exact ⟨start, hroot_down, hdown⟩
@@ -403,15 +403,15 @@ theorem fieldAsgn_corollary_frameReachable_iff_of_lt (vcfg : ValidConfig cfg) (v
       unfold RuntimeConfig.stackWithIndex
       rw [show cfg'.stack = cfg.stack from by rw [hcfg']]
     have hframe0_mem' : frame0 ∈ cfg'.stackWithIndex := by rw [hswi_eq]; exact hframe0_mem
-    have hoidm_ne : ∀ oidx, FrameReachable cfg frame.index (Reference.OId oidx) → oidx ≠ oidm := by
+    have hoidm_ne : ∀ oidx, FrameReferencable cfg frame.index (Reference.OId oidx) → oidx ≠ oidm := by
       intro oidx hreachx heq
       subst heq
-      have := FrameReachable_owner_index_le cfg vcfg frame hreachx rid hlocm frame0 hframe0_mem hfrid.symm
+      have := FrameReferencable_owner_index_le cfg vcfg frame hreachx rid hlocm frame0 hframe0_mem hfrid.symm
       exact absurd this (Nat.not_le.mpr hlt)
-    have hoidm_ne' : ∀ oidx, FrameReachable cfg' frame.index (Reference.OId oidx) → oidx ≠ oidm := by
+    have hoidm_ne' : ∀ oidx, FrameReferencable cfg' frame.index (Reference.OId oidx) → oidx ≠ oidm := by
       intro oidx hreachx heq
       subst heq
-      have := FrameReachable_owner_index_le cfg' vcfg' frame hreachx rid hlocm' frame0 hframe0_mem' hfrid.symm
+      have := FrameReferencable_owner_index_le cfg' vcfg' frame hreachx rid hlocm' frame0 hframe0_mem' hfrid.symm
       exact absurd this (Nat.not_le.mpr hlt)
     have hobjAtEq : ∀ oid', oid' ≠ oidm →
         (Reference.OId oid').objAt? cfg = (Reference.OId oid').objAt? cfg' := by
@@ -422,11 +422,11 @@ theorem fieldAsgn_corollary_frameReachable_iff_of_lt (vcfg : ValidConfig cfg) (v
     constructor
     · rintro ⟨start, hroot, hrtg⟩
       have main_up : ∀ target : Reference, Relation.ReflTransGen (RefStep cfg) start target →
-          FrameReachable cfg frame.index target ∧ Relation.ReflTransGen (RefStep cfg') start target := by
+          FrameReferencable cfg frame.index target ∧ Relation.ReflTransGen (RefStep cfg') start target := by
         intro target htrg
         induction htrg with
         | refl =>
-          exact ⟨(FrameReachable_iff_reflTransGen cfg frame.index start).mpr
+          exact ⟨(FrameReferencable_iff_reflTransGen cfg frame.index start).mpr
             ⟨start, hroot, Relation.ReflTransGen.refl⟩, Relation.ReflTransGen.refl⟩
         | tail hprev hstep ih =>
           obtain ⟨ihreach, ihrtg⟩ := ih
@@ -435,18 +435,18 @@ theorem fieldAsgn_corollary_frameReachable_iff_of_lt (vcfg : ValidConfig cfg) (v
           have hbne : oidb ≠ oidm := hoidm_ne oidb ihreach
           have heqB := hobjAtEq oidb hbne
           obtain ⟨objv, hobjAt, hcontains⟩ := hstep
-          refine ⟨FrameReachable.step hobjAt hcontains ihreach, ihrtg.tail ⟨objv, ?_, hcontains⟩⟩
+          refine ⟨FrameReferencable.step hobjAt hcontains ihreach, ihrtg.tail ⟨objv, ?_, hcontains⟩⟩
           rw [← heqB]; exact hobjAt
       obtain ⟨_, hup⟩ := main_up ref hrtg
       exact ⟨start, (hframeRootIff start).mp hroot, hup⟩
     · rintro ⟨start, hroot, hrtg⟩
       have hroot_down := (hframeRootIff start).mpr hroot
       have main_down : ∀ target : Reference, Relation.ReflTransGen (RefStep cfg') start target →
-          FrameReachable cfg' frame.index target ∧ Relation.ReflTransGen (RefStep cfg) start target := by
+          FrameReferencable cfg' frame.index target ∧ Relation.ReflTransGen (RefStep cfg) start target := by
         intro target htrg
         induction htrg with
         | refl =>
-          exact ⟨(FrameReachable_iff_reflTransGen cfg' frame.index start).mpr
+          exact ⟨(FrameReferencable_iff_reflTransGen cfg' frame.index start).mpr
             ⟨start, hroot, Relation.ReflTransGen.refl⟩, Relation.ReflTransGen.refl⟩
         | tail hprev hstep ih =>
           obtain ⟨ihreach, ihrtg⟩ := ih
@@ -455,7 +455,7 @@ theorem fieldAsgn_corollary_frameReachable_iff_of_lt (vcfg : ValidConfig cfg) (v
           have hbne : oidb ≠ oidm := hoidm_ne' oidb ihreach
           have heqB := hobjAtEq oidb hbne
           obtain ⟨objv, hobjAt, hcontains⟩ := hstep
-          refine ⟨FrameReachable.step hobjAt hcontains ihreach, ihrtg.tail ⟨objv, ?_, hcontains⟩⟩
+          refine ⟨FrameReferencable.step hobjAt hcontains ihreach, ihrtg.tail ⟨objv, ?_, hcontains⟩⟩
           rw [heqB]; exact hobjAt
       obtain ⟨_, hdown⟩ := main_down ref hrtg
       exact ⟨start, hroot_down, hdown⟩
@@ -502,14 +502,14 @@ theorem fieldAsgn_cr3 : ValidReachableConfig cfg →
       have hframe0_mem : frame0 ∈ cfg.stackWithIndex := List.mem_of_getLast? hframe0
       rw [swap_corollary_stackWithIndex_find_eq hframe0_mem]
       exact hobjm
-    have hoidm_ne : ∀ oidx, FrameReachable cfg frame.index (Reference.OId oidx) → oidx ≠ oidm := by
+    have hoidm_ne : ∀ oidx, FrameReferencable cfg frame.index (Reference.OId oidx) → oidx ≠ oidm := by
       intro oidx hreachx heq
       subst heq
-      have := FrameReachable_stk_index_le cfg vcfg frame hreachx frame0.index hlocm
+      have := FrameReferencable_stk_index_le cfg vcfg frame hreachx frame0.index hlocm
       exact absurd this (Nat.not_le.mpr hframe_lt_frame0)
     have main_claim : ∀ start', Relation.ReflTransGen (RefStep cfg') start' (Reference.OId oid) →
         Relation.ReflTransGen (RefStep cfg) start' (Reference.OId oid) ∨
-          FrameReachable cfg frameD.index (Reference.OId oid) := by
+          FrameReferencable cfg frameD.index (Reference.OId oid) := by
       intro start' hrtg'
       induction hrtg' using Relation.ReflTransGen.head_induction_on with
       | refl => left; exact Relation.ReflTransGen.refl
@@ -531,10 +531,10 @@ theorem fieldAsgn_cr3 : ValidReachableConfig cfg →
               -- root gives an independent path to `oid` that doesn't depend on this hop at all.
               obtain ⟨frameY, hframeYMem, hrootY⟩ := resolveV_frameRoot hyr
               rw [hceq] at ihchain
-              have hreachY : FrameReachable cfg frameY.index (Reference.OId oid) := by
-                rw [FrameReachable_iff_reflTransGen]
+              have hreachY : FrameReferencable cfg frameY.index (Reference.OId oid) := by
+                rw [FrameReferencable_iff_reflTransGen]
                 exact ⟨Reference.OId oidy, hrootY, ihchain⟩
-              have hownerbound := FrameReachable_owner_index_le cfg vcfg frameY hreachY frameD.regionId
+              have hownerbound := FrameReferencable_owner_index_le cfg vcfg frameY hreachY frameD.regionId
                 hlocDown frameD hframeDMem rfl
               by_cases heqidx : frameD.index = frameY.index
               · right
@@ -566,30 +566,30 @@ theorem fieldAsgn_cr3 : ValidReachableConfig cfg →
               exact ⟨objv, heqA ▸ hobjAt, hcontains⟩
             exact ihchain.head hstep_cfg
         · right; exact ihgoal
-    have hconcDown : FrameReachable cfg frame.index (Reference.OId oid) := by
-      rw [FrameReachable_iff_reflTransGen] at hreach
+    have hconcDown : FrameReferencable cfg frame.index (Reference.OId oid) := by
+      rw [FrameReferencable_iff_reflTransGen] at hreach
       obtain ⟨start, hroot, hrtg⟩ := hreach
       rcases main_claim start hrtg with hchain | hgoal
       · have hrootDown : FrameRoot cfg frame'.index start :=
           (fieldAsgn_corollary_frameRoot_iff h frame'.index start).mpr hroot
-        have hreachD' : FrameReachable cfg frameD'.index (Reference.OId oid) := by
+        have hreachD' : FrameReferencable cfg frameD'.index (Reference.OId oid) := by
           rw [hidxD']
-          exact (FrameReachable_iff_reflTransGen cfg frame'.index (Reference.OId oid)).mpr ⟨start, hrootDown, hchain⟩
+          exact (FrameReferencable_iff_reflTransGen cfg frame'.index (Reference.OId oid)).mpr ⟨start, hrootDown, hchain⟩
         have hres := vrcfg.cr3 frameD hframeDMem frameD' hframeD'Mem hltD oid hlocDown hreachD'
         rwa [hidxD] at hres
       · rwa [hidxD] at hgoal
-    rw [FrameReachable_iff_reflTransGen] at hconcDown
+    rw [FrameReferencable_iff_reflTransGen] at hconcDown
     obtain ⟨start2, hroot2, hrtg2⟩ := hconcDown
     have main_claim_up : ∀ target3 : Reference, Relation.ReflTransGen (RefStep cfg) start2 target3 →
         ∀ oid3, target3 = Reference.OId oid3 →
-          FrameReachable cfg frame.index (Reference.OId oid3) ∧
+          FrameReferencable cfg frame.index (Reference.OId oid3) ∧
             Relation.ReflTransGen (RefStep cfg') start2 (Reference.OId oid3) := by
       intro target3 hrtg3
       induction hrtg3 with
       | refl =>
         intro oid3 heq3
         refine ⟨?_, by rw [← heq3]⟩
-        rw [FrameReachable_iff_reflTransGen, ← heq3]
+        rw [FrameReferencable_iff_reflTransGen, ← heq3]
         exact ⟨start2, hroot2, Relation.ReflTransGen.refl⟩
       | tail hprev hstep ih =>
         intro oid3 heq3
@@ -602,10 +602,10 @@ theorem fieldAsgn_cr3 : ValidReachableConfig cfg →
         obtain ⟨objv, hobjAt, hcontains⟩ := hstep
         rw [hb_eq] at hobjAt
         rw [heq3] at hcontains
-        refine ⟨FrameReachable.step hobjAt hcontains ihreach, ihrtg.tail ⟨objv, ?_, hcontains⟩⟩
+        refine ⟨FrameReferencable.step hobjAt hcontains ihreach, ihrtg.tail ⟨objv, ?_, hcontains⟩⟩
         rw [← heqB]; exact hobjAt
     have hup := main_claim_up (Reference.OId oid) hrtg2 oid rfl
-    rw [FrameReachable_iff_reflTransGen]
+    rw [FrameReferencable_iff_reflTransGen]
     exact ⟨start2, (fieldAsgn_corollary_frameRoot_iff h frame.index start2).mp hroot2, hup.2⟩
   · -- REGION branch
     have hlocEq0 :=
@@ -622,14 +622,14 @@ theorem fieldAsgn_cr3 : ValidReachableConfig cfg →
       rw [hregion]
       exact hobjm
     have hframe0_mem : frame0 ∈ cfg.stackWithIndex := List.mem_of_getLast? hframe0
-    have hoidm_ne : ∀ oidx, FrameReachable cfg frame.index (Reference.OId oidx) → oidx ≠ oidm := by
+    have hoidm_ne : ∀ oidx, FrameReferencable cfg frame.index (Reference.OId oidx) → oidx ≠ oidm := by
       intro oidx hreachx heq
       subst heq
-      have := FrameReachable_owner_index_le cfg vcfg frame hreachx rid hlocm frame0 hframe0_mem hfrid.symm
+      have := FrameReferencable_owner_index_le cfg vcfg frame hreachx rid hlocm frame0 hframe0_mem hfrid.symm
       exact absurd this (Nat.not_le.mpr hframe_lt_frame0)
     have main_claim : ∀ start', Relation.ReflTransGen (RefStep cfg') start' (Reference.OId oid) →
         Relation.ReflTransGen (RefStep cfg) start' (Reference.OId oid) ∨
-          FrameReachable cfg frameD.index (Reference.OId oid) := by
+          FrameReferencable cfg frameD.index (Reference.OId oid) := by
       intro start' hrtg'
       induction hrtg' using Relation.ReflTransGen.head_induction_on with
       | refl => left; exact Relation.ReflTransGen.refl
@@ -649,10 +649,10 @@ theorem fieldAsgn_cr3 : ValidReachableConfig cfg →
             · -- ESCAPE
               obtain ⟨frameY, hframeYMem, hrootY⟩ := resolveV_frameRoot hyr
               rw [hceq] at ihchain
-              have hreachY : FrameReachable cfg frameY.index (Reference.OId oid) := by
-                rw [FrameReachable_iff_reflTransGen]
+              have hreachY : FrameReferencable cfg frameY.index (Reference.OId oid) := by
+                rw [FrameReferencable_iff_reflTransGen]
                 exact ⟨Reference.OId oidy, hrootY, ihchain⟩
-              have hownerbound := FrameReachable_owner_index_le cfg vcfg frameY hreachY frameD.regionId
+              have hownerbound := FrameReferencable_owner_index_le cfg vcfg frameY hreachY frameD.regionId
                 hlocDown frameD hframeDMem rfl
               by_cases heqidx : frameD.index = frameY.index
               · right
@@ -684,30 +684,30 @@ theorem fieldAsgn_cr3 : ValidReachableConfig cfg →
               exact ⟨objv, heqA ▸ hobjAt, hcontains⟩
             exact ihchain.head hstep_cfg
         · right; exact ihgoal
-    have hconcDown : FrameReachable cfg frame.index (Reference.OId oid) := by
-      rw [FrameReachable_iff_reflTransGen] at hreach
+    have hconcDown : FrameReferencable cfg frame.index (Reference.OId oid) := by
+      rw [FrameReferencable_iff_reflTransGen] at hreach
       obtain ⟨start, hroot, hrtg⟩ := hreach
       rcases main_claim start hrtg with hchain | hgoal
       · have hrootDown : FrameRoot cfg frame'.index start :=
           (fieldAsgn_corollary_frameRoot_iff h frame'.index start).mpr hroot
-        have hreachD' : FrameReachable cfg frameD'.index (Reference.OId oid) := by
+        have hreachD' : FrameReferencable cfg frameD'.index (Reference.OId oid) := by
           rw [hidxD']
-          exact (FrameReachable_iff_reflTransGen cfg frame'.index (Reference.OId oid)).mpr ⟨start, hrootDown, hchain⟩
+          exact (FrameReferencable_iff_reflTransGen cfg frame'.index (Reference.OId oid)).mpr ⟨start, hrootDown, hchain⟩
         have hres := vrcfg.cr3 frameD hframeDMem frameD' hframeD'Mem hltD oid hlocDown hreachD'
         rwa [hidxD] at hres
       · rwa [hidxD] at hgoal
-    rw [FrameReachable_iff_reflTransGen] at hconcDown
+    rw [FrameReferencable_iff_reflTransGen] at hconcDown
     obtain ⟨start2, hroot2, hrtg2⟩ := hconcDown
     have main_claim_up : ∀ target3 : Reference, Relation.ReflTransGen (RefStep cfg) start2 target3 →
         ∀ oid3, target3 = Reference.OId oid3 →
-          FrameReachable cfg frame.index (Reference.OId oid3) ∧
+          FrameReferencable cfg frame.index (Reference.OId oid3) ∧
             Relation.ReflTransGen (RefStep cfg') start2 (Reference.OId oid3) := by
       intro target3 hrtg3
       induction hrtg3 with
       | refl =>
         intro oid3 heq3
         refine ⟨?_, by rw [← heq3]⟩
-        rw [FrameReachable_iff_reflTransGen, ← heq3]
+        rw [FrameReferencable_iff_reflTransGen, ← heq3]
         exact ⟨start2, hroot2, Relation.ReflTransGen.refl⟩
       | tail hprev hstep ih =>
         intro oid3 heq3
@@ -720,10 +720,10 @@ theorem fieldAsgn_cr3 : ValidReachableConfig cfg →
         obtain ⟨objv, hobjAt, hcontains⟩ := hstep
         rw [hb_eq] at hobjAt
         rw [heq3] at hcontains
-        refine ⟨FrameReachable.step hobjAt hcontains ihreach, ihrtg.tail ⟨objv, ?_, hcontains⟩⟩
+        refine ⟨FrameReferencable.step hobjAt hcontains ihreach, ihrtg.tail ⟨objv, ?_, hcontains⟩⟩
         rw [← heqB]; exact hobjAt
     have hup := main_claim_up (Reference.OId oid) hrtg2 oid rfl
-    rw [FrameReachable_iff_reflTransGen]
+    rw [FrameReferencable_iff_reflTransGen]
     exact ⟨start2, (fieldAsgn_corollary_frameRoot_iff h frame.index start2).mp hroot2, hup.2⟩
 
 theorem fieldAsgn_reachable_valid : ValidReachableConfig cfg →

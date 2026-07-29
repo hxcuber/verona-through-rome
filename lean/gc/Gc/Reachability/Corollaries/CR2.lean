@@ -39,7 +39,7 @@ private theorem Path_refs_all_oid (cfg : RuntimeConfig) (oid : ObjectId) (l : Li
 
 -- Given the bound already established for the head of `l`, propagate it to every element.
 -- Generalized over `a0`/`hhead`/`hbound0` (rather than fixing them as top-level parameters), for
--- the same reason as `RegionReachable_stays_in_region_aux`: the recursive call needs to supply a
+-- the same reason as `RegionReferencable_stays_in_region_aux`: the recursive call needs to supply a
 -- *different* head (`b`, for the tail `b :: rest`) than the outer theorem's own `a0`, so `a0` has
 -- to be part of what `induction` generalizes over, not fixed before it.
 private theorem Path_bound_of_head_bound (cfg : RuntimeConfig) (hvalid : ValidConfig cfg)

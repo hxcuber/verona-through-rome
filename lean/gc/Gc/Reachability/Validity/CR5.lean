@@ -12,10 +12,10 @@ suspended (never becomes the active/last frame) across a sequence of `Mutation.l
 its frame-reachable set never changes across that whole sequence, no matter how long it is or
 what happens inside the active frame/region.
 
-`CR5_step` is the actual report.pdf statement (in `StackReachable` form, restricted to references
-already `FrameReachable` from the suspended frame -- an unrestricted version is false, see
+`CR5_step` is the actual report.pdf statement (in `StackReferencable` form, restricted to references
+already `FrameReferencable` from the suspended frame -- an unrestricted version is false, see
 `cr5_step_of_helper`'s own comment). It's proved via a helper, `CR5_helper_step`, which is the
-easier-to-prove-per-operation `FrameReachable` form (mirrors the `Validity/Preservation/*.lean`
+easier-to-prove-per-operation `FrameReferencable` form (mirrors the `Validity/Preservation/*.lean`
 per-operation pattern already used for CR3):
 - `cr5_step_of_helper`: upgrades a `CR5_helper_step` fact into the real `CR5_step` fact.
 - `cr5_step_enter` .. `cr5_step_varAsgn`: the 9 per-operation proofs. Each proves the
@@ -35,7 +35,7 @@ suspension hypothesis is evaluated pre-step, so `CR5_helper_step` only ever make
 frames that were *already* suspended before the operation runs. `enter_corollary_regionId_ne` (an
 already-on-stack frame's region can never be the entered/closed one) and S2/S3 (nothing earlier
 can reference into what `exit` pops) are exactly why this should hold uniformly for all 9 cases --
-`enter_corollary_frameReachable_iff`/`exit_corollary_frameReachable_iff` in the corresponding
+`enter_corollary_frameReferencable_iff`/`exit_corollary_frameReferencable_iff` in the corresponding
 `Validity/Preservation` files already prove almost exactly this fact for those two operations
 (currently `private`, so `cr5_step_enter`/`cr5_step_exit` will need their own
 copies or those made public).
@@ -50,30 +50,30 @@ def Suspended (cfg : RuntimeConfig) (i : Index) : Prop :=
 -- Easier to prove per-operation than `CR5_step` itself (see `cr5_step_of_helper`).
 def CR5_helper_step (cmd : Stmt) : Prop :=
   ∀ cfg cfg' : RuntimeConfig, ValidReachableConfig cfg → step cmd cfg = some cfg' →
-    ∀ i, Suspended cfg i → ∀ ref, FrameReachable cfg i ref ↔ FrameReachable cfg' i ref
+    ∀ i, Suspended cfg i → ∀ ref, FrameReferencable cfg i ref ↔ FrameReferencable cfg' i ref
 
--- report.pdf CR5, in `StackReachable` form: restricted to references already `FrameReachable`
--- from the suspended frame in `cfg` (an *unrestricted* `∀ ref, StackReachable cfg ref ↔
--- StackReachable cfg' ref` is false -- e.g. `makeObjStack` can make a brand-new object
--- `StackReachable` in `cfg'` via the active frame's own fresh var, without it ever having been
+-- report.pdf CR5, in `StackReferencable` form: restricted to references already `FrameReferencable`
+-- from the suspended frame in `cfg` (an *unrestricted* `∀ ref, StackReferencable cfg ref ↔
+-- StackReferencable cfg' ref` is false -- e.g. `makeObjStack` can make a brand-new object
+-- `StackReferencable` in `cfg'` via the active frame's own fresh var, without it ever having been
 -- reachable, from anywhere, in `cfg`; that has nothing to do with any suspended region).
 def CR5_step (cmd : Stmt) : Prop :=
   ∀ cfg cfg' : RuntimeConfig, ValidReachableConfig cfg → step cmd cfg = some cfg' →
-    ∀ i, Suspended cfg i → ∀ ref, FrameReachable cfg i ref →
-    (StackReachable cfg ref ↔ StackReachable cfg' ref)
+    ∀ i, Suspended cfg i → ∀ ref, FrameReferencable cfg i ref →
+    (StackReferencable cfg ref ↔ StackReferencable cfg' ref)
 
--- Upgrades `CR5_helper_step` into the real `CR5_step`: once `ref` is already `FrameReachable`
--- from the suspended frame, `StackReachable cfg ref` is trivially witnessed by that same frame,
--- and `StackReachable cfg' ref` falls out of the helper's `FrameReachable cfg' i ref` fact by
--- unfolding `FrameRoot` for a witness frame -- no `CR4`/`RegionReachable` machinery needed at all.
+-- Upgrades `CR5_helper_step` into the real `CR5_step`: once `ref` is already `FrameReferencable`
+-- from the suspended frame, `StackReferencable cfg ref` is trivially witnessed by that same frame,
+-- and `StackReferencable cfg' ref` falls out of the helper's `FrameReferencable cfg' i ref` fact by
+-- unfolding `FrameRoot` for a witness frame -- no `CR4`/`RegionReferencable` machinery needed at all.
 theorem cr5_step_of_helper (cmd : Stmt) : CR5_helper_step cmd → CR5_step cmd := by
   intro h cfg cfg' vrcfg hstep i hsusp ref hfr
   have hiff := h cfg cfg' vrcfg hstep i hsusp ref
   obtain ⟨frame, hframe, hidx, _⟩ := hsusp
   constructor
   · intro _
-    have hfr' : FrameReachable cfg' i ref := hiff.mp hfr
-    obtain ⟨start, hroot, _⟩ := (FrameReachable_iff_reflTransGen cfg' i ref).mp hfr'
+    have hfr' : FrameReferencable cfg' i ref := hiff.mp hfr
+    obtain ⟨start, hroot, _⟩ := (FrameReferencable_iff_reflTransGen cfg' i ref).mp hfr'
     rcases hroot with ⟨frame', hframe'mem, hidx', _⟩ | ⟨frame', hframe'mem, hidx', _⟩
     · exact ⟨frame', hframe'mem, by rw [hidx']; exact hfr'⟩
     · exact ⟨frame', hframe'mem, by rw [hidx']; exact hfr'⟩
@@ -87,7 +87,7 @@ theorem cr5_step_enter (xf : FieldAccess) (a : VarName) : CR5_step (Stmt.enter x
   subst hidx
   have vcfg := vrcfg.toValidConfig
   have vcfg' := enter_valid vcfg h
-  exact enter_corollary_frameReachable_iff vcfg vcfg' h frame0 hframe0 ref
+  exact enter_corollary_frameReferencable_iff vcfg vcfg' h frame0 hframe0 ref
 
 theorem cr5_step_exit : CR5_step Stmt.exit := by
   apply cr5_step_of_helper
@@ -115,7 +115,7 @@ theorem cr5_step_exit : CR5_step Stmt.exit := by
       dsimp only
       exact hold
     subst hidx
-    exact exit_corollary_frameReachable_iff vcfg vcfg' h frame hframe0' ref
+    exact exit_corollary_frameReferencable_iff vcfg vcfg' h frame hframe0' ref
   · exfalso
     rw [List.mem_singleton] at hpop
     rw [hpop] at hidx
@@ -138,7 +138,7 @@ theorem cr5_step_fieldAsgn (xf : FieldAccess) (y : VarName) : CR5_step (Stmt.fie
     rw [hlenWI, hlen] at hlt
     simpa using hlt
   have hframelt : frame.index < cfg.stack.dropLast.length := by rw [hidx]; exact hidlt
-  have hres := fieldAsgn_corollary_frameReachable_iff_of_lt vcfg vcfg' h frame hframelt ref
+  have hres := fieldAsgn_corollary_frameReferencable_iff_of_lt vcfg vcfg' h frame hframelt ref
   rwa [hidx] at hres
 
 theorem cr5_step_makeObjRegion (x : VarName) : CR5_step (Stmt.makeObjRegion x) := by
@@ -156,7 +156,7 @@ theorem cr5_step_makeObjRegion (x : VarName) : CR5_step (Stmt.makeObjRegion x) :
   have hidlt : i < cfg.stack.dropLast.length := by
     rw [hlenWI, hlen] at hlt
     simpa using hlt
-  exact makeObjRegion_corollary_frameReachable_iff_of_lt vcfg vcfg' h hidlt ref
+  exact makeObjRegion_corollary_frameReferencable_iff_of_lt vcfg vcfg' h hidlt ref
 
 theorem cr5_step_makeObjStack (x : VarName) : CR5_step (Stmt.makeObjStack x) := by
   apply cr5_step_of_helper
@@ -173,7 +173,7 @@ theorem cr5_step_makeObjStack (x : VarName) : CR5_step (Stmt.makeObjStack x) := 
   have hidlt : i < cfg.stack.dropLast.length := by
     rw [hlenWI, hlen] at hlt
     simpa using hlt
-  exact makeObjStack_corollary_frameReachable_iff_of_lt vcfg vcfg' h hidlt ref
+  exact makeObjStack_corollary_frameReferencable_iff_of_lt vcfg vcfg' h hidlt ref
 
 theorem cr5_step_makeRegion (x : VarName) : CR5_step (Stmt.makeRegion x) := by
   apply cr5_step_of_helper
@@ -190,7 +190,7 @@ theorem cr5_step_makeRegion (x : VarName) : CR5_step (Stmt.makeRegion x) := by
   have hidlt : i < cfg.stack.dropLast.length := by
     rw [hlenWI, hlen] at hlt
     simpa using hlt
-  exact makeRegion_corollary_frameReachable_iff_of_lt vcfg vcfg' h hidlt ref
+  exact makeRegion_corollary_frameReferencable_iff_of_lt vcfg vcfg' h hidlt ref
 
 theorem cr5_step_merge (x : VarName) : CR5_step (Stmt.merge x) := by
   apply cr5_step_of_helper
@@ -207,7 +207,7 @@ theorem cr5_step_merge (x : VarName) : CR5_step (Stmt.merge x) := by
   have hidlt : i < cfg.stack.dropLast.length := by
     rw [hlenWI, hlen] at hlt
     simpa using hlt
-  exact merge_corollary_frameReachable_iff_of_lt vcfg h hidlt ref
+  exact merge_corollary_frameReferencable_iff_of_lt vcfg h hidlt ref
 
 theorem cr5_step_swap (x : VarName) (yf : FieldAccess) : CR5_step (Stmt.swap x yf) := by
   apply cr5_step_of_helper
@@ -224,7 +224,7 @@ theorem cr5_step_swap (x : VarName) (yf : FieldAccess) : CR5_step (Stmt.swap x y
     rw [hlenWI, hlen] at hlt
     simpa using hlt
   have hframelt : frame.index < cfg.stack.dropLast.length := by rw [hidx]; exact hidlt
-  have hres := swap_corollary_frameReachable_iff_of_lt vcfg vcfg' h frame hframelt ref
+  have hres := swap_corollary_frameReferencable_iff_of_lt vcfg vcfg' h frame hframelt ref
   rwa [hidx] at hres
 
 theorem cr5_step_varAsgn (x : VarName) (yf : FieldAccess) : CR5_step (Stmt.varAsgn x yf) := by
@@ -309,7 +309,7 @@ theorem cr5_step_varAsgn (x : VarName) (yf : FieldAccess) : CR5_step (Stmt.varAs
       · have heq1 : fr1 = frame := swap_corollary_stackWithIndex_index_inj hfr1 hframe' (hidx1.trans hidx.symm)
         rw [heq1] at hlookup1
         exact Or.inr ⟨frame, hframe, hidx, region1, by rw [← hheapEq]; exact hlookup1, hstart⟩
-  rw [FrameReachable_iff_reflTransGen, FrameReachable_iff_reflTransGen]
+  rw [FrameReferencable_iff_reflTransGen, FrameReferencable_iff_reflTransGen]
   constructor
   · rintro ⟨start, hroot, hrtg⟩
     exact ⟨start, (hfrRootIff start).mp hroot, hrtg.mono (fun a b hab => (hRefStepIff a b).mp hab)⟩
