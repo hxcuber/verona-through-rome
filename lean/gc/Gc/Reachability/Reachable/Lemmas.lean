@@ -934,3 +934,46 @@ theorem makeObjStack_objAt_eq_of_ne {cfg cfg' : RuntimeConfig} (h : makeObjStack
           rw [AList.lookup_insert_ne hne]
         | succ n => rfl
 
+-- A fresh object id never resolves anywhere (it isn't allocated yet).
+theorem freshObjectId_objAt_none {cfg : RuntimeConfig} :
+    (Reference.OId cfg.freshObjectId).objAt? cfg = none := by
+  have hnotmem := cfg.freshObjectId_not_mem
+  unfold RuntimeConfig.objectIds at hnotmem
+  rw [List.mem_append] at hnotmem
+  push_neg at hnotmem
+  obtain ⟨hnotStack, hnotHeap⟩ := hnotmem
+  have hloc : (Reference.OId cfg.freshObjectId).loc? cfg = none := by
+    unfold Reference.loc?
+    dsimp only
+    cases hh : cfg.stackWithIndex.findRev? (fun frame => frame.objMap.keys.contains cfg.freshObjectId) with
+    | some frame =>
+      exfalso
+      apply hnotStack
+      unfold Stack.objectIds
+      rw [List.bind_eq_flatMap, List.mem_flatMap]
+      rw [List.findRev?_eq_find?_reverse] at hh
+      have hcontains := List.find?_some hh
+      have hmem : frame ∈ cfg.stackWithIndex := List.mem_reverse.mp (List.mem_of_find?_eq_some hh)
+      obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hmem
+      have hmemStack : cfg.stack[n] ∈ cfg.stack := List.getElem_mem hn
+      have hfeq2 : frame.objMap = cfg.stack[n].objMap := congrArg (·.objMap) hfeq.symm
+      refine ⟨cfg.stack[n].objectIds, List.mem_map_of_mem hmemStack, ?_⟩
+      unfold Frame.objectIds
+      rw [← hfeq2]
+      exact List.contains_iff_mem.mp hcontains
+    | none =>
+      cases hh2 : cfg.heap.entries.find? (fun (e : Sigma (fun _ : RegionId => Region)) => e.snd.objMap.keys.contains cfg.freshObjectId) with
+      | none => rfl
+      | some regionEntry =>
+        exfalso
+        apply hnotHeap
+        unfold Heap.objectIds
+        rw [List.mem_flatten]
+        have hcontains := List.find?_some hh2
+        refine ⟨regionEntry.snd.objectIds, List.mem_map_of_mem (List.mem_of_find?_eq_some hh2), ?_⟩
+        unfold Region.objectIds
+        exact List.contains_iff_mem.mp hcontains
+  unfold Reference.objAt?
+  dsimp only
+  rw [hloc]
+
