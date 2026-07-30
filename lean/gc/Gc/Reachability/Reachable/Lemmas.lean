@@ -766,3 +766,98 @@ theorem exit_frame_reachable_transport_backward {cfg cfg' : RuntimeConfig} (vcfg
         rwa [AList.lookup_insert_ne hXfridNe] at hlookupXf
       exact Or.inr ⟨Xf, hXfeq ▸ hXmemcfg, hXfidx, region', hlookupXf', hbridge⟩
   exact (FrameReachable_iff_reflTransGen cfg X.index (Reference.OId oid)).mpr ⟨start, hroot', hrtg'⟩
+
+-- The freshly-allocated object id is never already present in the last frame's own objMap.
+theorem makeObjStack_fresh_not_in_last {cfg : RuntimeConfig} {lastFrame : Frame}
+    (hlast : cfg.stack.getLast? = some lastFrame) : cfg.freshObjectId ∉ lastFrame.objMap.keys := by
+  intro hmem
+  apply cfg.freshObjectId_not_mem
+  unfold RuntimeConfig.objectIds
+  rw [List.mem_append]
+  left
+  unfold Stack.objectIds
+  rw [List.bind_eq_flatMap, List.mem_flatMap]
+  have hmemStack : lastFrame ∈ cfg.stack := by
+    have hne : cfg.stack ≠ [] := by intro hnil; rw [hnil] at hlast; simp at hlast
+    rw [List.getLast?_eq_getLast_of_ne_nil hne, Option.some_inj] at hlast
+    rw [← hlast]
+    exact List.getLast_mem hne
+  exact ⟨lastFrame.objectIds, List.mem_map_of_mem hmemStack, hmem⟩
+
+-- `loc?` agrees between `cfg`/`cfg'` for any oid other than the freshly-allocated one.
+theorem makeObjStack_loc_eq_of_ne {cfg cfg' : RuntimeConfig} (h : makeObjStack x cfg = some cfg')
+    {oid : ObjectId} (hne : oid ≠ cfg.freshObjectId) :
+    (Reference.OId oid).loc? cfg = (Reference.OId oid).loc? cfg' := by
+  obtain ⟨lastFrame, hlast, hcfg'⟩ := makeObjStack_cases h
+  have hfreshNotIn : cfg.freshObjectId ∉ lastFrame.objMap.keys := makeObjStack_fresh_not_in_last hlast
+  have hkeq : (lastFrame.objMap.insert cfg.freshObjectId ∅).keys.contains oid = lastFrame.objMap.keys.contains oid := by
+    rw [AList.keys_insert, List.erase_of_not_mem hfreshNotIn]
+    simp only [List.contains_cons]
+    have : (oid == cfg.freshObjectId) = false := by simpa using hne
+    rw [this]
+    simp
+  have hne' : cfg.stack ≠ [] := by intro hnil; rw [hnil] at hlast; simp at hlast
+  have hstackEq : cfg.stack = cfg.stack.dropLast ++ [lastFrame] := by
+    rw [List.getLast?_eq_getLast_of_ne_nil hne', Option.some_inj] at hlast
+    rw [← hlast]
+    exact (List.dropLast_append_getLast hne').symm
+  set newLastWI : FrameWithIndex := { lastFrame with
+      varMap := lastFrame.varMap.insert x (Reference.OId cfg.freshObjectId),
+      objMap := lastFrame.objMap.insert cfg.freshObjectId ∅,
+      index := cfg.stack.dropLast.length } with hnewLastWI_def
+  set oldLastWI : FrameWithIndex := { lastFrame with index := cfg.stack.dropLast.length } with holdLastWI_def
+  set revTail : List FrameWithIndex :=
+      (List.mapIdx (fun idx frame => ({ toFrame := frame, index := idx } : FrameWithIndex))
+        cfg.stack.dropLast).reverse with hrevTail_def
+  set pred : FrameWithIndex → Bool := fun frame => frame.objMap.keys.contains oid with hpred_def
+  have hstackFindEq :
+      (List.find? pred (newLastWI :: revTail)).map FrameWithIndex.index =
+      (List.find? pred (oldLastWI :: revTail)).map FrameWithIndex.index := by
+    have hnewval : pred newLastWI = pred oldLastWI := by
+      rw [hnewLastWI_def, holdLastWI_def, hpred_def]
+      exact hkeq
+    cases hval : pred oldLastWI with
+    | true =>
+      have h1 : List.find? pred (newLastWI :: revTail) = some newLastWI :=
+        List.find?_cons_of_pos (hnewval.trans hval)
+      have h2 : List.find? pred (oldLastWI :: revTail) = some oldLastWI :=
+        List.find?_cons_of_pos hval
+      rw [h1, h2]
+      rfl
+    | false =>
+      have h1 : List.find? pred (newLastWI :: revTail) = List.find? pred revTail :=
+        List.find?_cons_of_neg (by rw [hnewval, hval]; decide)
+      have h2 : List.find? pred (oldLastWI :: revTail) = List.find? pred revTail :=
+        List.find?_cons_of_neg (by rw [hval]; decide)
+      rw [h1, h2]
+  unfold Reference.loc?
+  dsimp only
+  subst hcfg'
+  unfold RuntimeConfig.stackWithIndex
+  dsimp only
+  conv_lhs => rw [hstackEq]
+  rw [List.mapIdx_concat, List.mapIdx_concat]
+  rw [List.findRev?_eq_find?_reverse, List.findRev?_eq_find?_reverse]
+  rw [List.reverse_append, List.reverse_append, List.reverse_singleton, List.reverse_singleton]
+  rw [List.singleton_append, List.singleton_append]
+  cases hval1 : List.find? pred (oldLastWI :: revTail) with
+  | none =>
+    have hval2 : List.find? pred (newLastWI :: revTail) = none := by
+      have := hstackFindEq
+      rw [hval1] at this
+      cases hval3 : List.find? pred (newLastWI :: revTail) with
+      | none => rfl
+      | some fr => rw [hval3] at this; simp at this
+    rw [hval2]
+  | some fr1 =>
+    have hval2 : ∃ fr2, List.find? pred (newLastWI :: revTail) = some fr2 ∧ fr2.index = fr1.index := by
+      have := hstackFindEq
+      rw [hval1] at this
+      cases hval3 : List.find? pred (newLastWI :: revTail) with
+      | none => rw [hval3] at this; simp at this
+      | some fr2 => rw [hval3] at this; simp at this; exact ⟨fr2, rfl, this⟩
+    obtain ⟨fr2, hfr2, hidxeq⟩ := hval2
+    rw [hfr2]
+    cases cfg.heap.entries.find? (fun (e : Sigma (fun _ : RegionId => Region)) => e.snd.objMap.keys.contains oid) with
+    | none => dsimp only; rw [hidxeq]
+    | some _ => dsimp only
