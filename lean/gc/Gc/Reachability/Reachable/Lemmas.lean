@@ -52,6 +52,24 @@ theorem stack_step_index_le {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
     rw [hidxEq] at this
     exact this
 
+-- H3 restated forward: an OId-typed step out of an object inside region `rid` always lands
+-- back inside `rid` too (no openness needed, unlike `predecessor_of_region_object`).
+theorem successor_of_region_object {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
+    {rid : RegionId} {region : Region} (hlookup : cfg.heap.lookup rid = some region)
+    {oidA oidC : ObjectId} (hloc : (Reference.OId oidA).loc? cfg = some (Location.Rgn rid))
+    (hstep : ReachableStep cfg (Reference.OId oidA) (Reference.OId oidC)) :
+    (Reference.OId oidC).loc? cfg = some (Location.Rgn rid) := by
+  rw [ReachableStep_oid_iff] at hstep
+  obtain ⟨obj, hobjAt, hcontains⟩ := hstep
+  unfold Reference.objAt? at hobjAt
+  dsimp only at hobjAt
+  rw [hloc] at hobjAt
+  dsimp only at hobjAt
+  rw [hlookup] at hobjAt
+  have hmemrefs : (Reference.OId oidC) ∈ region.refs :=
+    mem_region_refs_of_mem_objMap hobjAt (List.contains_iff_mem.mp hcontains)
+  exact vcfg.h3 rid oidC region hlookup hmemrefs
+
 -- L2's per-frame fact, restated directly in terms of `FrameWithIndex.regionId`.
 theorem l2_of_stackWithIndex {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
     {frame : FrameWithIndex} (hframe : frame ∈ cfg.stackWithIndex) :
@@ -424,3 +442,162 @@ theorem exit_regionId_ne {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
   rw [hfpIdx] at hidxEq
   rw [hidxEq] at hflt
   exact absurd hflt (lt_irrefl _)
+
+-- If `a` doesn't resolve to the popped frame's own slot, and `a` steps to `c` (both
+-- SafeRef, so both OId-typed), neither does `c`: an OId in `Rgn rid` can only step to
+-- another `Rgn rid` object (never the stack); an OId stack-resident elsewhere can only step
+-- to an equal-or-earlier stack slot (S2), which stays below the (maximal) popped index.
+theorem exit_avoid_popped_step {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
+    {rid : RegionId} {region : Region} (hlookup : cfg.heap.lookup rid = some region)
+    {poppedIdx : Index} (hpoppedIdx : poppedIdx = cfg.stack.length - 1)
+    {a c : Reference} (haSafe : SafeRef cfg rid a) (hcSafe : SafeRef cfg rid c)
+    (hstep : ReachableStep cfg a c)
+    {oidA : ObjectId} (haEq : a = Reference.OId oidA)
+    (haNe : (Reference.OId oidA).loc? cfg ≠ some (Location.Stk poppedIdx))
+    {oidC : ObjectId} (hcEq : c = Reference.OId oidC) :
+    (Reference.OId oidC).loc? cfg ≠ some (Location.Stk poppedIdx) := by
+  intro hlocC
+  subst haEq; subst hcEq
+  unfold SafeRef at haSafe
+  rcases haSafe with hlocA | ⟨fidA, hlocA⟩
+  · have := successor_of_region_object vcfg hlookup hlocA hstep
+    rw [hlocC] at this
+    simp at this
+  · have hfidNe : fidA ≠ poppedIdx := by intro heq; rw [heq] at hlocA; exact haNe hlocA
+    have hle1 : poppedIdx ≤ fidA := stack_step_index_le vcfg hlocA hstep hlocC
+    have hle2 : fidA < cfg.stack.length := loc_stk_lt hlocA
+    subst hpoppedIdx
+    exact hfidNe (le_antisymm (Nat.le_sub_one_of_lt hle2) hle1)
+
+-- `find? (index == fid)` over `stackWithIndex` agrees between `cfg`/`cfg'` for any surviving
+-- index (below the popped one).
+theorem exit_stack_find_index_eq {cfg cfg' : RuntimeConfig} (h : exit cfg = some cfg')
+    (fid : Index) (hfid : fid < cfg.stack.length - 1) :
+    cfg.stackWithIndex.find? (fun frame => frame.index == fid) =
+    cfg'.stackWithIndex.find? (fun frame => frame.index == fid) := by
+  have hfid' : fid < cfg.stack.length := lt_of_lt_of_le hfid (Nat.sub_le _ _)
+  have hmem : ({ toFrame := cfg.stack[fid], index := fid } : FrameWithIndex) ∈ cfg.stackWithIndex :=
+    List.mem_mapIdx.mpr ⟨fid, hfid', rfl⟩
+  have hmem' : ({ toFrame := cfg.stack[fid], index := fid } : FrameWithIndex) ∈ cfg'.stackWithIndex :=
+    exit_frame_mem_up h hmem hfid
+  rw [swap_corollary_stackWithIndex_find_eq hmem, swap_corollary_stackWithIndex_find_eq hmem']
+
+-- Converse of `stackWithIndex_getElem_index_eq`: a member's own index recovers it via `[·]?`.
+theorem stackWithIndex_mem_getElem_eq {cfg : RuntimeConfig} {frame : FrameWithIndex}
+    (hmem : frame ∈ cfg.stackWithIndex) : cfg.stackWithIndex[frame.index]? = some frame := by
+  obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hmem
+  have hidx : frame.index = n := by rw [← hfeq]
+  rw [hidx]
+  unfold RuntimeConfig.stackWithIndex
+  rw [List.getElem?_mapIdx, List.getElem?_eq_getElem hn, Option.map_some]
+  exact congrArg some hfeq
+
+-- `loc?` agrees between `cfg`/`cfg'` for any oid not resolving to the popped frame's slot.
+theorem exit_loc_eq_of_ne_popped {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : exit cfg = some cfg') (oid : ObjectId)
+    (hne : (Reference.OId oid).loc? cfg ≠ some (Location.Stk (cfg.stack.length - 1))) :
+    (Reference.OId oid).loc? cfg = (Reference.OId oid).loc? cfg' := by
+  obtain ⟨poppedFrame, region, hlen, hlast, hlookupRid, hopenRid, hcfg'⟩ := exit_cases h
+  cases hloc : (Reference.OId oid).loc? cfg with
+  | none =>
+    symm
+    by_contra hcontra
+    obtain ⟨loc, hloc'⟩ := Option.ne_none_iff_exists'.mp hcontra
+    cases loc with
+    | Rgn rid0 =>
+      have := (exit_corollary_1 vcfg h (Reference.OId oid)).mpr hloc'
+      rw [hloc] at this; exact absurd this (by simp)
+    | Stk fid0 =>
+      have := exit_corollary_3 vcfg h (Reference.OId oid) hloc'
+      rw [hloc] at this; exact absurd this (by simp)
+  | some loc =>
+    cases loc with
+    | Rgn rid0 => exact ((exit_corollary_1 vcfg h (Reference.OId oid)).mp hloc).symm
+    | Stk fid0 =>
+      have hfidNe : fid0 ≠ cfg.stack.length - 1 := by intro heq; rw [heq] at hloc; exact hne hloc
+      obtain ⟨frame, hget, hobjmem⟩ := (oid_loc_stk_iff_in_stack vcfg).mp hloc
+      have hmem : frame ∈ cfg.stackWithIndex := List.mem_of_getElem? hget
+      have hidx : frame.index = fid0 := stackWithIndex_getElem_index_eq hget
+      have hlt : frame.index < cfg.stack.length := by
+        rw [hidx]
+        have hlt0 : fid0 < cfg.stackWithIndex.length := (List.getElem?_eq_some_iff.mp hget).1
+        unfold RuntimeConfig.stackWithIndex at hlt0
+        rwa [List.length_mapIdx] at hlt0
+      have hidxNe : frame.index ≠ cfg.stack.length - 1 := by rw [hidx]; exact hfidNe
+      have hflt : frame.index < cfg.stack.length - 1 :=
+        lt_of_le_of_ne (Nat.le_sub_one_of_lt hlt) hidxNe
+      have hmem' : frame ∈ cfg'.stackWithIndex := exit_frame_mem_up h hmem hflt
+      have hget' : cfg'.stackWithIndex[frame.index]? = some frame := stackWithIndex_mem_getElem_eq hmem'
+      rw [hidx] at hget'
+      have vcfg' : ValidConfig cfg' := exit_valid vcfg h
+      exact ((oid_loc_stk_iff_in_stack vcfg').mpr ⟨frame, hget', hobjmem⟩).symm
+
+-- `objAt?` agrees between `cfg`/`cfg'` for any oid not resolving to the popped frame's slot.
+theorem exit_objAt_eq_of_ne_popped {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : exit cfg = some cfg') (oid : ObjectId)
+    (hne : (Reference.OId oid).loc? cfg ≠ some (Location.Stk (cfg.stack.length - 1))) :
+    (Reference.OId oid).objAt? cfg = (Reference.OId oid).objAt? cfg' := by
+  obtain ⟨poppedFrame, region, hlen, hlast, hlookupRid, hopenRid, hcfg'⟩ := exit_cases h
+  have hlocEq := exit_loc_eq_of_ne_popped vcfg h oid hne
+  unfold Reference.objAt?
+  dsimp only
+  rw [hlocEq]
+  cases hloc' : (Reference.OId oid).loc? cfg' with
+  | none => rfl
+  | some loc =>
+    cases loc with
+    | Rgn rid0 =>
+      dsimp only
+      subst hcfg'
+      by_cases heq : rid0 = poppedFrame.regionId
+      · subst heq
+        rw [AList.lookup_insert, hlookupRid]
+        rfl
+      · rw [AList.lookup_insert_ne heq]
+    | Stk fid0 =>
+      dsimp only
+      have hloc : (Reference.OId oid).loc? cfg = some (Location.Stk fid0) := by rw [hlocEq]; exact hloc'
+      have hfidNe : fid0 ≠ cfg.stack.length - 1 := by
+        intro heqfid; rw [heqfid] at hloc; exact hne hloc
+      have hfid : fid0 < cfg.stack.length - 1 := by
+        have hfidLt : fid0 < cfg.stack.length := loc_stk_lt hloc
+        exact lt_of_le_of_ne (Nat.le_sub_one_of_lt hfidLt) hfidNe
+      rw [exit_stack_find_index_eq h fid0 hfid]
+
+-- OId-sourced steps agree between cfg/cfg' across `exit`, for any oid not resolving to the
+-- popped frame's slot.
+theorem exit_oid_step_iff_of_ne_popped {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : exit cfg = some cfg') (oid : ObjectId)
+    (hne : (Reference.OId oid).loc? cfg ≠ some (Location.Stk (cfg.stack.length - 1))) (b : Reference) :
+    ReachableStep cfg (Reference.OId oid) b ↔ ReachableStep cfg' (Reference.OId oid) b := by
+  rw [ReachableStep_oid_iff, ReachableStep_oid_iff, exit_objAt_eq_of_ne_popped vcfg h oid hne]
+
+-- Combines `safe_reflTransGen_root_safe` (freshly, at every point, via the remaining
+-- suffix to `oid`), `exit_avoid_popped_step` and `exit_oid_step_iff_of_ne_popped`: any
+-- cfg-chain from a not-popped root to a safe `oid` transports to cfg'.
+theorem exit_reflTransGen_transport {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : exit cfg = some cfg') {rid : RegionId} {region : Region}
+    (hlookup : cfg.heap.lookup rid = some region) (hopen : region.status = Status.Open)
+    {oid : ObjectId} (hloc : (Reference.OId oid).loc? cfg = some (Location.Rgn rid))
+    {start : Reference} (hrtg : Relation.ReflTransGen (ReachableStep cfg) start (Reference.OId oid)) :
+    (∀ oidStart, start = Reference.OId oidStart →
+      (Reference.OId oidStart).loc? cfg ≠ some (Location.Stk (cfg.stack.length - 1))) →
+    Relation.ReflTransGen (ReachableStep cfg') start (Reference.OId oid) := by
+  induction hrtg using Relation.ReflTransGen.head_induction_on with
+  | refl => intro _; exact Relation.ReflTransGen.refl
+  | @head a c hstep hrest ih =>
+    intro haNotPopped
+    have haSafe : SafeRef cfg rid a :=
+      safe_reflTransGen_root_safe vcfg hlookup hopen (Relation.ReflTransGen.head hstep hrest) (Or.inl hloc)
+    have hcSafe : SafeRef cfg rid c := safe_reflTransGen_root_safe vcfg hlookup hopen hrest (Or.inl hloc)
+    cases a with
+    | RId _ => exact absurd haSafe (by unfold SafeRef; exact id)
+    | OId oidA =>
+      have haNe := haNotPopped oidA rfl
+      cases c with
+      | RId _ => exact absurd hcSafe (by unfold SafeRef; exact id)
+      | OId oidC =>
+        have hcNe := exit_avoid_popped_step vcfg hlookup rfl haSafe hcSafe hstep rfl haNe rfl
+        have hchain' := ih (fun oidC' hcEq => by
+          rw [Reference.OId.injEq] at hcEq; rw [← hcEq]; exact hcNe)
+        exact Relation.ReflTransGen.head ((exit_oid_step_iff_of_ne_popped vcfg h oidA haNe (Reference.OId oidC)).mp hstep) hchain'
