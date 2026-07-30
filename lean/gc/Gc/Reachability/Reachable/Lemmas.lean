@@ -688,3 +688,48 @@ theorem exit_stk_not_popped_of_cfg' {cfg cfg' : RuntimeConfig} (vcfg : ValidConf
   have hfidlt : frameC.index < cfg.stack.length - 1 := (exit_frame_mem_down h hmemC).2
   rw [hidxC, hlocC] at hfidlt
   exact absurd hfidlt (lt_irrefl _)
+
+-- Anything resolving into an untouched region (its cfg/cfg' heap entries agree) in cfg' also
+-- avoids the popped frame's cfg-side slot (Rgn and Stk are different shapes).
+theorem exit_rgn_not_popped {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
+    {rid : RegionId} {region : Region} (hlookup : cfg.heap.lookup rid = some region)
+    (hlookup' : cfg'.heap.lookup rid = some region)
+    (oidX : ObjectId) (hlocX : (Reference.OId oidX).loc? cfg' = some (Location.Rgn rid)) :
+    (Reference.OId oidX).loc? cfg ≠ some (Location.Stk (cfg.stack.length - 1)) := by
+  intro hbad
+  obtain ⟨region', hlookup'', hmemX⟩ := (oid_loc_rgn_iff_in_heap vcfg').mp hlocX
+  rw [hlookup'] at hlookup''
+  injection hlookup'' with hregionEq
+  rw [← hregionEq] at hmemX
+  have hlocXcfg : (Reference.OId oidX).loc? cfg = some (Location.Rgn rid) :=
+    (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region, hlookup, hmemX⟩
+  rw [hbad] at hlocXcfg
+  simp at hlocXcfg
+
+-- The backward direction: any cfg'-chain reaching a safe reference transports to cfg. No
+-- monotonicity argument is needed here (unlike the forward direction): a `SafeRef cfg' rid`
+-- node's "not popped" fact is derivable purely locally, from its own cfg'-side shape
+-- (`exit_rgn_not_popped`/`exit_stk_not_popped_of_cfg'`), at every step.
+theorem exit_reflTransGen_transport_backward {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : exit cfg = some cfg') {rid : RegionId} {region : Region}
+    (hlookup : cfg.heap.lookup rid = some region) (hlookup' : cfg'.heap.lookup rid = some region)
+    (hopen : region.status = Status.Open)
+    {start ref : Reference} (hrtg : Relation.ReflTransGen (ReachableStep cfg') start ref) :
+    SafeRef cfg' rid ref → Relation.ReflTransGen (ReachableStep cfg) start ref := by
+  have vcfg' : ValidConfig cfg' := exit_valid vcfg h
+  induction hrtg with
+  | refl => intro _; exact Relation.ReflTransGen.refl
+  | tail hprev hstep ih =>
+    rename_i prev cur
+    intro hsafe
+    have hsafePrev := predecessor_safe vcfg' hlookup' hopen hsafe hstep
+    have hchainPrev := ih hsafePrev
+    cases prev with
+    | RId _ => exact absurd hsafePrev (by unfold SafeRef; exact id)
+    | OId oidPrev =>
+      have hne : (Reference.OId oidPrev).loc? cfg ≠ some (Location.Stk (cfg.stack.length - 1)) := by
+        unfold SafeRef at hsafePrev
+        rcases hsafePrev with hloc | ⟨fid, hloc⟩
+        · exact exit_rgn_not_popped vcfg vcfg' hlookup hlookup' oidPrev hloc
+        · exact exit_stk_not_popped_of_cfg' vcfg h oidPrev hloc
+      exact hchainPrev.tail ((exit_oid_step_iff_of_ne_popped vcfg h oidPrev hne cur).mpr hstep)
