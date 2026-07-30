@@ -1068,3 +1068,42 @@ theorem makeObjStack_oid_step_iff {cfg cfg' : RuntimeConfig} (h : makeObjStack x
       simp [Object.refs] at hcontains
   · rw [ReachableStep_oid_iff, ReachableStep_oid_iff, makeObjStack_objAt_eq_of_ne h hne]
 
+-- Every `cfg'.stackWithIndex` member is either a pre-existing, content-unchanged frame
+-- (index strictly below the last one) or exactly the modified last frame.
+theorem makeObjStack_frame_cases {cfg cfg' : RuntimeConfig} {lastFrame : Frame} {x : VarName}
+    (hlast : cfg.stack.getLast? = some lastFrame)
+    (hcfg' : cfg' = { cfg with
+      stack := cfg.stack.dropLast ++ [{ lastFrame with
+        varMap := lastFrame.varMap.insert x (Reference.OId cfg.freshObjectId),
+        objMap := lastFrame.objMap.insert cfg.freshObjectId ∅ }] })
+    {frame : FrameWithIndex} (hframe : frame ∈ cfg'.stackWithIndex) :
+    (frame ∈ cfg.stackWithIndex ∧ frame.index < cfg.stack.length - 1) ∨
+    (frame.regionId = lastFrame.regionId ∧ frame.bridgeVar = lastFrame.bridgeVar ∧
+      frame.varMap = lastFrame.varMap.insert x (Reference.OId cfg.freshObjectId) ∧
+      frame.objMap = lastFrame.objMap.insert cfg.freshObjectId ∅ ∧
+      frame.index = cfg.stack.dropLast.length) := by
+  have hne' : cfg.stack ≠ [] := by intro hnil; rw [hnil] at hlast; simp at hlast
+  have hstackEq : cfg.stack = cfg.stack.dropLast ++ [lastFrame] := by
+    rw [List.getLast?_eq_getLast_of_ne_nil hne', Option.some_inj] at hlast
+    rw [← hlast]; exact (List.dropLast_append_getLast hne').symm
+  unfold RuntimeConfig.stackWithIndex at hframe
+  rw [hcfg'] at hframe
+  dsimp only at hframe
+  rw [List.mapIdx_concat] at hframe
+  rcases List.mem_append.mp hframe with hmem | hmem
+  · left
+    obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hmem
+    have hidx : frame.index = n := by rw [← hfeq]
+    have hmem' : frame ∈ cfg.stackWithIndex := by
+      unfold RuntimeConfig.stackWithIndex
+      conv_lhs => rw [hstackEq]
+      rw [List.mapIdx_concat]
+      exact List.mem_append_left _ hmem
+    refine ⟨hmem', ?_⟩
+    rw [hidx, ← List.length_dropLast]
+    exact hn
+  · right
+    rw [List.mem_singleton] at hmem
+    subst hmem
+    exact ⟨rfl, rfl, rfl, rfl, rfl⟩
+
