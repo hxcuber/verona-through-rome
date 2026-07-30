@@ -499,6 +499,25 @@ theorem stackWithIndex_mem_getElem_eq {cfg : RuntimeConfig} {frame : FrameWithIn
   rw [List.getElem?_mapIdx, List.getElem?_eq_getElem hn, Option.map_some]
   exact congrArg some hfeq
 
+-- Searching `stackWithIndex` by index is the same as direct indexing (indices are unique
+-- and sequential, so at most one entry can ever match `index == fid`).
+theorem stackWithIndex_find_index_eq_getElem {cfg : RuntimeConfig} (fid : Index) :
+    cfg.stackWithIndex.find? (fun f => f.index == fid) = cfg.stackWithIndex[fid]? := by
+  cases hget : cfg.stackWithIndex[fid]? with
+  | none =>
+    rw [List.find?_eq_none]
+    intro fr hfr
+    by_contra hcontra
+    rw [beq_iff_eq] at hcontra
+    have hget2 := stackWithIndex_mem_getElem_eq hfr
+    rw [hcontra] at hget2
+    rw [hget2] at hget
+    exact absurd hget (by simp)
+  | some frame =>
+    have hidx : frame.index = fid := stackWithIndex_getElem_index_eq hget
+    rw [← hidx]
+    exact swap_corollary_stackWithIndex_find_eq (List.mem_of_getElem? hget)
+
 -- `loc?` agrees between `cfg`/`cfg'` for any oid not resolving to the popped frame's slot.
 theorem exit_loc_eq_of_ne_popped {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
     (h : exit cfg = some cfg') (oid : ObjectId)
@@ -861,3 +880,4 @@ theorem makeObjStack_loc_eq_of_ne {cfg cfg' : RuntimeConfig} (h : makeObjStack x
     cases cfg.heap.entries.find? (fun (e : Sigma (fun _ : RegionId => Region)) => e.snd.objMap.keys.contains oid) with
     | none => dsimp only; rw [hidxeq]
     | some _ => dsimp only
+
