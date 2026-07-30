@@ -881,3 +881,56 @@ theorem makeObjStack_loc_eq_of_ne {cfg cfg' : RuntimeConfig} (h : makeObjStack x
     | none => dsimp only; rw [hidxeq]
     | some _ => dsimp only
 
+-- `objAt?` agrees between `cfg`/`cfg'` for any oid other than the freshly-allocated one.
+theorem makeObjStack_objAt_eq_of_ne {cfg cfg' : RuntimeConfig} (h : makeObjStack x cfg = some cfg')
+    {oid : ObjectId} (hne : oid ≠ cfg.freshObjectId) :
+    (Reference.OId oid).objAt? cfg = (Reference.OId oid).objAt? cfg' := by
+  obtain ⟨lastFrame, hlast, hcfg'⟩ := makeObjStack_cases h
+  have hlocEq := makeObjStack_loc_eq_of_ne h hne
+  unfold Reference.objAt?
+  dsimp only
+  rw [hlocEq]
+  cases hloc' : (Reference.OId oid).loc? cfg' with
+  | none => rfl
+  | some loc =>
+    cases loc with
+    | Rgn rid0 => dsimp only; subst hcfg'; rfl
+    | Stk fid0 =>
+      dsimp only
+      rw [stackWithIndex_find_index_eq_getElem, stackWithIndex_find_index_eq_getElem]
+      have hne' : cfg.stack ≠ [] := by intro hnil; rw [hnil] at hlast; simp at hlast
+      have hstackEq : cfg.stack = cfg.stack.dropLast ++ [lastFrame] := by
+        rw [List.getLast?_eq_getLast_of_ne_nil hne', Option.some_inj] at hlast
+        rw [← hlast]; exact (List.dropLast_append_getLast hne').symm
+      have hgetCfg : cfg.stackWithIndex[fid0]? =
+          (cfg.stack[fid0]?).map (fun f => ({ toFrame := f, index := fid0 } : FrameWithIndex)) := by
+        unfold RuntimeConfig.stackWithIndex; rw [List.getElem?_mapIdx]
+      have hgetCfg' : cfg'.stackWithIndex[fid0]? =
+          (cfg'.stack[fid0]?).map (fun f => ({ toFrame := f, index := fid0 } : FrameWithIndex)) := by
+        unfold RuntimeConfig.stackWithIndex; rw [List.getElem?_mapIdx]
+      rw [hgetCfg, hgetCfg']
+      by_cases hfid : fid0 < cfg.stack.dropLast.length
+      · have h1 : cfg.stack[fid0]? = cfg.stack.dropLast[fid0]? := by
+          conv_lhs => rw [hstackEq]
+          rw [List.getElem?_append_left hfid]
+        have h2 : cfg'.stack[fid0]? = cfg.stack.dropLast[fid0]? := by
+          rw [hcfg']; dsimp only
+          rw [List.getElem?_append_left hfid]
+        rw [h1, h2]
+      · push_neg at hfid
+        set newLastFrame : Frame := { regionId := lastFrame.regionId, bridgeVar := lastFrame.bridgeVar, objMap := lastFrame.objMap.insert cfg.freshObjectId ∅, varMap := lastFrame.varMap.insert x (Reference.OId cfg.freshObjectId) } with hnewLastFrame_def
+        have h1 : cfg.stack[fid0]? = [lastFrame][fid0 - cfg.stack.dropLast.length]? := by
+          conv_lhs => rw [hstackEq]
+          rw [List.getElem?_append_right hfid]
+        have h2 : cfg'.stack[fid0]? = [newLastFrame][fid0 - cfg.stack.dropLast.length]? := by
+          rw [hcfg']; dsimp only
+          rw [List.getElem?_append_right hfid]
+        rw [h1, h2]
+        cases hidx : fid0 - cfg.stack.dropLast.length with
+        | zero =>
+          simp only [List.getElem?_cons_zero, Option.map_some]
+          rw [hnewLastFrame_def]
+          dsimp only [Option.bind]
+          rw [AList.lookup_insert_ne hne]
+        | succ n => rfl
+
