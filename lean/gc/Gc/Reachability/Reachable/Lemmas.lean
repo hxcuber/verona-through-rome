@@ -24,6 +24,13 @@ theorem mem_frame_refs_of_mem_objMap {frame : Frame} {oid : ObjectId} {obj : Obj
   rw [List.bind_eq_flatMap, List.mem_append, List.mem_flatMap]
   exact Or.inl ⟨obj, List.mem_map_of_mem (AList.lookup_mem_entries hlookup), hb⟩
 
+-- A var's own value contributes directly to its frame's overall refs.
+theorem mem_frame_refs_of_mem_varMap {frame : Frame} {var : VarName} {b : Reference}
+    (hlookup : frame.varMap.lookup var = some b) : b ∈ frame.refs := by
+  unfold Frame.refs
+  rw [List.mem_append]
+  exact Or.inr (List.mem_map_of_mem (AList.lookup_mem_entries hlookup))
+
 -- S2, restated at the `ReachableStep` level: a stack-to-stack hop never increases the
 -- owning frame's index (a frame can only reference itself or an earlier stack slot).
 theorem stack_step_index_le {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
@@ -601,3 +608,83 @@ theorem exit_reflTransGen_transport {cfg cfg' : RuntimeConfig} (vcfg : ValidConf
         have hchain' := ih (fun oidC' hcEq => by
           rw [Reference.OId.injEq] at hcEq; rw [← hcEq]; exact hcNe)
         exact Relation.ReflTransGen.head ((exit_oid_step_iff_of_ne_popped vcfg h oidA haNe (Reference.OId oidC)).mp hstep) hchain'
+
+-- A `FrameRoot` rooted at a frame strictly before the popped one never resolves to the
+-- popped frame's own slot (S2, applied directly to the rooting frame).
+theorem exit_root_avoid_popped {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
+    {X : FrameWithIndex} (hXmem : X ∈ cfg.stackWithIndex) (hXlt : X.index < cfg.stack.length - 1)
+    {start : Reference} (hroot : FrameRoot cfg X.index start) :
+    ∀ oidStart, start = Reference.OId oidStart →
+      (Reference.OId oidStart).loc? cfg ≠ some (Location.Stk (cfg.stack.length - 1)) := by
+  intro oidStart hstartEq hlocStart
+  rcases hroot with ⟨Xf, hXfmem, hXfidx, var, hvar⟩ | ⟨Xf, hXfmem, hXfidx, region', hlookupXf, hbridge⟩
+  · have hXfeq : Xf = X := swap_corollary_stackWithIndex_index_inj hXfmem hXmem hXfidx
+    rw [hXfeq, hstartEq] at hvar
+    have hmemrefs : (Reference.OId oidStart) ∈ X.refs := mem_frame_refs_of_mem_varMap hvar
+    have hle := vcfg.s2 X hXmem (Reference.OId oidStart) hmemrefs (cfg.stack.length - 1) oidStart rfl hlocStart
+    exact absurd hle (Nat.not_le.mpr hXlt)
+  · rw [hstartEq] at hbridge
+    injection hbridge with hbeq
+    rw [hbeq] at hlocStart
+    have hbridgeMem : region' ∈ cfg.heap.regions := by
+      unfold Heap.regions
+      exact List.mem_map_of_mem (AList.lookup_mem_entries hlookupXf)
+    have hbridgeIn : region'.bridgeObjectId ∈ region'.objMap := vcfg.h1 region' hbridgeMem
+    have hbridgeLoc : (Reference.OId region'.bridgeObjectId).loc? cfg = some (Location.Rgn Xf.regionId) :=
+      (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region', hlookupXf, hbridgeIn⟩
+    rw [hlocStart] at hbridgeLoc
+    simp at hbridgeLoc
+
+-- Every pre-existing frame with index strictly below the popped one survives `exit`
+-- unchanged, with the exact same heap entry for its own region.
+theorem exit_frame_reachable_transport {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : exit cfg = some cfg') {poppedFrame : Frame} {region0 : Region}
+    (hlast : cfg.stack.getLast? = some poppedFrame) (hlen : cfg.stack.length ≥ 2)
+    (_hlookupRid : cfg.heap.lookup poppedFrame.regionId = some region0) (_hopenRid : region0.status = Status.Open)
+    (hcfg' : cfg' = { cfg with
+      stack := cfg.stack.dropLast,
+      heap := cfg.heap.insert poppedFrame.regionId { region0 with status := Status.Closed } })
+    {oid : ObjectId} {rid : RegionId} {region : Region} (hlookup : cfg.heap.lookup rid = some region)
+    (hopen : region.status = Status.Open) (hloc : (Reference.OId oid).loc? cfg = some (Location.Rgn rid))
+    {X : FrameWithIndex} (hXmem : X ∈ cfg.stackWithIndex) (hXlt : X.index < cfg.stack.length - 1)
+    (hXreach : FrameReachable cfg X.index (Reference.OId oid)) :
+    FrameReachable cfg' X.index (Reference.OId oid) := by
+  rw [FrameReachable_iff_reflTransGen] at hXreach
+  obtain ⟨start, hroot, hrtg⟩ := hXreach
+  have hstartAvoid := exit_root_avoid_popped vcfg hXmem hXlt hroot
+  have hrtg' := exit_reflTransGen_transport vcfg h hlookup hopen hloc hrtg hstartAvoid
+  have hXridNe : X.regionId ≠ poppedFrame.regionId := exit_regionId_ne vcfg hXmem hXlt hlast hlen
+  have hroot' : FrameRoot cfg' X.index start := by
+    rcases hroot with ⟨Xf, hXfmem, hXfidx, var, hvar⟩ | ⟨Xf, hXfmem, hXfidx, region', hlookupXf, hbridge⟩
+    · exact Or.inl ⟨Xf, (exit_frame_mem_up h hXfmem (hXfidx ▸ hXlt)), hXfidx, var, hvar⟩
+    · have hXfeq : Xf = X := swap_corollary_stackWithIndex_index_inj hXfmem hXmem hXfidx
+      have hXfridNe : Xf.regionId ≠ poppedFrame.regionId := hXfeq ▸ hXridNe
+      have hlookupXf' : cfg'.heap.lookup Xf.regionId = some region' := by
+        rw [hcfg']
+        dsimp only
+        rwa [AList.lookup_insert_ne hXfridNe]
+      exact Or.inr ⟨Xf, exit_frame_mem_up h hXfmem (hXfidx ▸ hXlt), hXfidx, region', hlookupXf', hbridge⟩
+  exact (FrameReachable_iff_reflTransGen cfg' X.index (Reference.OId oid)).mpr ⟨start, hroot', hrtg'⟩
+
+-- Anything stack-resident in cfg' is (a fortiori) not resolving to the popped frame's own
+-- slot in cfg either: `loc?` is a function, and the object's frame survives unchanged.
+theorem exit_stk_not_popped_of_cfg' {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : exit cfg = some cfg') (oid : ObjectId) {fid : Index}
+    (hloc' : (Reference.OId oid).loc? cfg' = some (Location.Stk fid)) :
+    (Reference.OId oid).loc? cfg ≠ some (Location.Stk (cfg.stack.length - 1)) := by
+  intro hbad
+  have vcfg' : ValidConfig cfg' := exit_valid vcfg h
+  obtain ⟨frameC, hgetC, hobjmemC⟩ := (oid_loc_stk_iff_in_stack vcfg').mp hloc'
+  have hmemC : frameC ∈ cfg'.stackWithIndex := List.mem_of_getElem? hgetC
+  have hidxC : frameC.index = fid := stackWithIndex_getElem_index_eq hgetC
+  have hmemCcfg : frameC ∈ cfg.stackWithIndex := (exit_frame_mem_down h hmemC).1
+  have hgetCcfg : cfg.stackWithIndex[frameC.index]? = some frameC := stackWithIndex_mem_getElem_eq hmemCcfg
+  have hlocC : (Reference.OId oid).loc? cfg = some (Location.Stk frameC.index) :=
+    (oid_loc_stk_iff_in_stack vcfg).mpr ⟨frameC, hgetCcfg, hobjmemC⟩
+  rw [hbad] at hlocC
+  injection hlocC with hlocC
+  injection hlocC with hlocC
+  rw [hidxC] at hlocC
+  have hfidlt : frameC.index < cfg.stack.length - 1 := (exit_frame_mem_down h hmemC).2
+  rw [hidxC, hlocC] at hfidlt
+  exact absurd hfidlt (lt_irrefl _)
