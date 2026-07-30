@@ -16,6 +16,42 @@ theorem mem_region_refs_of_mem_objMap {region : Region} {oid : ObjectId} {obj : 
   rw [List.bind_eq_flatMap, List.mem_flatMap]
   exact ⟨obj, List.mem_map_of_mem (AList.lookup_mem_entries hlookup), hb⟩
 
+-- An object's own refs contribute to its holding frame's overall refs.
+theorem mem_frame_refs_of_mem_objMap {frame : Frame} {oid : ObjectId} {obj : Object}
+    (hlookup : frame.objMap.lookup oid = some obj) {b : Reference} (hb : b ∈ obj.refs) :
+    b ∈ frame.refs := by
+  unfold Frame.refs
+  rw [List.bind_eq_flatMap, List.mem_append, List.mem_flatMap]
+  exact Or.inl ⟨obj, List.mem_map_of_mem (AList.lookup_mem_entries hlookup), hb⟩
+
+-- S2, restated at the `ReachableStep` level: a stack-to-stack hop never increases the
+-- owning frame's index (a frame can only reference itself or an earlier stack slot).
+theorem stack_step_index_le {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
+    {oid oid' : ObjectId} {fidCur fidNext : Index}
+    (hloc : (Reference.OId oid).loc? cfg = some (Location.Stk fidCur))
+    (hstep : ReachableStep cfg (Reference.OId oid) (Reference.OId oid'))
+    (hloc' : (Reference.OId oid').loc? cfg = some (Location.Stk fidNext)) :
+    fidNext ≤ fidCur := by
+  rw [ReachableStep_oid_iff] at hstep
+  obtain ⟨obj, hobjAt, hcontains⟩ := hstep
+  unfold Reference.objAt? at hobjAt
+  dsimp only at hobjAt
+  rw [hloc] at hobjAt
+  dsimp only at hobjAt
+  cases hfind : cfg.stackWithIndex.find? (fun frame => frame.index == fidCur) with
+  | none => rw [hfind] at hobjAt; simp at hobjAt
+  | some someFrame =>
+    rw [hfind] at hobjAt
+    have hidxEq : someFrame.index = fidCur := by
+      have := List.find?_some hfind
+      exact beq_iff_eq.mp this
+    have hmem : someFrame ∈ cfg.stackWithIndex := List.mem_of_find?_eq_some hfind
+    have hmemrefs : (Reference.OId oid') ∈ someFrame.refs :=
+      mem_frame_refs_of_mem_objMap hobjAt (List.contains_iff_mem.mp hcontains)
+    have := vcfg.s2 someFrame hmem (Reference.OId oid') hmemrefs fidNext oid' rfl hloc'
+    rw [hidxEq] at this
+    exact this
+
 -- L2's per-frame fact, restated directly in terms of `FrameWithIndex.regionId`.
 theorem l2_of_stackWithIndex {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
     {frame : FrameWithIndex} (hframe : frame ∈ cfg.stackWithIndex) :
@@ -325,3 +361,66 @@ theorem enter_frame_mem_down {cfg cfg' : RuntimeConfig} (h : enter xf a cfg = so
   rcases enter_frame_cases hcfg' hframe with ⟨hmem, -⟩ | ⟨-, -, -, -, hidx⟩
   · exact hmem
   · rw [hidx] at hlt; exact absurd hlt (lt_irrefl _)
+
+-- A pre-existing, non-popped frame survives `exit` unchanged, at the same index.
+theorem exit_frame_mem_up {cfg cfg' : RuntimeConfig} (h : exit cfg = some cfg')
+    {frame : FrameWithIndex} (hframe : frame ∈ cfg.stackWithIndex) (hlt : frame.index < cfg.stack.length - 1) :
+    frame ∈ cfg'.stackWithIndex := by
+  obtain ⟨poppedFrame, region, hlen, hlast, hlookupRid, hopenRid, hcfg'⟩ := exit_cases h
+  subst hcfg'
+  unfold RuntimeConfig.stackWithIndex at hframe ⊢
+  dsimp only
+  obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hframe
+  have hidx : frame.index = n := by rw [← hfeq]
+  have hnlt : n < cfg.stack.dropLast.length := by rw [List.length_dropLast]; rw [hidx] at hlt; exact hlt
+  apply List.mem_mapIdx.mpr
+  refine ⟨n, hnlt, ?_⟩
+  have hget : cfg.stack.dropLast[n] = cfg.stack[n] := List.getElem_dropLast hnlt
+  rw [hget]
+  exact hfeq
+
+-- Every `cfg'.stackWithIndex` member was already a `cfg.stackWithIndex` member with index
+-- strictly below the popped frame's (i.e. it survived `exit`).
+theorem exit_frame_mem_down {cfg cfg' : RuntimeConfig} (h : exit cfg = some cfg')
+    {frame : FrameWithIndex} (hframe : frame ∈ cfg'.stackWithIndex) :
+    frame ∈ cfg.stackWithIndex ∧ frame.index < cfg.stack.length - 1 := by
+  obtain ⟨poppedFrame, region, hlen, hlast, hlookupRid, hopenRid, hcfg'⟩ := exit_cases h
+  subst hcfg'
+  unfold RuntimeConfig.stackWithIndex at hframe ⊢
+  dsimp only at hframe
+  refine ⟨List.mem_of_mem_dropLast_mapIdx hframe, ?_⟩
+  obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hframe
+  have hidx : frame.index = n := by rw [← hfeq]
+  rw [hidx, ← List.length_dropLast]
+  exact hn
+
+-- The popped frame itself, viewed as a `FrameWithIndex` at the last index.
+theorem exit_poppedFrame_mem {cfg : RuntimeConfig} {poppedFrame : Frame}
+    (hlast : cfg.stack.getLast? = some poppedFrame) (hlen : cfg.stack.length ≥ 2) :
+    ∃ f : FrameWithIndex, f ∈ cfg.stackWithIndex ∧ f.toFrame = poppedFrame ∧
+      f.index = cfg.stack.length - 1 := by
+  have hne : cfg.stack ≠ [] := by intro hnil; rw [hnil] at hlen; simp at hlen
+  rw [List.getLast?_eq_getLast_of_ne_nil hne, Option.some_inj] at hlast
+  have hgetElem : cfg.stack[cfg.stack.length - 1] = poppedFrame := by
+    rw [← hlast]
+    exact (List.getLast_eq_getElem hne).symm
+  refine ⟨{ toFrame := poppedFrame, index := cfg.stack.length - 1 }, ?_, rfl, rfl⟩
+  unfold RuntimeConfig.stackWithIndex
+  apply List.mem_mapIdx.mpr
+  refine ⟨cfg.stack.length - 1, by omega, ?_⟩
+  dsimp only
+  rw [hgetElem]
+
+-- A frame strictly before the popped one has a different regionId (S1: regionId is
+-- injective across the stack).
+theorem exit_regionId_ne {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
+    {f : FrameWithIndex} (hf : f ∈ cfg.stackWithIndex) (hflt : f.index < cfg.stack.length - 1)
+    {poppedFrame : Frame} (hlast : cfg.stack.getLast? = some poppedFrame) (hlen : cfg.stack.length ≥ 2) :
+    f.regionId ≠ poppedFrame.regionId := by
+  intro heq
+  obtain ⟨fp, hfpMem, hfpEq, hfpIdx⟩ := exit_poppedFrame_mem hlast hlen
+  have hregEq : f.regionId = fp.regionId := by rw [hfpEq]; exact heq
+  have hidxEq : f.index = fp.index := merge_corollary_regionId_unique_index vcfg.s1 hf hfpMem hregEq
+  rw [hfpIdx] at hidxEq
+  rw [hidxEq] at hflt
+  exact absurd hflt (lt_irrefl _)
