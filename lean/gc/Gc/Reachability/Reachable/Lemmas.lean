@@ -1138,3 +1138,34 @@ theorem makeObjStack_step_eq {cfg cfg' : RuntimeConfig} (h : makeObjStack x cfg 
     rw [ReachableStep_rid_iff, ReachableStep_rid_iff]
     rw [hcfg']
 
+-- `FrameReachable` agrees between `cfg`/`cfg'`, both directions, for any frame with index
+-- strictly below the last one (content is literally untouched there).
+theorem makeObjStack_frame_reachable_iff {cfg cfg' : RuntimeConfig} (h : makeObjStack x cfg = some cfg')
+    {X : FrameWithIndex} (hXmem : X ∈ cfg.stackWithIndex) (hXlt : X.index < cfg.stack.length - 1)
+    (ref : Reference) : FrameReachable cfg X.index ref ↔ FrameReachable cfg' X.index ref := by
+  obtain ⟨lastFrame, hlast, hcfg'⟩ := makeObjStack_cases h
+  rw [FrameReachable_iff_reflTransGen, FrameReachable_iff_reflTransGen, makeObjStack_step_eq h]
+  constructor
+  · rintro ⟨start, hroot, hrtg⟩
+    refine ⟨start, ?_, hrtg⟩
+    rcases hroot with ⟨Xf, hXfmem, hXfidx, var, hvar⟩ | ⟨Xf, hXfmem, hXfidx, region, hlookup, hbridge⟩
+    · exact Or.inl ⟨Xf, makeObjStack_frame_mem_up h hXfmem (hXfidx ▸ hXlt), hXfidx, var, hvar⟩
+    · have hlookup' : cfg'.heap.lookup Xf.regionId = some region := by rw [hcfg']; exact hlookup
+      exact Or.inr ⟨Xf, makeObjStack_frame_mem_up h hXfmem (hXfidx ▸ hXlt), hXfidx, region, hlookup', hbridge⟩
+  · rintro ⟨start, hroot, hrtg⟩
+    refine ⟨start, ?_, hrtg⟩
+    rcases hroot with ⟨Xf, hXfmem, hXfidx, var, hvar⟩ | ⟨Xf, hXfmem, hXfidx, region, hlookup, hbridge⟩
+    · rcases makeObjStack_frame_cases hlast hcfg' hXfmem with ⟨hXfmemcfg, -⟩ | ⟨-, -, -, -, hXfidx2⟩
+      · exact Or.inl ⟨Xf, hXfmemcfg, hXfidx, var, hvar⟩
+      · exfalso
+        have hXeq : X.index = cfg.stack.dropLast.length := by rw [← hXfidx, hXfidx2]
+        rw [hXeq, List.length_dropLast] at hXlt
+        exact absurd hXlt (lt_irrefl _)
+    · rcases makeObjStack_frame_cases hlast hcfg' hXfmem with ⟨hXfmemcfg, -⟩ | ⟨-, -, -, -, hXfidx2⟩
+      · have hlookup' : cfg.heap.lookup Xf.regionId = some region := by rw [hcfg'] at hlookup; exact hlookup
+        exact Or.inr ⟨Xf, hXfmemcfg, hXfidx, region, hlookup', hbridge⟩
+      · exfalso
+        have hXeq : X.index = cfg.stack.dropLast.length := by rw [← hXfidx, hXfidx2]
+        rw [hXeq, List.length_dropLast] at hXlt
+        exact absurd hXlt (lt_irrefl _)
+
