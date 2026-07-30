@@ -28,7 +28,7 @@ All commands below assume `cd lean/gc`.
   original broken `Gc/Reachability/Reachability.lean` (a fuel-based computational reachability walk that
   pattern-matched on wrong `Location` constructor names — `Location.Stack`/`Location.Region` instead of
   the real `Location.Stk`/`Location.Rgn` — and never built) was deleted outright rather than just excluded
-  from the build; the inductive `FrameReachable`/`RefStep` machinery in `Gc/Reachability/Semantics.lean`
+  from the build; the inductive `FrameReachable`/`RefStep` machinery in `Gc/Reachability/Referencable/Semantics.lean`
   made it redundant. `Main.lean`'s undefined `hello` (leftover from the `lake new` template) was replaced
   with a plain greeting. Still prefer building the specific module(s) you're touching by qualified name
   for faster iteration, e.g. `lake build Gc.Model.Theorems`.
@@ -90,12 +90,12 @@ The proof development has two layers under `Gc/`:
   into its explicit disjunction-of-∃-bundles branches. This case-split lemma used to be reproven ad hoc
   inside each `Preservation/<Op>.lean` file (see the per-file gotchas below, e.g. `merge_cases`); it now
   lives once alongside the operation and is reused by both `Gc/Model/Preservation/<Op>.lean` and
-  `Gc/Reachability/Validity/Preservation/<Op>.lean`.
+  `Gc/Reachability/Referencable/Validity/Preservation/<Op>.lean`.
 - `Mutation/Stmt.lean` — reifies a single operation as data: `inductive Stmt` (one constructor per
   operation, carrying its arguments) plus `step : Stmt → RuntimeConfig → Option RuntimeConfig`
   dispatching to the real operation. Lets later layers state "for all 9 operations" claims by quantifying
   over `Stmt` instead of writing 9 separate theorems — used by `Preservation.lean` below and by
-  `Gc/Reachability/Validity/Preservation.lean`/`Validity/CR5.lean`.
+  `Gc/Reachability/Referencable/Validity/Preservation.lean`/`Validity/CR5.lean`.
 - `Start.lean` — `RuntimeConfig.start` (the initial configuration: one root region, one root frame) and
   a proof that it satisfies `ValidConfig`.
 - `Preservation/*.lean` — one file per `Mutation` operation. Each proves that the operation preserves
@@ -110,7 +110,13 @@ The proof development has two layers under `Gc/`:
 - `Theorems.lean` — generic `List`/`AList` lemmas (not domain-specific) used as a small helper library
   by the `Preservation` proofs.
 
-### `Gc/Reachability/` — reachability/liveness definitions (now substantially built out)
+### `Gc/Reachability/Referencable/` — reachability/liveness definitions (now substantially built out)
+
+**Note**: this whole layer used to live directly under `Gc/Reachability/`; it was moved into a
+`Referencable/` subfolder (2026-07-30, mechanical rename — file contents/module logic unchanged,
+only the `Gc.Reachability.*` module path grew a `.Referencable` segment) to make room for a sibling
+`Gc/Reachability/Reachable/` folder (see its own bullet at the end of this section) that will hold a
+different reachability notion.
 
 - `Semantics.lean` — `RefStep` (`a` steps to `b` when `b` is a field value of the object `a` currently
   resolves to, via `Reference.objAt?`) and its `RefStep.exists_oid_left` lemma (moved here from
@@ -125,7 +131,7 @@ The proof development has two layers under `Gc/`:
 - `Path.lean` — a thin `Path`/`ValidPath` wrapper (`path.refs : List Reference`, valid when consecutive
   refs are linked by `RefStep`) used specifically by the CR2 proof, which needs to reason about *every*
   element of a chain (via `List.IsChain` induction), not just its endpoints. Imports
-  `Gc.Reachability.Semantics` for `RefStep` (picked up 2026-07-29 when `RefStep` moved out of
+  `Gc.Reachability.Referencable.Semantics` for `RefStep` (picked up 2026-07-29 when `RefStep` moved out of
   `Gc/Model/Helpers.lean`).
 - `Corollaries/` — the reusable, non-operation-specific reachability lemmas. Originally a single
   ~1000-line `Corollaries.lean`; **split 2026-07-29** into `Corollaries/{Common,CR1,CR2,CR4}.lean`
@@ -190,6 +196,16 @@ Note: an earlier `Gc/Reachability/Reachability.lean` (a fuel-based *computationa
 `Region.reachableRefs`/`RuntimeConfig.stackReachableRefs`, rather than the inductive props above) used
 to exist here but pattern-matched on wrong `Location` constructor names and never built; it has since
 been **deleted entirely** (not just excluded from the build) — see the Commands section above.
+
+### `Gc/Reachability/Reachable/` — new sibling reachability layer (added 2026-07-30, not yet populated)
+
+A new folder alongside `Referencable/`, added at the same time as the `Reachability/`→
+`Reachability/Referencable/` move above. Currently holds a single one-line stub file,
+`Semantics.lean` (`import Gc.Model.Types` only, matching `Gc/Equivalence/Equivalence.lean`'s stub
+convention), left deliberately empty for the user to populate directly — not yet imported from
+`Gc.lean`, so it isn't built by a bare `lake build` until it's wired in. No design decisions about
+what this layer's `Semantics.lean` will define have been made yet; treat any claim about its contents
+elsewhere in this file as stale until this note is updated.
 
 ## Current known state (check before assuming something works)
 
@@ -703,7 +719,7 @@ not by reading file contents alone):
     goal's own `∃`-conjunct when its LHS syntactically matches `e` independent of the existential witness
     (fixed with `rfl` in place of the naively-expected hypothesis at three sites in `swap_cases`).
 
-### `Gc/Reachability/Validity/` — CR3 preservation (mirrors the `Gc/Model/Preservation/` pattern above)
+### `Gc/Reachability/Referencable/Validity/` — CR3 preservation (mirrors the `Gc/Model/Preservation/` pattern above)
 
 `Validity/Reachable.lean` defines the third reachability invariant:
 
@@ -811,7 +827,7 @@ planned step" below):
     `propext`/`Classical.choice`/`Quot.sound`.
 - **`Swap.lean`** — **fully proved, zero `sorry`** (finished 2026-07-28, same session as
   `FieldAsgn`/`VarAsgn` above). This was the last remaining `sorry` anywhere in `Gc/` — its completion
-  means every operation in both `Gc/Model/Preservation/` and `Gc/Reachability/Validity/Preservation/`
+  means every operation in both `Gc/Model/Preservation/` and `Gc/Reachability/Referencable/Validity/Preservation/`
   is now fully proved. `swap_cr3` had to combine **both** prior techniques at once: `fieldAsgn_cr3`'s
   per-hop `main_claim` induction (swap genuinely mutates a container's own field content, unlike
   `varAsgn`) *and* `varAsgn_cr3`'s root-escape technique (swap also writes a pre-existing value into a
@@ -873,7 +889,7 @@ planned step" below):
     `Quot.sound`. Full `lake build` (1058 jobs) and a project-wide sorry scan (0 sorries across 42
     files) both confirm `Gc/` is now completely `sorry`-free.
 
-### `Gc/Reachability/Validity/CR5.lean` — CR5 single-step (added 2026-07-29, restructured same day)
+### `Gc/Reachability/Referencable/Validity/CR5.lean` — CR5 single-step (added 2026-07-29, restructured same day)
 
 report.pdf CR5: "Activity in an active region and frame cannot affect the stack-reachability of
 objects within suspended regions." Unlike CR1/CR2/CR4 (`Corollaries/{CR1,CR2,CR4}.lean`) and CR3 (a
@@ -1011,13 +1027,13 @@ Elsewhere:
   generic, no domain dependency — was moved from `Preservation/Exit.lean` into `Theorems.lean` (which
   `Validity.lean` now also imports) so both files can use it without an import cycle; `Exit.lean`'s own
   proofs were unaffected (same qualified name, still builds clean).
-- `Gc/Reachability/Guarantees.lean` is empty; `Gc/Reachability/Invariants.lean` has no proofs yet — this
+- `Gc/Reachability/Referencable/Guarantees.lean` is empty; `Gc/Reachability/Referencable/Invariants.lean` has no proofs yet — this
   layer is much earlier-stage than `Gc/Model/`.
 
 ## Next planned step
 
 `Gc/Model/` (the runtime model and its operational-semantics preservation proofs) has been **complete**
-since 2026-07-26. As of 2026-07-28, `Gc/Reachability/`'s CR3 layer (`Validity/Preservation/*.lean`) is
+since 2026-07-26. As of 2026-07-28, `Gc/Reachability/Referencable/`'s CR3 layer (`Validity/Preservation/*.lean`) is
 now **also complete: all 9 operations proved, zero `sorry`** — `Enter`/`Exit`/`MakeObjStack`/
 `MakeObjRegion`/`MakeRegion`/`Merge` (earlier sessions), `FieldAsgn`/`VarAsgn` (earlier this session), and
 finally `Swap.lean`'s `swap_cr3` (see its own "Current known state" bullet above for how it combines the
@@ -1038,18 +1054,18 @@ non-operation-specific fact that had accumulated in an arbitrary operation's own
 (originally in `Merge.lean`; used by `Corollaries.lean` itself plus `Swap`/`Exit`/`VarAsgn`/
 `MakeObjRegion`'s CR3 files). Names were kept identical to their pre-extraction names to avoid a mass
 rename across ~40 call sites — only the *location* and *import path* changed. Every
-`Gc/Reachability/Validity/Preservation/*.lean` file's imports were updated to `import
+`Gc/Reachability/Referencable/Validity/Preservation/*.lean` file's imports were updated to `import
 Gc.Model.Preservation.Common` directly (dropping `Gc.Model.Preservation.Swap`/`Exit` where that was the
 only reason for the import; `Swap.lean`/`Exit.lean`/`Merge.lean`'s own Reachability-layer files keep their
 legitimate operation-specific import *and* gained the explicit `Common` import, rather than relying on
-getting these facts transitively). `Gc/Reachability/Corollaries.lean` now imports
+getting these facts transitively). `Gc/Reachability/Referencable/Corollaries.lean` now imports
 `Gc.Model.Preservation.Common` instead of `Gc.Model.Preservation.Merge`.
 
 The triplicated `resolveV_frameRoot`/`resolveFA_frameReach` pair (`fieldAsgn_corollary_resolveV_frameRoot`/
 `varAsgn_corollary_resolveV_frameRoot`/`swap_corollary_resolveV_frameRoot`, and
 `varAsgn_corollary_resolveFA_frameReach`/`swap_corollary_resolveFA_frameReach`) were byte-for-byte
 identical private copies in `FieldAsgn.lean`/`VarAsgn.lean`/`Swap.lean` — these are now a single public
-`resolveV_frameRoot`/`resolveFA_frameReach` pair in `Gc.Reachability.Corollaries` (already imported
+`resolveV_frameRoot`/`resolveFA_frameReach` pair in `Gc.Reachability.Referencable.Corollaries` (already imported
 everywhere they're needed), and all call sites across the three files were renamed to the shared,
 un-prefixed names.
 
@@ -1058,7 +1074,7 @@ of `Gc/`) after every edit.
 
 **A second consolidation pass (2026-07-28, same day, later session) went beyond import-location smells and
 found genuinely reconstructed proofs** — same theorem, copy-pasted body, in multiple
-`Gc/Reachability/Validity/Preservation/*.lean` files, not just a borrowed lemma:
+`Gc/Reachability/Referencable/Validity/Preservation/*.lean` files, not just a borrowed lemma:
 - `stackWithIndex_getElem_index_eq` (`Common.lean`): `cfg.stackWithIndex[fid]? = some frame → frame.index
   = fid`, fully generic (no `cfg'`/mutation involved at all) — was three byte-for-byte-identical private
   copies (`enter`/`exit`/`makeObjStack_corollary_getElem_index_eq`).
@@ -1116,7 +1132,7 @@ indirection layer with no real duplication removed, so it wasn't worth the risk.
 
 **Update (2026-07-29): `CR5_step` completed for all 9 operations, then restructured to match
 report.pdf's own statement (CR5'→CR5 rename), and `CR4` was generalized to cover `RId` references
-too** — see `Gc/Reachability/Validity/CR5.lean`'s and `Gc/Reachability/Corollaries/CR4.lean`'s own
+too** — see `Gc/Reachability/Referencable/Validity/CR5.lean`'s and `Gc/Reachability/Referencable/Corollaries/CR4.lean`'s own
 entries above for the full breakdown. Two more structural changes landed the same day:
 
 - **`Corollaries.lean` split** into `Corollaries/{Common,CR1,CR2,CR4}.lean`, and CR1/CR2/CR4's headline
@@ -1126,25 +1142,25 @@ entries above for the full breakdown. Two more structural changes landed the sam
   `AllPreserve`/`allPreserve_ValidConfig`/`allPreserve_ValidReachableConfig` were genuine, load-bearing
   dependencies of `CR5.lean`. `Stmt`/`step` moved to `Gc/Model/Mutation/Stmt.lean`; the two
   `AllPreserve` instances folded into their respective layer's existing `Preservation.lean` aggregator
-  (`Gc/Model/Preservation.lean` / `Gc/Reachability/Validity/Preservation.lean`), which already imports
+  (`Gc/Model/Preservation.lean` / `Gc/Reachability/Referencable/Validity/Preservation.lean`), which already imports
   exactly the per-operation facts each dispatcher needs. `Scratch.lean` itself was deleted; no proof or
   statement content changed.
 
 Both verified via full `lake build` (1066 jobs) plus an explicit build of
-`Gc.Reachability.Validity.CR5` (still outside the default `Gc.lean` target — nothing downstream needs
+`Gc.Reachability.Referencable.Validity.CR5` (still outside the default `Gc.lean` target — nothing downstream needs
 it yet), zero live `sorry`.
 
 **Current overall state** (this "Next planned step" section itself had drifted before this pass — the
 `Mutation.lean`→`Mutation/` split and the deletion of the old `Reachability.lean` both predate the CR5
 work above and were previously undocumented here; see the Architecture section for both):
 - `Gc/Model/` — complete, zero `sorry`.
-- `Gc/Reachability/Validity/Reachable.lean` (CR3, all 9 operations) — complete, zero `sorry`.
-- `Gc/Reachability/Corollaries/{CR1,CR2,CR4}.lean` — complete.
-- `Gc/Reachability/Validity/CR5.lean` (`CR5_step`, single-step, all 9 operations) — complete, zero
+- `Gc/Reachability/Referencable/Validity/Reachable.lean` (CR3, all 9 operations) — complete, zero `sorry`.
+- `Gc/Reachability/Referencable/Corollaries/{CR1,CR2,CR4}.lean` — complete.
+- `Gc/Reachability/Referencable/Validity/CR5.lean` (`CR5_step`, single-step, all 9 operations) — complete, zero
   `sorry`.
 - `Gc/Equivalence/Equivalence.lean` — still a genuine one-line stub (`import Gc.Model.Types` only), now
   tracked/committed (previously untracked WIP).
-- `Gc/Reachability/Guarantees.lean`/`Invariants.lean` — still empty / no proofs.
+- `Gc/Reachability/Referencable/Guarantees.lean`/`Invariants.lean` — still empty / no proofs.
 
 **Concretely still open** (multi-step CR5 deprioritized per user direction 2026-07-29 — not currently
 being pursued, see `CR5.lean`'s own notes above):

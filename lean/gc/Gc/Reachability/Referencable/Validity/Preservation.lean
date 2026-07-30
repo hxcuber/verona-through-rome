@@ -1,14 +1,14 @@
-import Gc.Reachability.Validity.Preservation.Enter
-import Gc.Reachability.Validity.Preservation.Exit
-import Gc.Reachability.Validity.Preservation.FieldAsgn
-import Gc.Reachability.Validity.Preservation.MakeObjRegion
-import Gc.Reachability.Validity.Preservation.MakeObjStack
-import Gc.Reachability.Validity.Preservation.MakeRegion
-import Gc.Reachability.Validity.Preservation.Merge
-import Gc.Reachability.Validity.Preservation.Swap
-import Gc.Reachability.Validity.Preservation.VarAsgn
+import Gc.Reachability.Referencable.Validity.Preservation.Enter
+import Gc.Reachability.Referencable.Validity.Preservation.Exit
+import Gc.Reachability.Referencable.Validity.Preservation.FieldAsgn
+import Gc.Reachability.Referencable.Validity.Preservation.MakeObjRegion
+import Gc.Reachability.Referencable.Validity.Preservation.MakeObjStack
+import Gc.Reachability.Referencable.Validity.Preservation.MakeRegion
+import Gc.Reachability.Referencable.Validity.Preservation.Merge
+import Gc.Reachability.Referencable.Validity.Preservation.Swap
+import Gc.Reachability.Referencable.Validity.Preservation.VarAsgn
 import Gc.Model.Preservation
-import Gc.Reachability.Validity.Reachable
+import Gc.Reachability.Referencable.Validity.Reachable
 
 -- `Reachability`-layer analogue of `Gc.Model.Preservation`'s `allPreserve_ValidConfig`: every
 -- operation preserves `ValidReachableConfig` (`ValidConfig` plus CR3), not just `ValidConfig`.

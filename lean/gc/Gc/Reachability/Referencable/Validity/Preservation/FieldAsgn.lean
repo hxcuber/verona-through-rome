@@ -1,8 +1,8 @@
 import Gc.Model.Mutation.FieldAsgn
 import Gc.Model.Preservation.FieldAsgn
 import Gc.Model.Preservation.Common
-import Gc.Reachability.Validity.Reachable
-import Gc.Reachability.Corollaries.Common
+import Gc.Reachability.Referencable.Validity.Reachable
+import Gc.Reachability.Referencable.Corollaries.Common
 
 -- fieldAsgn never touches a frame's `regionId`/`bridgeVar`/`varMap` anywhere: the STACK branch
 -- only replaces a value inside the last frame's own `objMap`, and the REGION branch doesn't touch
@@ -318,7 +318,7 @@ private theorem fieldAsgn_corollary_region_objAt_mutated {cfg cfg' : RuntimeConf
 -- here: a chain rooted at a suspended frame can never even reach the mutated container in the
 -- first place (`FrameReferencable_stk_index_le`/`_owner_index_le` bound any object reachable from a
 -- suspended frame's own index, which is strictly below the mutated container's owner index).
--- Packaged here as its own reusable theorem since CR5 (`Gc/Reachability/Validity/CR5.lean`) needs
+-- Packaged here as its own reusable theorem since CR5 (`Gc/Reachability/Referencable/Validity/CR5.lean`) needs
 -- exactly this fact, not CR3's later-frame-implies-earlier-frame shape.
 theorem fieldAsgn_corollary_frameReferencable_iff_of_lt (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
     (h : fieldAsgn xf y cfg = some cfg')

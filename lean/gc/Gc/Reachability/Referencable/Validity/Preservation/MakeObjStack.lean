@@ -1,7 +1,7 @@
 import Gc.Model.Mutation.MakeObjStack
 import Gc.Model.Preservation.MakeObjStack
 import Gc.Model.Preservation.Common
-import Gc.Reachability.Validity.Reachable
+import Gc.Reachability.Referencable.Validity.Reachable
 
 -- makeObjStack only ever inserts a *fresh* key into the last frame's own objMap, so for any
 -- oid ≠ freshObjectId, `loc?` is completely unaffected. Adapts the same `loc_eq_of_ne_fresh`-style
@@ -448,7 +448,7 @@ private theorem makeObjStack_corollary_frameRoot_down {cfg cfg' : RuntimeConfig}
 -- `FrameReferencable` is completely unaffected at any position strictly before the mutated (last)
 -- one -- the frame-transport argument `makeObjStack_cr3` already builds inline for itself
 -- (`frame_transport_down`/`_up`/its own `FrameRoot` iff), packaged here as its own reusable
--- theorem since CR5 (`Gc/Reachability/Validity/CR5.lean`) needs exactly this fact, not CR3's
+-- theorem since CR5 (`Gc/Reachability/Referencable/Validity/CR5.lean`) needs exactly this fact, not CR3's
 -- later-frame-implies-earlier-frame shape.
 theorem makeObjStack_corollary_frameReferencable_iff_of_lt (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
     (h : makeObjStack x cfg = some cfg')

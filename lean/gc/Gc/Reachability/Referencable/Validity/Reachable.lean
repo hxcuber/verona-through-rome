@@ -1,7 +1,7 @@
 import Gc.Model.Types
 import Gc.Model.Helpers
 import Gc.Model.Validity
-import Gc.Reachability.Semantics
+import Gc.Reachability.Referencable.Semantics
 
 -- report.pdf CR3: if an object o lives in a (suspended) region R with associated frame F,
 -- and o is frame-reachable from some later frame F', then o is frame-reachable from F itself.

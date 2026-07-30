@@ -1,6 +1,6 @@
 import Gc.Model.Types
 import Gc.Model.Helpers
-import Gc.Reachability.Semantics
+import Gc.Reachability.Referencable.Semantics
 
 -- Generalized over `rid` (rather than fixing `rid := frame.regionId` up front), for the same
 -- reason as RegionReferencable_stays_in_region_aux: `frame.regionId` is a projection, not a bare

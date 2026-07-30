@@ -1,7 +1,7 @@
 import Gc.Model.Types
 import Gc.Model.Helpers
 import Gc.Model.Validity
-import Gc.Reachability.Semantics
+import Gc.Reachability.Referencable.Semantics
 
 -- Activity in an active region does not affect liveness in suspended regions
 -- What if a suspended region contains an object that is reachable from the stack,

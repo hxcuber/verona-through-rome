@@ -1,6 +1,6 @@
 import Gc.Model.Types
 import Gc.Model.Helpers
-import Gc.Reachability.Semantics
+import Gc.Reachability.Referencable.Semantics
 
 structure Path where
   refs : List Reference

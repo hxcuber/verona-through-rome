@@ -1,8 +1,8 @@
 import Gc.Model.Mutation.Merge
 import Gc.Model.Preservation.Merge
 import Gc.Model.Preservation.Common
-import Gc.Reachability.Validity.Reachable
-import Gc.Reachability.Corollaries.Common
+import Gc.Reachability.Referencable.Validity.Reachable
+import Gc.Reachability.Referencable.Corollaries.Common
 
 -- Every on-stack frame's region is Open (L2), but `rid'` (the region being merged away) is
 -- Closed -- so no on-stack frame (in particular, no frame reachable via `vcfg.l2`) can ever own
@@ -417,7 +417,7 @@ private theorem merge_corollary_frameRoot_down (vcfg' : ValidConfig cfg')
 -- `FrameReferencable` is completely unaffected at any position strictly before the mutated (last)
 -- one -- generalizes the frame-transport / heap-lookup argument `merge_cr3` already builds inline
 -- for its own specific `frame` (`frame_transport_down`/`_up`, `hframe_ridne_frame1`/
--- `hframe_ridne_rid'`) to an arbitrary suspended `fid`, since CR5 (`Gc/Reachability/Validity/
+-- `hframe_ridne_rid'`) to an arbitrary suspended `fid`, since CR5 (`Gc/Reachability/Referencable/Validity/
 -- CR5.lean`) needs exactly this fact, not CR3's later-frame-implies-earlier-frame shape. Unlike
 -- `makeObjStack`/`makeObjRegion`/`makeRegion`'s analogues, only `ValidConfig cfg` is needed (no
 -- `cfg'` validity, matching `merge_corollary_refStep_iff`'s own unconditional-in-`cfg'` shape).

@@ -1,8 +1,8 @@
 import Gc.Model.Mutation.Exit
 import Gc.Model.Preservation.Exit
 import Gc.Model.Preservation.Common
-import Gc.Reachability.Validity.Reachable
-import Gc.Reachability.Corollaries.Common
+import Gc.Reachability.Referencable.Validity.Reachable
+import Gc.Reachability.Referencable.Corollaries.Common
 
 theorem exit_corollary_stackWithIndex_eq {cfg : RuntimeConfig} {poppedFrame : Frame}
     (hlast : cfg.stack.getLast? = some poppedFrame) :

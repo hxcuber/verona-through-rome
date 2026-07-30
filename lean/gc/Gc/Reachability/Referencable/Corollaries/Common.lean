@@ -2,11 +2,11 @@ import Gc.Model.Types
 import Gc.Model.Helpers
 import Gc.Model.Validity
 import Gc.Model.Preservation.Common
-import Gc.Reachability.Semantics
+import Gc.Reachability.Referencable.Semantics
 
 /-!
 Generic, non-CR-specific reachability facts shared across `Corollaries/CR1.lean`,
-`Corollaries/CR2.lean`, `Corollaries/CR4.lean`, and several `Gc/Reachability/Validity/
+`Corollaries/CR2.lean`, `Corollaries/CR4.lean`, and several `Gc/Reachability/Referencable/Validity/
 Preservation/*.lean` files. Extracted from the original monolithic `Corollaries.lean` (mirrors
 `Gc/Model/Preservation/Common.lean`'s own consolidation).
 -/

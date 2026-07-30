@@ -1,12 +1,12 @@
 import Gc.Model.Mutation.Stmt
-import Gc.Reachability.Validity.Preservation
+import Gc.Reachability.Referencable.Validity.Preservation
 
 /-!
 report.pdf CR5: "Activity in an active region and frame cannot affect the stack-reachability
 of objects within suspended regions."
 
-Unlike CR1-CR4 (`Gc/Reachability/Corollaries/{CR1,CR2,CR4}.lean`) and CR3's `ValidConfig`-style
-invariant (`Gc/Reachability/Validity/Reachable.lean`), CR5 isn't a property of a single config --
+Unlike CR1-CR4 (`Gc/Reachability/Referencable/Corollaries/{CR1,CR2,CR4}.lean`) and CR3's `ValidConfig`-style
+invariant (`Gc/Reachability/Referencable/Validity/Reachable.lean`), CR5 isn't a property of a single config --
 it's a claim about *change over a run of the operational semantics*: as long as some frame stays
 suspended (never becomes the active/last frame) across a sequence of `Mutation.lean` operations,
 its frame-reachable set never changes across that whole sequence, no matter how long it is or
