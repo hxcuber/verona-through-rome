@@ -1125,3 +1125,16 @@ theorem makeObjStack_frame_mem_up {cfg cfg' : RuntimeConfig} (h : makeObjStack x
   · rw [List.getElem_append_left hnlt, List.getElem_dropLast hnlt]
     exact hfeq
 
+-- `ReachableStep` agrees between `cfg`/`cfg'` completely unconditionally -- heap is never
+-- touched by `makeObjStack` at all, so RId-sourced steps agree trivially too.
+theorem makeObjStack_step_eq {cfg cfg' : RuntimeConfig} (h : makeObjStack x cfg = some cfg') :
+    ReachableStep cfg = ReachableStep cfg' := by
+  obtain ⟨lastFrame, hlast, hcfg'⟩ := makeObjStack_cases h
+  funext a b
+  apply propext
+  cases a with
+  | OId oid => exact makeObjStack_oid_step_iff h oid b
+  | RId rid =>
+    rw [ReachableStep_rid_iff, ReachableStep_rid_iff]
+    rw [hcfg']
+
