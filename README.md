@@ -19,3 +19,5 @@ Major changes from the report
 - reorganisation - `Mutation.lean` is gone, instead there is a `Mutation` folder, within it is a file for each mutation function, along with a lemma that inverts the function so we get all of its cases for free.
 
 - lemmas common to preservation proofs are now extracted to `Gc/Model/Preservation/Common.lean`, although they are also used in `Gc/Reachability/Validity/Preservation`, so it remains to be seen if they will stay there, but for now it is what it is.
+
+- the proposed ideas of reachability in the report aren't entirely accurate - their lean formalisation is actually to do with reference chains, so I've renamed them to `_Referencable` instead of `_Reachable`. There is a separate `_Reachable`. The main difference between these two is that whereas `_Referencable` stops as soon as it meets a region reference, `_Reachable` can continue, provided that the region is closed. There is a point to be made here about how separating regions and objects leads to this.
