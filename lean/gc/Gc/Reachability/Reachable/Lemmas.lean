@@ -1107,3 +1107,21 @@ theorem makeObjStack_frame_cases {cfg cfg' : RuntimeConfig} {lastFrame : Frame} 
     subst hmem
     exact ⟨rfl, rfl, rfl, rfl, rfl⟩
 
+-- A pre-existing frame with index strictly below the last one survives `makeObjStack`
+-- unchanged, at the same index.
+theorem makeObjStack_frame_mem_up {cfg cfg' : RuntimeConfig} (h : makeObjStack x cfg = some cfg')
+    {frame : FrameWithIndex} (hframe : frame ∈ cfg.stackWithIndex) (hlt : frame.index < cfg.stack.length - 1) :
+    frame ∈ cfg'.stackWithIndex := by
+  obtain ⟨lastFrame, hlast, hcfg'⟩ := makeObjStack_cases h
+  unfold RuntimeConfig.stackWithIndex at hframe ⊢
+  rw [hcfg']
+  dsimp only
+  obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hframe
+  have hidx : frame.index = n := by rw [← hfeq]
+  have hnlt : n < cfg.stack.dropLast.length := by rw [List.length_dropLast]; rw [hidx] at hlt; exact hlt
+  apply List.mem_mapIdx.mpr
+  refine ⟨n, ?_, ?_⟩
+  · rw [List.length_append]; omega
+  · rw [List.getElem_append_left hnlt, List.getElem_dropLast hnlt]
+    exact hfeq
+
