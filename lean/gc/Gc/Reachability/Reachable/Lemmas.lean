@@ -977,3 +977,94 @@ theorem freshObjectId_objAt_none {cfg : RuntimeConfig} :
   dsimp only
   rw [hloc]
 
+-- The freshly-allocated object resolves to its own (empty) content in cfg'.
+theorem makeObjStack_fresh_objAt_cfg' {cfg cfg' : RuntimeConfig} (h : makeObjStack x cfg = some cfg') :
+    (Reference.OId cfg.freshObjectId).objAt? cfg' = some (∅ : Object) := by
+  obtain ⟨lastFrame, hlast, hcfg'⟩ := makeObjStack_cases h
+  have hnotmem := cfg.freshObjectId_not_mem
+  unfold RuntimeConfig.objectIds at hnotmem
+  rw [List.mem_append] at hnotmem
+  push_neg at hnotmem
+  obtain ⟨-, hnotHeap⟩ := hnotmem
+  have hne' : cfg.stack ≠ [] := by intro hnil; rw [hnil] at hlast; simp at hlast
+  have hstackEq : cfg.stack = cfg.stack.dropLast ++ [lastFrame] := by
+    rw [List.getLast?_eq_getLast_of_ne_nil hne', Option.some_inj] at hlast
+    rw [← hlast]; exact (List.dropLast_append_getLast hne').symm
+  have hheapNone : cfg.heap.entries.find?
+      (fun (e : Sigma (fun _ : RegionId => Region)) => e.snd.objMap.keys.contains cfg.freshObjectId) = none := by
+    rw [List.find?_eq_none]
+    intro entry hentry hcontra
+    apply hnotHeap
+    unfold Heap.objectIds
+    rw [List.mem_flatten]
+    refine ⟨entry.snd.objectIds, List.mem_map_of_mem hentry, ?_⟩
+    unfold Region.objectIds
+    exact List.contains_iff_mem.mp hcontra
+  have hcontainsNew : (lastFrame.objMap.insert cfg.freshObjectId ∅).keys.contains cfg.freshObjectId = true := by
+    rw [AList.keys_insert]
+    simp
+  set dropLastLen : Nat := cfg.stack.dropLast.length with hdropLastLen_def
+  set newLastFrame : Frame := { regionId := lastFrame.regionId, bridgeVar := lastFrame.bridgeVar, objMap := lastFrame.objMap.insert cfg.freshObjectId ∅, varMap := lastFrame.varMap.insert x (Reference.OId cfg.freshObjectId) } with hnewLastFrame_def
+  have hloc' : (Reference.OId cfg.freshObjectId).loc? cfg' = some (Location.Stk dropLastLen) := by
+    unfold Reference.loc?
+    dsimp only
+    rw [hcfg']
+    dsimp only
+    rw [hheapNone]
+    unfold RuntimeConfig.stackWithIndex
+    dsimp only
+    rw [List.mapIdx_concat, List.findRev?_eq_find?_reverse, List.reverse_append,
+      List.reverse_singleton, List.singleton_append]
+    have hcontainsNew' : newLastFrame.objMap.keys.contains cfg.freshObjectId = true := hcontainsNew
+    have hfindEq : List.find? (fun (frame : FrameWithIndex) => frame.objMap.keys.contains cfg.freshObjectId)
+        (({ toFrame := newLastFrame, index := dropLastLen } : FrameWithIndex) ::
+          (List.mapIdx (fun idx frame => ({ toFrame := frame, index := idx } : FrameWithIndex)) cfg.stack.dropLast).reverse) =
+        some { toFrame := newLastFrame, index := dropLastLen } :=
+      List.find?_cons_of_pos hcontainsNew'
+    rw [hfindEq]
+  unfold Reference.objAt?
+  dsimp only
+  rw [hloc']
+  dsimp only
+  have hmemNew : ({ toFrame := newLastFrame, index := dropLastLen } : FrameWithIndex) ∈ cfg'.stackWithIndex := by
+    rw [hcfg']
+    unfold RuntimeConfig.stackWithIndex
+    dsimp only
+    apply List.mem_mapIdx.mpr
+    refine ⟨dropLastLen, by rw [hdropLastLen_def]; simp, ?_⟩
+    dsimp only
+    rw [List.getElem_append_right (by rw [hdropLastLen_def])]
+    simp [hdropLastLen_def]
+  have hfind : cfg'.stackWithIndex.find? (fun frame => frame.index == dropLastLen) =
+      some { toFrame := newLastFrame, index := dropLastLen } :=
+    swap_corollary_stackWithIndex_find_eq hmemNew
+  rw [hfind]
+  have hlookupNew : newLastFrame.objMap.lookup cfg.freshObjectId = some (∅ : Object) := by
+    rw [hnewLastFrame_def]
+    dsimp only
+    rw [AList.lookup_insert]
+  exact hlookupNew
+
+-- `ReachableStep` agrees between `cfg`/`cfg'` for every oid, unconditionally: any hop
+-- sourced at the freshly-allocated id is vacuously impossible on both sides (it doesn't
+-- resolve at all in cfg, and resolves to an empty object in cfg').
+theorem makeObjStack_oid_step_iff {cfg cfg' : RuntimeConfig} (h : makeObjStack x cfg = some cfg')
+    (oid : ObjectId) (b : Reference) :
+    ReachableStep cfg (Reference.OId oid) b ↔ ReachableStep cfg' (Reference.OId oid) b := by
+  by_cases hne : oid = cfg.freshObjectId
+  · subst hne
+    constructor
+    · intro hstep
+      rw [ReachableStep_oid_iff] at hstep
+      obtain ⟨obj, hobjAt, -⟩ := hstep
+      rw [freshObjectId_objAt_none] at hobjAt
+      exact absurd hobjAt (by simp)
+    · intro hstep
+      rw [ReachableStep_oid_iff] at hstep
+      obtain ⟨obj, hobjAt, hcontains⟩ := hstep
+      rw [makeObjStack_fresh_objAt_cfg' h] at hobjAt
+      injection hobjAt with hobjAt
+      rw [← hobjAt] at hcontains
+      simp [Object.refs] at hcontains
+  · rw [ReachableStep_oid_iff, ReachableStep_oid_iff, makeObjStack_objAt_eq_of_ne h hne]
+
