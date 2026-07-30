@@ -197,15 +197,61 @@ Note: an earlier `Gc/Reachability/Reachability.lean` (a fuel-based *computationa
 to exist here but pattern-matched on wrong `Location` constructor names and never built; it has since
 been **deleted entirely** (not just excluded from the build) — see the Commands section above.
 
-### `Gc/Reachability/Reachable/` — new sibling reachability layer (added 2026-07-30, not yet populated)
+### `Gc/Reachability/Reachable/` — new sibling reachability layer (added 2026-07-30, now under active development)
 
-A new folder alongside `Referencable/`, added at the same time as the `Reachability/`→
-`Reachability/Referencable/` move above. Currently holds a single one-line stub file,
-`Semantics.lean` (`import Gc.Model.Types` only, matching `Gc/Equivalence/Equivalence.lean`'s stub
-convention), left deliberately empty for the user to populate directly — not yet imported from
-`Gc.lean`, so it isn't built by a bare `lake build` until it's wired in. No design decisions about
-what this layer's `Semantics.lean` will define have been made yet; treat any claim about its contents
-elsewhere in this file as stale until this note is updated.
+A folder alongside `Referencable/`, added at the same time as the `Reachability/`→
+`Reachability/Referencable/` move above. Not yet imported from `Gc.lean`, so none of it is built by a
+bare `lake build` until it's wired in — check it via qualified-name builds
+(`lake build Gc.Reachability.Reachable.Scratch`) or the Lean LSP tools. Per explicit user instruction,
+this whole layer deliberately does **not** import anything from `Gc.Reachability.Referencable` — its
+own `Semantics.lean` restates `deref?`/`ReachableStep` fresh rather than reusing `Referencable`'s
+`RefStep`, even though the two are almost the same shape. The point of the layer, and the reason it
+exists as a sibling rather than living inside `Referencable/`: report.pdf's own reachability notion is
+actually about **reference chains**, which stop dead the moment they hit a region reference (`RId`) —
+that's what `Referencable/`'s `RefStep`/`objAt?` formalizes. `Reachable/`'s `deref?` is deliberately
+*stronger*: an `RId` step is allowed to continue into a **Closed** region's own bridge object, so a
+chain can cross a region boundary that `Referencable/` would stop at. See
+`Gc/Reachability/Reachable/Corollaries.lean`'s own header comment for the precise phrasing.
+
+- `Semantics.lean` — `Reference.deref?` (the `OId` branch is exactly `Referencable`'s `objAt?`
+  restated via `do`-notation — see `deref?_oid_eq_objAt?` in `Corollaries.lean`; the new content is the
+  `RId` branch, which steps into a `Closed` region's bridge object, `none` if `Open`), `ReachableStep`
+  (`a` steps to `b` via `deref?`, not `objAt?`), `RegionReachable`/`FrameReachable`/`StackReachable`/
+  `FrameRoot` (same shape as `Referencable/Semantics.lean`'s, just built on the new `ReachableStep`), and
+  `RegionReachable_iff_reflTransGen`/`FrameReachable_iff_reflTransGen` (converting to
+  `Relation.ReflTransGen (ReachableStep cfg) start ref` form, the representation the proofs below
+  actually work with).
+- `Corollaries.lean` — `deref?_oid_eq_objAt?`/`ReachableStep_rid_iff`/`ReachableStep_oid_iff` (unfolding
+  lemmas for the two `ReachableStep` sources), `RegionReachable_implies_FrameRechable`, and the two defs
+  this whole layer's current work centers on:
+  - `FrameReachable_at_later_frame_implies_FrameReachable_at_frame cfg` — a CR3-style hypothesis (same
+    shape as `Referencable`'s report.pdf `CR3`, restated over this layer's own `FrameReachable`), taken
+    as an explicit hypothesis on the theorem below rather than proved — **its own preservation across a
+    mutation isn't proved yet**, deliberately deferred per user direction.
+  - `StackReachable_invariant_for_suspended_region_objects cmd` — the actual claim under proof: for a
+    `ValidConfig cfg`, a mutation `cmd`, and a frame `frame` whose region is *suspended* (index strictly
+    below the active/last frame's) and holds some `oid` (`oid.loc? cfg = Rgn frame.regionId`),
+    `StackReachable cfg (OId oid) ↔ StackReachable cfg' (OId oid)` — i.e. "liveness of objects in
+    suspended regions is invariant to activity in an active region." This is the user's own
+    reformulation of report.pdf Section 5 paragraph 4's claim; deliberately **drops** the paper's own
+    qualifier "as long as the active region remains active" (discussed at length and judged unnecessary
+    for this single-step formulation — the invariant is stated per-operation, so there's no later point
+    at which "the active region" could have already stopped being active).
+- `Lemmas.lean` — a growing, per-operation reusable lemma toolkit (mirrors `Referencable/Validity/
+  Preservation/*.lean`'s per-op corollary convention, but all in one file rather than split, since this
+  layer is still being actively drafted and the eventual per-op split isn't decided yet). Holds both
+  general machinery (`SafeRef`/`predecessor_safe`/`safe_reflTransGen_transport` — a backward,
+  H3/L2-driven chase used by `enter`'s proof; `stackWithIndex_find_index_eq_getElem`,
+  `stackWithIndex_getLast_mem` — generic `stackWithIndex`↔`getLast?`/index facts reused across ops) and
+  per-operation corollaries (`enter_*`, `exit_*`, `makeObjStack_*`, `freshObjectId_*`) proving the
+  `loc?`/`objAt?`/`ReachableStep` agreement facts and frame-membership transports each op's proof needs.
+- `Scratch.lean` — one `stackReachable_invariant_<op>` theorem per `Stmt` constructor (skeletons
+  drafted for all 9; proved so far: `enter`, `exit`, `makeObjStack` — see "Current known state" below),
+  plus a `stackReachable_invariant_all` dispatcher (`cases cmd with ...`) mirroring
+  `Referencable/Validity/Preservation.lean`'s `allPreserve_ValidConfig` pattern. Despite the name, this
+  file (like the old, now-deleted `Gc/Scratch.lean`) holds genuine, load-bearing proof content, not
+  throwaway exploration — kept as one file rather than split per-op since the whole layer is still
+  mid-draft.
 
 ## Current known state (check before assuming something works)
 
@@ -1030,6 +1076,46 @@ Elsewhere:
 - `Gc/Reachability/Referencable/Guarantees.lean` is empty; `Gc/Reachability/Referencable/Invariants.lean` has no proofs yet — this
   layer is much earlier-stage than `Gc/Model/`.
 
+### `Gc/Reachability/Reachable/` per-operation status (`stackReachable_invariant_<op>` in `Scratch.lean`)
+
+Per-operation status of `StackReachable_invariant_for_suspended_region_objects`, proved one `Stmt` at a
+time, easiest-to-hardest, each checkpointed as its own commit (`draft(lean4): ...` for `Lemmas.lean`
+groundwork, `prove(lean4): stackReachable_invariant_<op>, zero sorry` once the main theorem closes):
+
+- **`enter`/`exit`** — **fully proved, zero `sorry`** (both axiom-checked to only depend on
+  `propext`/`Classical.choice`/`Quot.sound`). Both follow the same shape: forward direction transports
+  any pre-existing witness frame up unchanged; backward direction splits on whether the `cfg'`-side
+  witness frame is a survivor (transports down unchanged) or the newly-pushed/about-to-be-popped frame,
+  closed via a `SafeRef`-based backward chase (`safe_reflTransGen_transport`/`_root_safe` in
+  `Lemmas.lean`) showing any chain reaching such a frame's root must already have passed back through
+  `frame`'s own region — i.e. the "unsafe" root case is vacuous once `hloc` pins `oid`'s location.
+- **`makeObjStack`** — **fully proved, zero `sorry`** (finished 2026-07-31; axiom-checked). Structurally
+  simpler than `enter`/`exit` in one key respect: `makeObjStack_step_eq` shows `ReachableStep cfg =
+  ReachableStep cfg'` as a **literal function equality**, not just an iff — the heap is never touched at
+  all, so only the *root set* (not the step relation) can differ between `cfg`/`cfg'`. The one new root
+  the mutation can introduce is `x ↦ OId cfg.freshObjectId`; ruling this out as a viable path to `oid`
+  needed two new general lemmas — `freshObjectId_loc_none`/`_ne_rgn` (a fresh id resolves to no
+  location at all, so in particular never to `Rgn frame.regionId`, contradicting `hloc` if `oid` were
+  ever forced to equal it) and `stackWithIndex_getLast_mem` (reifies `cfg.stack.getLast?` as a genuine
+  `FrameWithIndex` member of `cfg.stackWithIndex`, needed to hand `lastFrame` itself to `hcr3` as the
+  "later frame" witness in the backward direction's mutated-last-frame case). The var-root case
+  (`var = x`) closes by deriving `oid = cfg.freshObjectId` from a zero-or-one-step `ReflTransGen` case
+  split (`Relation.ReflTransGen.cases_head`) and contradicting it against `hloc`/`freshObjectId_loc_ne_rgn`;
+  every other case reduces to `hcr3` applied to `lastFrame` (reindexed via `stackWithIndex_getLast_mem`)
+  exactly as in `enter`/`exit`.
+- **`makeObjRegion`/`makeRegion`/`merge`/`varAsgn`/`fieldAsgn`/`swap`** — **not yet started**, still
+  literal `sorry` in `Scratch.lean`. Per user direction, work proceeds one operation at a time,
+  checkpointed after each, stopping for explicit confirmation before starting the next. Expected
+  difficulty ordering (by analogy with the `Referencable/` CR3 proofs, though not guaranteed to hold
+  here): `makeObjRegion`/`makeRegion` should be close cousins of `makeObjStack` (same fresh-id-root
+  argument, heap-side instead of/alongside stack-side); `merge` relocates existing objects rather than
+  allocating, so likely needs no fresh-id argument at all (mirroring how easy `merge_cr3` turned out to
+  be in `Referencable/`); `varAsgn`/`fieldAsgn`/`swap` write *pre-existing* references into roots/fields,
+  so (again by `Referencable/` analogy) likely need a `resolveV`/`resolveFA`-provenance-tracing
+  "root escape" argument analogous to `varAsgn_corollary_resolveFA_frameReach` — none of that machinery
+  exists yet in this layer's `Lemmas.lean` and would need re-deriving from scratch (this layer
+  deliberately doesn't import `Referencable/`'s copy).
+
 ## Next planned step
 
 `Gc/Model/` (the runtime model and its operational-semantics preservation proofs) has been **complete**
@@ -1173,3 +1259,11 @@ being pursued, see `CR5.lean`'s own notes above):
 - After CR6, the natural next target is report.pdf's `Guarantees.lean` (currently empty) — CR5
   (report.pdf: "G3 comes directly as a result of CR5") is specifically the ingredient the
   concurrent-garbage-detection guarantee (G3) needs; CR6 similarly feeds G4/G5.
+
+**Active thread as of 2026-07-31 (separate from the above)**: `Gc/Reachability/Reachable/` — the new
+sibling reachability layer described in its own Architecture bullet above. `enter`/`exit`/`makeObjStack`
+are proved (see that section's "per-operation status" for details); `makeObjRegion`, `makeRegion`,
+`merge`, `varAsgn`, `fieldAsgn`, `swap` are still `sorry` in `Scratch.lean`. This is being worked one
+operation at a time, checkpointed as its own commit, stopping for explicit user confirmation before each
+next operation — **do not proceed past the next unproved operation without asking first**, even though
+that's the opposite default from the CR6/`Guarantees.lean` work above.
