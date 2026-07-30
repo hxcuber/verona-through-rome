@@ -70,12 +70,7 @@ def FrameReachable_at_later_frame_implies_FrameReachable_at_frame (cfg : Runtime
 
 def StackReachable_invariant_for_suspended_region_objects (cmd : Stmt) : Prop :=
   ∀ cfg cfg' : RuntimeConfig, ValidConfig cfg → step cmd cfg = some cfg' →
-    -- CR3-style hypothesis, assumed here rather than proved: anything frame-reachable
-    -- from a later frame into an earlier frame's own region is already frame-reachable
-    -- from that earlier frame itself. Needed for the content-mutating ops (varAsgn,
-    -- fieldAsgn, swap) to rule out a newly-written edge being the *only* witness for a
-    -- suspended-region object's reachability. Its own preservation across `step` is not
-    -- proved yet -- see the `Reachable/Scratch.lean`/`Lemmas.lean` TODOs.
+    -- CR3-style hypothesis, assumed for now -- its preservation isn't proved yet.
     FrameReachable_at_later_frame_implies_FrameReachable_at_frame cfg →
     ∀ frame : FrameWithIndex, frame ∈ cfg.stackWithIndex →
     frame.index < cfg.stackWithIndex.length - 1 →
