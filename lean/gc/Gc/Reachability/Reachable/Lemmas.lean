@@ -733,3 +733,36 @@ theorem exit_reflTransGen_transport_backward {cfg cfg' : RuntimeConfig} (vcfg : 
         · exact exit_rgn_not_popped vcfg vcfg' hlookup hlookup' oidPrev hloc
         · exact exit_stk_not_popped_of_cfg' vcfg h oidPrev hloc
       exact hchainPrev.tail ((exit_oid_step_iff_of_ne_popped vcfg h oidPrev hne cur).mpr hstep)
+
+-- Mirrors `exit_frame_reachable_transport`, backward: any `cfg'.stackWithIndex` member's
+-- reachability of a frame.regionId-object transports down to `cfg`.
+theorem exit_frame_reachable_transport_backward {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : exit cfg = some cfg') {poppedFrame : Frame} {region0 : Region}
+    (hlast : cfg.stack.getLast? = some poppedFrame) (hlen : cfg.stack.length ≥ 2)
+    (hcfg' : cfg' = { cfg with
+      stack := cfg.stack.dropLast,
+      heap := cfg.heap.insert poppedFrame.regionId { region0 with status := Status.Closed } })
+    {oid : ObjectId} {rid : RegionId} {region : Region} (hlookup : cfg.heap.lookup rid = some region)
+    (hlookup' : cfg'.heap.lookup rid = some region) (hopen : region.status = Status.Open)
+    (hloc' : (Reference.OId oid).loc? cfg' = some (Location.Rgn rid))
+    {X : FrameWithIndex} (hXmem : X ∈ cfg'.stackWithIndex)
+    (hXreach : FrameReachable cfg' X.index (Reference.OId oid)) :
+    FrameReachable cfg X.index (Reference.OId oid) := by
+  rw [FrameReachable_iff_reflTransGen] at hXreach
+  obtain ⟨start, hroot, hrtg⟩ := hXreach
+  have hsafe : SafeRef cfg' rid (Reference.OId oid) := Or.inl hloc'
+  have hrtg' := exit_reflTransGen_transport_backward vcfg h hlookup hlookup' hopen hrtg hsafe
+  obtain ⟨hXmemcfg, hXlt⟩ := exit_frame_mem_down h hXmem
+  have hXridNe : X.regionId ≠ poppedFrame.regionId := exit_regionId_ne vcfg hXmemcfg hXlt hlast hlen
+  have hroot' : FrameRoot cfg X.index start := by
+    rcases hroot with ⟨Xf, hXfmem, hXfidx, var, hvar⟩ | ⟨Xf, hXfmem, hXfidx, region', hlookupXf, hbridge⟩
+    · have hXfeq : Xf = X := swap_corollary_stackWithIndex_index_inj hXfmem hXmem hXfidx
+      exact Or.inl ⟨Xf, (hXfeq ▸ hXmemcfg), hXfidx, var, hvar⟩
+    · have hXfeq : Xf = X := swap_corollary_stackWithIndex_index_inj hXfmem hXmem hXfidx
+      have hXfridNe : Xf.regionId ≠ poppedFrame.regionId := hXfeq ▸ hXridNe
+      have hlookupXf' : cfg.heap.lookup Xf.regionId = some region' := by
+        rw [hcfg'] at hlookupXf
+        dsimp only at hlookupXf
+        rwa [AList.lookup_insert_ne hXfridNe] at hlookupXf
+      exact Or.inr ⟨Xf, hXfeq ▸ hXmemcfg, hXfidx, region', hlookupXf', hbridge⟩
+  exact (FrameReachable_iff_reflTransGen cfg X.index (Reference.OId oid)).mpr ⟨start, hroot', hrtg'⟩
