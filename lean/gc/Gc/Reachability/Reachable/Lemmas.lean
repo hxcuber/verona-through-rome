@@ -2166,3 +2166,647 @@ theorem varAsgn_freshvar_last_mem {cfg cfg' : RuntimeConfig} {xf : VarName} {oid
     rw [hstack']; simp
   have hmem := stackWithIndex_getLast_mem hlast'
   rwa [hlen] at hmem
+
+-- ===== fieldAsgn =====
+
+-- FIELD-ASGN-STACK's mutated container always lives on the stack, at index `fidC`. Anything
+-- `FrameReachable` from it (traced backward) stays confined to the stack, with index only ever
+-- increasing (`stack_step_index_le`, chained), all the way back to its own `FrameRoot` -- which
+-- (via `S2`, or a direct contradiction in the bridge case, since a bridge value never resolves
+-- `Stk`) forces the rooting frame's own index to be `≥ fidC`.
+theorem fieldAsgn_stack_container_confined {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
+    {fidC : Index} {oidC : ObjectId} (hlocC : (Reference.OId oidC).loc? cfg = some (Location.Stk fidC))
+    {fid : Index} (hreach : FrameReachable cfg fid (Reference.OId oidC)) :
+    fidC ≤ fid := by
+  rw [FrameReachable_iff_reflTransGen] at hreach
+  obtain ⟨start, hroot, hrtg⟩ := hreach
+  have hback : ∀ ref, Relation.ReflTransGen (ReachableStep cfg) start ref →
+      ∀ oidR fidR, ref = Reference.OId oidR → (Reference.OId oidR).loc? cfg = some (Location.Stk fidR) →
+        ∃ oidS fidS, start = Reference.OId oidS ∧ (Reference.OId oidS).loc? cfg = some (Location.Stk fidS) ∧
+          fidR ≤ fidS := by
+    intro ref hrtg2
+    induction hrtg2 with
+    | refl => intro oidR fidR heq hloc; exact ⟨oidR, fidR, heq, heq ▸ hloc, le_refl _⟩
+    | tail hprev hstep ih =>
+      intro oidR fidR heq hloc
+      subst heq
+      obtain ⟨oidB, fidB, hbeq, hlocB⟩ := predecessor_of_stack_object vcfg hloc hstep
+      obtain ⟨oidS, fidS, hseq, hlocS, hle⟩ := ih oidB fidB hbeq hlocB
+      have hstepBound := stack_step_index_le vcfg hlocB (hbeq ▸ hstep) hloc
+      exact ⟨oidS, fidS, hseq, hlocS, le_trans hstepBound hle⟩
+  obtain ⟨oidS, fidS, hseq, hlocS, hle⟩ := hback (Reference.OId oidC) hrtg oidC fidC rfl hlocC
+  rcases hroot with
+      ⟨frameR, hframeRmem, hframeRidx, var, hvar⟩ |
+      ⟨frameR, hframeRmem, hframeRidx, regionR, hlookupR, hbridge⟩
+  · rw [hseq] at hvar
+    have hmemrefs : (Reference.OId oidS) ∈ frameR.refs := mem_frame_refs_of_mem_varMap hvar
+    have hs2 := vcfg.s2 frameR hframeRmem (Reference.OId oidS) hmemrefs fidS oidS rfl hlocS
+    rw [hframeRidx] at hs2
+    exact le_trans hle hs2
+  · exfalso
+    rw [hseq] at hbridge
+    injection hbridge with hbeq2
+    have hbridgeIn : regionR.bridgeObjectId ∈ regionR.objMap := by
+      apply vcfg.h1
+      unfold Heap.regions
+      exact List.mem_map_of_mem (AList.lookup_mem_entries hlookupR)
+    have hlocBridge := (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨regionR, hlookupR, hbridgeIn⟩
+    rw [← hbeq2] at hlocBridge
+    rw [hlocS] at hlocBridge
+    simp at hlocBridge
+
+-- S3 restated at the `ReachableStep` level (mirrors `stack_step_index_le`'s S2-flavored version):
+-- a stack-to-region hop's *target* region is owned by a frame with index no greater than the
+-- stack source's own.
+theorem stack_step_region_index_le {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
+    {oid : ObjectId} {fidCur : Index} {oid' : ObjectId} {rid' : RegionId}
+    (hloc : (Reference.OId oid).loc? cfg = some (Location.Stk fidCur))
+    (hstep : ReachableStep cfg (Reference.OId oid) (Reference.OId oid'))
+    (hloc' : (Reference.OId oid').loc? cfg = some (Location.Rgn rid')) :
+    ∃ frame' ∈ cfg.stackWithIndex, frame'.regionId = rid' ∧ frame'.index ≤ fidCur := by
+  rw [ReachableStep_oid_iff] at hstep
+  obtain ⟨obj, hobjAt, hcontains⟩ := hstep
+  unfold Reference.objAt? at hobjAt
+  dsimp only at hobjAt
+  rw [hloc] at hobjAt
+  dsimp only at hobjAt
+  cases hfind : cfg.stackWithIndex.find? (fun frame => frame.index == fidCur) with
+  | none => rw [hfind] at hobjAt; simp at hobjAt
+  | some someFrame =>
+    rw [hfind] at hobjAt
+    have hidxEq : someFrame.index = fidCur := by
+      have := List.find?_some hfind
+      exact beq_iff_eq.mp this
+    have hmem : someFrame ∈ cfg.stackWithIndex := List.mem_of_find?_eq_some hfind
+    have hmemrefs : (Reference.OId oid') ∈ someFrame.refs :=
+      mem_frame_refs_of_mem_objMap hobjAt (List.contains_iff_mem.mp hcontains)
+    obtain ⟨frame', hmem', hridEq', hidx'⟩ := vcfg.s3 someFrame hmem (Reference.OId oid') hmemrefs rid' oid' rfl hloc'
+    rw [hidxEq] at hidx'
+    exact ⟨frame', hmem', hridEq', hidx'⟩
+
+-- FIELD-ASGN-REGION's mutated container always lives inside the active frame's own region `rid`
+-- (always Open, since it's on-stack, L2). Anything `FrameReachable` from it (traced backward)
+-- either stays confined to the region the *whole* way back to its own `FrameRoot` (H3,
+-- `predecessor_of_region_object`'s region case; `S1`/`S3` then bound the rooting frame's index),
+-- or "escapes" onto the stack at some intermediate point (`predecessor_of_region_object`'s stack
+-- case; `S1`/`S3` bound *that* point directly, then `fieldAsgn_stack_container_confined` finishes
+-- the job by bounding the rooting frame's index against that intermediate stack point instead).
+theorem fieldAsgn_region_container_confined {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
+    {rid : RegionId} {region : Region} (hlookup : cfg.heap.lookup rid = some region) (hopen : region.status = Status.Open)
+    {ownerFrame : FrameWithIndex} (hownerMem : ownerFrame ∈ cfg.stackWithIndex) (hownerRid : ownerFrame.regionId = rid)
+    {oidC : ObjectId} (hlocC : (Reference.OId oidC).loc? cfg = some (Location.Rgn rid))
+    {fid : Index} (hreach : FrameReachable cfg fid (Reference.OId oidC)) :
+    ownerFrame.index ≤ fid := by
+  rw [FrameReachable_iff_reflTransGen] at hreach
+  obtain ⟨start, hroot, hrtg⟩ := hreach
+  have hback : ∀ ref, Relation.ReflTransGen (ReachableStep cfg) start ref →
+      ∀ oidR, ref = Reference.OId oidR → (Reference.OId oidR).loc? cfg = some (Location.Rgn rid) →
+        (∃ oidS, start = Reference.OId oidS ∧ (Reference.OId oidS).loc? cfg = some (Location.Rgn rid)) ∨
+        (∃ oidB fidB, Relation.ReflTransGen (ReachableStep cfg) start (Reference.OId oidB) ∧
+          (Reference.OId oidB).loc? cfg = some (Location.Stk fidB) ∧ ownerFrame.index ≤ fidB) := by
+    intro ref hrtg2
+    induction hrtg2 with
+    | refl => intro oidR heq hloc; left; exact ⟨oidR, heq, heq ▸ hloc⟩
+    | tail hprev hstep ih =>
+      intro oidR heq hloc
+      subst heq
+      obtain ⟨oidB, hbeq, hcaseB⟩ := predecessor_of_region_object vcfg hlookup hopen hloc hstep
+      rcases hcaseB with hlocB | ⟨fidB, hlocB⟩
+      · exact ih oidB hbeq hlocB
+      · right
+        refine ⟨oidB, fidB, hbeq ▸ hprev, hlocB, ?_⟩
+        obtain ⟨frame', hmem', hridEq', hidx'⟩ :=
+          stack_step_region_index_le vcfg hlocB (hbeq ▸ hstep) hloc
+        have hidxEq : frame'.index = ownerFrame.index :=
+          merge_corollary_regionId_unique_index vcfg.s1 hmem' hownerMem (hridEq'.trans hownerRid.symm)
+        rw [← hidxEq]
+        exact hidx'
+  obtain ⟨oidS, hseq, hlocS⟩ | ⟨oidB, fidB, hprefixB, hlocB, hleB⟩ := hback (Reference.OId oidC) hrtg oidC rfl hlocC
+  · rcases hroot with
+        ⟨frameR, hframeRmem, hframeRidx, var, hvar⟩ |
+        ⟨frameR, hframeRmem, hframeRidx, regionR, hlookupR, hbridge⟩
+    · rw [hseq] at hvar
+      have hmemrefs : (Reference.OId oidS) ∈ frameR.refs := mem_frame_refs_of_mem_varMap hvar
+      obtain ⟨frame', hmem', hridEq', hidx'⟩ := vcfg.s3 frameR hframeRmem (Reference.OId oidS) hmemrefs rid oidS rfl hlocS
+      have hidxEq : frame'.index = ownerFrame.index :=
+        merge_corollary_regionId_unique_index vcfg.s1 hmem' hownerMem (hridEq'.trans hownerRid.symm)
+      rw [hframeRidx] at hidx'
+      rw [← hidxEq]
+      exact hidx'
+    · rw [hseq] at hbridge
+      injection hbridge with hbeq2
+      have hlocBridge : (Reference.OId regionR.bridgeObjectId).loc? cfg = some (Location.Rgn frameR.regionId) := by
+        obtain ⟨regionR2, hlookupR2, hopenR2⟩ := l2_of_stackWithIndex vcfg hframeRmem
+        rw [hlookupR2] at hlookupR
+        injection hlookupR with hlookupR
+        subst hlookupR
+        have hbridgeIn : regionR2.bridgeObjectId ∈ regionR2.objMap := vcfg.h1 regionR2
+          (by unfold Heap.regions; exact List.mem_map_of_mem (AList.lookup_mem_entries hlookupR2))
+        exact (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨regionR2, hlookupR2, hbridgeIn⟩
+      rw [← hbeq2] at hlocBridge
+      rw [hlocS] at hlocBridge
+      injection hlocBridge with hlocBridge
+      injection hlocBridge with hlocBridge
+      have hidxEq : frameR.index = ownerFrame.index :=
+        merge_corollary_regionId_unique_index vcfg.s1 hframeRmem hownerMem (hlocBridge.symm.trans hownerRid.symm)
+      rw [hframeRidx] at hidxEq
+      exact le_of_eq hidxEq.symm
+  · have hreachB : FrameReachable cfg fid (Reference.OId oidB) :=
+      (FrameReachable_iff_reflTransGen cfg fid (Reference.OId oidB)).mpr ⟨start, hroot, hprefixB⟩
+    have hbound := fieldAsgn_stack_container_confined vcfg hlocB hreachB
+    exact le_trans hleB hbound
+
+-- `objAt?` agrees between `cfg`/`cfg'` for any oid' other than the mutated container's own
+-- (FIELD-ASGN-STACK branch): the stack side reduces to the mutated frame's own `objMap.lookup`
+-- for the position it lives at, unconditionally equal for `oid' ≠ oid` (`AList.lookup_insert_ne`);
+-- the heap side is untouched entirely.
+theorem fieldAsgn_stack_objAt_eq_of_ne {cfg cfg' : RuntimeConfig} {frame : FrameWithIndex} {oid : ObjectId}
+    {obj : Object} {field : FieldName} {yRef : Reference}
+    (hframe : cfg.stackWithIndex.getLast? = some frame) (hobj : frame.objMap.lookup oid = some obj)
+    (hcfg' : cfg' = { cfg with stack := cfg.stack.dropLast ++
+      [({ frame with objMap := frame.objMap.insert oid (obj.insert field yRef) } : Frame)] })
+    {oid' : ObjectId} (hne : oid' ≠ oid) :
+    (Reference.OId oid').objAt? cfg = (Reference.OId oid').objAt? cfg' := by
+  have hlocEq : (Reference.OId oid').loc? cfg = (Reference.OId oid').loc? cfg' := by
+    rw [hcfg']; exact fieldAsgn_corollary_stack_loc_eq hframe hobj oid'
+  obtain ⟨stack_eq, hframeidx⟩ := fieldAsgn_corollary_stack_eq hframe
+  unfold Reference.objAt?
+  dsimp only
+  rw [hlocEq]
+  cases hloc' : (Reference.OId oid').loc? cfg' with
+  | none => rfl
+  | some loc =>
+    cases loc with
+    | Rgn ridX =>
+      dsimp only
+      have hheapEq : cfg'.heap = cfg.heap := by rw [hcfg']
+      rw [hheapEq]
+    | Stk fidX =>
+      dsimp only
+      rw [stackWithIndex_find_index_eq_getElem, stackWithIndex_find_index_eq_getElem]
+      have hgetCfg : cfg.stackWithIndex[fidX]? =
+          (cfg.stack[fidX]?).map (fun f => ({ toFrame := f, index := fidX } : FrameWithIndex)) := by
+        unfold RuntimeConfig.stackWithIndex; rw [List.getElem?_mapIdx]
+      have hgetCfg' : cfg'.stackWithIndex[fidX]? =
+          (cfg'.stack[fidX]?).map (fun f => ({ toFrame := f, index := fidX } : FrameWithIndex)) := by
+        unfold RuntimeConfig.stackWithIndex; rw [List.getElem?_mapIdx]
+      rw [hgetCfg, hgetCfg']
+      have hstack' : cfg'.stack = cfg.stack.dropLast ++
+          [({ frame with objMap := frame.objMap.insert oid (obj.insert field yRef) } : Frame)] := by rw [hcfg']
+      have hfidxlt : fidX < cfg'.stack.length := loc_stk_lt hloc'
+      have hlen' : cfg'.stack.length = cfg.stack.dropLast.length + 1 := by rw [hstack']; simp
+      rw [hlen'] at hfidxlt
+      by_cases hfx : fidX = cfg.stack.dropLast.length
+      · have h1 : cfg.stack[fidX]? = some frame.toFrame := by
+          conv_lhs => rw [stack_eq, hfx]
+          simp
+        have h2 : cfg'.stack[fidX]? =
+            some ({ frame with objMap := frame.objMap.insert oid (obj.insert field yRef) } : Frame) := by
+          rw [hstack', hfx]
+          simp
+        rw [h1, h2]
+        simp only [Option.map_some]
+        dsimp only [Option.bind]
+        rw [AList.lookup_insert_ne hne]
+      · have hlt : fidX < cfg.stack.dropLast.length := lt_of_le_of_ne (Nat.lt_succ_iff.mp hfidxlt) hfx
+        have h1 : cfg.stack[fidX]? = cfg.stack.dropLast[fidX]? := by
+          conv_lhs => rw [stack_eq]
+          rw [List.getElem?_append_left hlt]
+        have h2 : cfg'.stack[fidX]? = cfg.stack.dropLast[fidX]? := by
+          rw [hstack', List.getElem?_append_left hlt]
+        rw [h1, h2]
+
+-- `objAt?` agrees between `cfg`/`cfg'` for any oid' other than the mutated container's own
+-- (FIELD-ASGN-REGION branch): mirrors the stack version, but at the heap level.
+theorem fieldAsgn_region_objAt_eq_of_ne {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    {rid oid : ObjectId} {region : Region} {obj : Object} {field : FieldName} {yRef : Reference}
+    (hregion : cfg.heap.lookup rid = some region) (hobj : region.objMap.lookup oid = some obj)
+    (hcfg' : cfg' = { cfg with heap := cfg.heap.insert rid ({ region with objMap := region.objMap.insert oid (obj.insert field yRef) } : Region) }) :
+    ∀ {oid' : ObjectId}, oid' ≠ oid →
+    (Reference.OId oid').objAt? cfg = (Reference.OId oid').objAt? cfg' := by
+  intro oid' hne
+  have hlocEq : (Reference.OId oid').loc? cfg = (Reference.OId oid').loc? cfg' := by
+    rw [hcfg']; exact fieldAsgn_corollary_region_loc_eq vcfg hregion hobj oid'
+  unfold Reference.objAt?
+  dsimp only
+  rw [hlocEq]
+  cases hloc' : (Reference.OId oid').loc? cfg' with
+  | none => rfl
+  | some loc =>
+    cases loc with
+    | Rgn ridX =>
+      dsimp only
+      by_cases hridx : ridX = rid
+      · subst hridx
+        have hlookup' : cfg'.heap.lookup ridX = some
+            ({ region with objMap := region.objMap.insert oid (obj.insert field yRef) } : Region) := by
+          rw [hcfg']; dsimp only; rw [AList.lookup_insert]
+        rw [hlookup', hregion]
+        dsimp only [Option.bind]
+        rw [AList.lookup_insert_ne hne]
+      · have hlookup' : cfg'.heap.lookup ridX = cfg.heap.lookup ridX := by
+          rw [hcfg']; dsimp only; rw [AList.lookup_insert_ne hridx]
+        rw [hlookup']
+    | Stk fidX =>
+      dsimp only
+      rw [stackWithIndex_find_index_eq_getElem, stackWithIndex_find_index_eq_getElem]
+      have hstackEq : cfg'.stack = cfg.stack := by rw [hcfg']
+      unfold RuntimeConfig.stackWithIndex
+      rw [hstackEq]
+
+-- `ReachableStep` agrees between `cfg`/`cfg'` for any source *other than* the mutated container's
+-- own `OId`: unconditional in the target, for either branch (`fieldAsgn_stack_objAt_eq_of_ne`/
+-- `_region_objAt_eq_of_ne` for `OId`-sourced steps; `open_rid_no_step`/untouched-heap for
+-- `RId`-sourced ones). Returns the container's own id existentially, since the caller needs it
+-- anyway to state "not the container".
+theorem fieldAsgn_step_iff_of_ne {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : fieldAsgn xf y cfg = some cfg') :
+    ∃ oidC : ObjectId, resolveV xf.root cfg = some (Reference.OId oidC) ∧
+      ∀ a : Reference, a ≠ Reference.OId oidC → ∀ b : Reference,
+      ReachableStep cfg a b ↔ ReachableStep cfg' a b := by
+  obtain ⟨frame, hframe, hcase⟩ := fieldAsgn_cases h
+  rcases hcase with
+      ⟨oid, oid_y, obj, hxr, hyr, hloc, hobj, hcfg'⟩ |
+      ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
+  · refine ⟨oid, hxr, fun a hane b => ?_⟩
+    cases a with
+    | OId oid' =>
+      have hne : oid' ≠ oid := fun heq => hane (heq ▸ rfl)
+      rw [ReachableStep_oid_iff, ReachableStep_oid_iff, fieldAsgn_stack_objAt_eq_of_ne hframe hobj hcfg' hne]
+    | RId rid' =>
+      have hheapEq : cfg'.heap = cfg.heap := by rw [hcfg']
+      rw [ReachableStep_rid_iff, ReachableStep_rid_iff, hheapEq]
+  · refine ⟨oid, hxr, fun a hane b => ?_⟩
+    cases a with
+    | OId oid' =>
+      have hne : oid' ≠ oid := fun heq => hane (heq ▸ rfl)
+      rw [ReachableStep_oid_iff, ReachableStep_oid_iff, fieldAsgn_region_objAt_eq_of_ne vcfg hregion hobj hcfg' hne]
+    | RId rid' =>
+      by_cases hridEq : rid' = rid
+      · subst hridEq
+        have hlookup' : cfg'.heap.lookup rid' = some
+            ({ region with objMap := region.objMap.insert oid (obj.insert xf.field (Reference.OId oid_y)) } : Region) := by
+          rw [hcfg']; dsimp only; rw [AList.lookup_insert]
+        constructor
+        · intro hstep; exact absurd hstep (open_rid_no_step hregion hstatus)
+        · intro hstep; exact absurd hstep (open_rid_no_step hlookup' hstatus)
+      · have hlookup' : cfg'.heap.lookup rid' = cfg.heap.lookup rid' := by
+          rw [hcfg']; dsimp only; rw [AList.lookup_insert_ne hridEq]
+        rw [ReachableStep_rid_iff, ReachableStep_rid_iff, hlookup']
+
+-- `stackWithIndex_objMap_get_eq_of_last_varMap_update`'s mirror image: if `cfg'` is `cfg` with its
+-- **last** frame's `objMap` replaced (everything else -- `regionId`/`bridgeVar`/`varMap` --
+-- untouched, and every other frame untouched), then `(varMap, bridgeVar, regionId)` is unaffected
+-- at every stack position.
+theorem fieldAsgn_stack_shape_eq {cfg cfg' : RuntimeConfig} {frame : Frame}
+    {newObjMap : ObjMap} (hframeLast : cfg.stack.getLast? = some frame)
+    (hstack' : cfg'.stack = cfg.stack.dropLast ++
+      [({ regionId := frame.regionId, bridgeVar := frame.bridgeVar, objMap := newObjMap,
+          varMap := frame.varMap } : Frame)]) (n : ℕ) :
+    (cfg.stack[n]?).map (fun f : Frame => (f.varMap, f.bridgeVar, f.regionId)) =
+    (cfg'.stack[n]?).map (fun f : Frame => (f.varMap, f.bridgeVar, f.regionId)) := by
+  have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame] :=
+    (List.dropLast_append_getLast? frame hframeLast).symm
+  set newFrame : Frame :=
+    { regionId := frame.regionId, bridgeVar := frame.bridgeVar, objMap := newObjMap,
+      varMap := frame.varMap } with newFrame_def
+  by_cases hlp : n = cfg.stack.dropLast.length
+  · have e1 : cfg.stack[n]? = some frame := by
+      conv_lhs => rw [stack_eq, hlp]
+      simp
+    have e2 : cfg'.stack[n]? = some newFrame := by
+      rw [hstack']; rw [hlp]
+      simp
+    rw [e1, e2]
+    rfl
+  · by_cases hlt : n < cfg.stack.dropLast.length
+    · have e1 : cfg.stack[n]? = cfg.stack.dropLast[n]? := by
+        conv_lhs => rw [stack_eq]
+        rw [List.getElem?_append_left hlt]
+      have e2 : cfg'.stack[n]? = cfg.stack.dropLast[n]? := by
+        rw [hstack']; rw [List.getElem?_append_left hlt]
+      rw [e1, e2]
+    · have hlen : cfg.stack.length = cfg.stack.dropLast.length + 1 := by rw [stack_eq]; simp
+      have hlen' : cfg'.stack.length = cfg.stack.dropLast.length + 1 := by rw [hstack']; simp
+      have e1 : cfg.stack[n]? = none := List.getElem?_eq_none (by omega)
+      have e2 : cfg'.stack[n]? = none := List.getElem?_eq_none (by omega)
+      rw [e1, e2]
+
+-- `FrameRoot` agrees between `cfg`/`cfg'` unconditionally, for every `fid`/`start`: neither branch
+-- ever touches `varMap`/`bridgeVar`/`bridgeObjectId` (FIELD-ASGN-STACK only changes the active
+-- frame's own `objMap`; FIELD-ASGN-REGION only changes the active region's own `objMap`) -- the
+-- one wrinkle is the active frame's own stack *membership* (as an exact record, `objMap` included)
+-- for the stack branch, handled via the generic shape-transport machinery
+-- (`stackWithIndex_frame_transport_up/down_of_shape_eq`, Model layer) with `fieldAsgn_stack_shape_eq`.
+theorem fieldAsgn_frame_root_iff {cfg cfg' : RuntimeConfig} (h : fieldAsgn xf y cfg = some cfg')
+    (fid : Index) (start : Reference) : FrameRoot cfg fid start ↔ FrameRoot cfg' fid start := by
+  obtain ⟨frame, hframe, hcase⟩ := fieldAsgn_cases h
+  rcases hcase with
+      ⟨oid, oid_y, obj, hxr, hyr, hloc, hobj, hcfg'⟩ |
+      ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
+  · obtain ⟨stack_eq, hframeidx⟩ := fieldAsgn_corollary_stack_eq hframe
+    have hframeLast : cfg.stack.getLast? = some frame.toFrame := by
+      rw [stack_eq]; simp
+    have hstack' : cfg'.stack = cfg.stack.dropLast ++
+        [({ regionId := frame.regionId, bridgeVar := frame.bridgeVar,
+            objMap := frame.objMap.insert oid (obj.insert xf.field (Reference.OId oid_y)),
+            varMap := frame.varMap } : Frame)] := by rw [hcfg']
+    have hshape := fieldAsgn_stack_shape_eq hframeLast hstack'
+    have hheapEq : cfg'.heap = cfg.heap := by rw [hcfg']
+    constructor
+    · rintro (⟨frameV, hVmem, hVidx, var, hvar⟩ | ⟨frameV, hVmem, hVidx, regionV, hVlookup, hVbridge⟩)
+      · obtain ⟨frameV0, hVmem0, hVidx0, hproj0⟩ := stackWithIndex_frame_transport_up_of_shape_eq hshape frameV hVmem
+        refine Or.inl ⟨frameV0, hVmem0, hVidx0.trans hVidx, var, ?_⟩
+        rw [show frameV0.varMap = frameV.varMap from congrArg (·.1) hproj0]
+        exact hvar
+      · obtain ⟨frameV0, hVmem0, hVidx0, hproj0⟩ := stackWithIndex_frame_transport_up_of_shape_eq hshape frameV hVmem
+        refine Or.inr ⟨frameV0, hVmem0, hVidx0.trans hVidx, regionV, ?_, hVbridge⟩
+        rw [show frameV0.regionId = frameV.regionId from congrArg (·.2.2) hproj0, hheapEq]
+        exact hVlookup
+    · rintro (⟨frameV, hVmem, hVidx, var, hvar⟩ | ⟨frameV, hVmem, hVidx, regionV, hVlookup, hVbridge⟩)
+      · obtain ⟨frameV0, hVmem0, hVidx0, hproj0⟩ := stackWithIndex_frame_transport_down_of_shape_eq hshape frameV hVmem
+        refine Or.inl ⟨frameV0, hVmem0, hVidx0.trans hVidx, var, ?_⟩
+        rw [show frameV0.varMap = frameV.varMap from congrArg (·.1) hproj0]
+        exact hvar
+      · obtain ⟨frameV0, hVmem0, hVidx0, hproj0⟩ := stackWithIndex_frame_transport_down_of_shape_eq hshape frameV hVmem
+        refine Or.inr ⟨frameV0, hVmem0, hVidx0.trans hVidx, regionV, ?_, hVbridge⟩
+        rw [show frameV0.regionId = frameV.regionId from congrArg (·.2.2) hproj0, ← hheapEq]
+        exact hVlookup
+  · have hstackEq : cfg'.stack = cfg.stack := by rw [hcfg']
+    have hstackWithIndexEq : cfg'.stackWithIndex = cfg.stackWithIndex := by
+      unfold RuntimeConfig.stackWithIndex; rw [hstackEq]
+    constructor
+    · rintro (⟨frameV, hVmem, hVidx, var, hvar⟩ | ⟨frameV, hVmem, hVidx, regionV, hVlookup, hVbridge⟩)
+      · exact Or.inl ⟨frameV, hstackWithIndexEq ▸ hVmem, hVidx, var, hvar⟩
+      · by_cases hrideq : frameV.regionId = rid
+        · have hlookup' : cfg'.heap.lookup frameV.regionId =
+              some ({ region with objMap := region.objMap.insert oid (obj.insert xf.field (Reference.OId oid_y)) } : Region) := by
+            rw [hrideq, hcfg']; dsimp only; rw [AList.lookup_insert]
+          rw [hrideq] at hVlookup
+          have hbeq : regionV = region := by
+            have hcomb := hVlookup.symm.trans hregion
+            injection hcomb
+          rw [hbeq] at hVbridge
+          exact Or.inr ⟨frameV, hstackWithIndexEq ▸ hVmem, hVidx, _, hlookup', hVbridge⟩
+        · have hlookup' : cfg'.heap.lookup frameV.regionId = cfg.heap.lookup frameV.regionId := by
+            rw [hcfg']; dsimp only; rw [AList.lookup_insert_ne hrideq]
+          exact Or.inr ⟨frameV, hstackWithIndexEq ▸ hVmem, hVidx, regionV, hlookup'.trans hVlookup, hVbridge⟩
+    · rintro (⟨frameV, hVmem, hVidx, var, hvar⟩ | ⟨frameV, hVmem, hVidx, regionV, hVlookup, hVbridge⟩)
+      · exact Or.inl ⟨frameV, hstackWithIndexEq ▸ hVmem, hVidx, var, hvar⟩
+      · by_cases hrideq : frameV.regionId = rid
+        · have hlookupcfg' : cfg'.heap.lookup frameV.regionId =
+              some ({ region with objMap := region.objMap.insert oid (obj.insert xf.field (Reference.OId oid_y)) } : Region) := by
+            rw [hrideq, hcfg']; dsimp only; rw [AList.lookup_insert]
+          rw [hlookupcfg'] at hVlookup
+          injection hVlookup with hVlookupEq
+          rw [← hVlookupEq] at hVbridge
+          dsimp only at hVbridge
+          exact Or.inr ⟨frameV, hstackWithIndexEq ▸ hVmem, hVidx, region, by rw [hrideq]; exact hregion, hVbridge⟩
+        · have hlookup' : cfg'.heap.lookup frameV.regionId = cfg.heap.lookup frameV.regionId := by
+            rw [hcfg']; dsimp only; rw [AList.lookup_insert_ne hrideq]
+          exact Or.inr ⟨frameV, hstackWithIndexEq ▸ hVmem, hVidx, regionV, hlookup'.symm.trans hVlookup, hVbridge⟩
+
+-- If a `FrameReachable cfg G ref` chain can never touch the mutated container `oidC` (at any
+-- point along it -- guaranteed whenever `G` is confined below `oidC`'s own owner-index, via
+-- `fieldAsgn_stack_container_confined`/`_region_container_confined`), it transports unconditionally
+-- to `cfg'`: the root transports via `hframeRootIff` (unconditional), and every hop transports via
+-- `hstepIffOfNe`, since the hop's own source is -- by the very fact it's `FrameReachable cfg G _`
+-- -- itself confined away from `oidC`.
+theorem fieldAsgn_confined_transport {cfg cfg' : RuntimeConfig}
+    {oidC : ObjectId} (hstepIffOfNe : ∀ a : Reference, a ≠ Reference.OId oidC → ∀ b : Reference,
+      ReachableStep cfg a b ↔ ReachableStep cfg' a b)
+    (hframeRootIff : ∀ fid start, FrameRoot cfg fid start ↔ FrameRoot cfg' fid start)
+    {G : Index} (hconfined : ∀ refX, FrameReachable cfg G refX → refX ≠ Reference.OId oidC)
+    {ref : Reference} (hreach : FrameReachable cfg G ref) :
+    FrameReachable cfg' G ref := by
+  rw [FrameReachable_iff_reflTransGen] at hreach
+  obtain ⟨start, hroot, hrtg⟩ := hreach
+  rw [FrameReachable_iff_reflTransGen]
+  refine ⟨start, (hframeRootIff G start).mp hroot, ?_⟩
+  induction hrtg with
+  | refl => exact Relation.ReflTransGen.refl
+  | tail hprev hstep ih =>
+    rename_i p c
+    have hpReach : FrameReachable cfg G p :=
+      (FrameReachable_iff_reflTransGen cfg G p).mpr ⟨start, hroot, hprev⟩
+    have hpne : p ≠ Reference.OId oidC := hconfined p hpReach
+    exact ih.tail ((hstepIffOfNe p hpne c).mp hstep)
+
+-- `X.index < activeFrame.index` membership in `cfg.stackWithIndex` agrees with membership in
+-- `cfg'.stackWithIndex`, in both directions. FIELD-ASGN-REGION never touches the stack at all, so
+-- this holds unconditionally there; FIELD-ASGN-STACK only mutates the *active* frame's own
+-- `objMap`, leaving every other frame's record untouched.
+theorem fieldAsgn_frame_mem_iff {cfg cfg' : RuntimeConfig} (h : fieldAsgn xf y cfg = some cfg')
+    {X : FrameWithIndex} {activeIdx : Index} (hXlt : X.index < activeIdx)
+    (hactiveidx : activeIdx = cfg.stack.dropLast.length) :
+    X ∈ cfg.stackWithIndex ↔ X ∈ cfg'.stackWithIndex := by
+  obtain ⟨frame, hframe, hcase⟩ := fieldAsgn_cases h
+  rcases hcase with
+      ⟨oid, oid_y, obj, hxr, hyr, hloc, hobj, hcfg'⟩ |
+      ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
+  · have hstack' : cfg'.stack = cfg.stack.dropLast ++
+        [({ frame with objMap := frame.objMap.insert oid (obj.insert xf.field (Reference.OId oid_y)) } : Frame)] := by
+      rw [hcfg']
+    constructor
+    · intro hXmem
+      unfold RuntimeConfig.stackWithIndex
+      rw [hstack']
+      obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hXmem
+      have hidx : X.index = n := by rw [← hfeq]
+      have hnlt : n < cfg.stack.dropLast.length := by rw [← hidx, ← hactiveidx]; exact hXlt
+      apply List.mem_mapIdx.mpr
+      refine ⟨n, ?_, ?_⟩
+      · rw [List.length_append]; omega
+      · rw [List.getElem_append_left hnlt, List.getElem_dropLast hnlt]; exact hfeq
+    · intro hXmem
+      unfold RuntimeConfig.stackWithIndex at hXmem
+      rw [hstack'] at hXmem
+      rw [List.mapIdx_concat] at hXmem
+      rcases List.mem_append.mp hXmem with hmem | hmem
+      · obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hmem
+        have hnlt : n < cfg.stack.length := lt_of_lt_of_le hn (List.length_dropLast .. ▸ Nat.sub_le _ _)
+        unfold RuntimeConfig.stackWithIndex
+        apply List.mem_mapIdx.mpr
+        refine ⟨n, hnlt, ?_⟩
+        rw [← List.getElem_dropLast hn]
+        exact hfeq
+      · exfalso
+        rw [List.mem_singleton] at hmem
+        have hXeq : X.index = cfg.stack.dropLast.length := by rw [hmem]
+        rw [hXeq, ← hactiveidx] at hXlt
+        exact absurd hXlt (lt_irrefl _)
+  · have hstackEq : cfg'.stack = cfg.stack := by rw [hcfg']
+    unfold RuntimeConfig.stackWithIndex
+    rw [hstackEq]
+
+-- The mutated container's own `ReachableStep`, restricted to `c ≠ OId oid_y` (i.e. not the
+-- just-written field's own new value): transports backward unconditionally (FIELD-ASGN-STACK
+-- branch), since the new refs are exactly the old refs with `oid_y` possibly added
+-- (`fieldAsgn_corollary_object_insert_refs_mem`, Model layer).
+theorem fieldAsgn_stack_oidC_step_of_ne_oidY {cfg cfg' : RuntimeConfig} {frame : FrameWithIndex}
+    {oid oid_y : ObjectId} {obj : Object} {field : FieldName}
+    (hframe : cfg.stackWithIndex.getLast? = some frame)
+    (hlocC : (Reference.OId oid).loc? cfg = some (Location.Stk frame.index))
+    (hobj : frame.objMap.lookup oid = some obj)
+    (hcfg' : cfg' = { cfg with stack := cfg.stack.dropLast ++
+      [({ frame with objMap := frame.objMap.insert oid (obj.insert field (Reference.OId oid_y)) } : Frame)] })
+    {c : Reference} (hstep : ReachableStep cfg' (Reference.OId oid) c) :
+    c = Reference.OId oid_y ∨ ReachableStep cfg (Reference.OId oid) c := by
+  have hlocEq : (Reference.OId oid).loc? cfg = (Reference.OId oid).loc? cfg' := by
+    rw [hcfg']; exact fieldAsgn_corollary_stack_loc_eq hframe hobj oid
+  obtain ⟨stack_eq, hframeidx⟩ := fieldAsgn_corollary_stack_eq hframe
+  have hstack' : cfg'.stack = cfg.stack.dropLast ++
+      [({ frame with objMap := frame.objMap.insert oid (obj.insert field (Reference.OId oid_y)) } : Frame)] := by
+    rw [hcfg']
+  have hobjAtC : (Reference.OId oid).objAt? cfg' = some (obj.insert field (Reference.OId oid_y)) := by
+    unfold Reference.objAt?
+    dsimp only
+    rw [← hlocEq, hlocC]
+    dsimp only
+    rw [stackWithIndex_find_index_eq_getElem]
+    have hget : cfg'.stackWithIndex[frame.index]? =
+        (cfg'.stack[frame.index]?).map (fun f => ({ toFrame := f, index := frame.index } : FrameWithIndex)) := by
+      unfold RuntimeConfig.stackWithIndex; rw [List.getElem?_mapIdx]
+    rw [hget]
+    have hget2 : cfg'.stack[frame.index]? =
+        some ({ frame with objMap := frame.objMap.insert oid (obj.insert field (Reference.OId oid_y)) } : Frame) := by
+      rw [hstack', hframeidx]; simp
+    rw [hget2]
+    simp only [Option.map_some]
+    dsimp only [Option.bind]
+    rw [AList.lookup_insert]
+  have hobjAt : (Reference.OId oid).objAt? cfg = some obj := by
+    unfold Reference.objAt?
+    dsimp only
+    rw [hlocC]
+    dsimp only
+    rw [stackWithIndex_find_index_eq_getElem]
+    have hget : cfg.stackWithIndex[frame.index]? =
+        (cfg.stack[frame.index]?).map (fun f => ({ toFrame := f, index := frame.index } : FrameWithIndex)) := by
+      unfold RuntimeConfig.stackWithIndex; rw [List.getElem?_mapIdx]
+    rw [hget]
+    have hget2 : cfg.stack[frame.index]? = some frame.toFrame := by
+      conv_lhs => rw [stack_eq, hframeidx]
+      simp
+    rw [hget2]
+    simp only [Option.map_some]
+    dsimp only [Option.bind]
+    exact hobj
+  rw [ReachableStep_oid_iff] at hstep
+  obtain ⟨objC, hobjAtC2, hcontainsC⟩ := hstep
+  rw [hobjAtC] at hobjAtC2
+  injection hobjAtC2 with hobjAtCeq
+  rw [← hobjAtCeq] at hcontainsC
+  rcases fieldAsgn_corollary_object_insert_refs_mem (List.contains_iff_mem.mp hcontainsC) with heq | hmem
+  · left; exact heq
+  · right
+    rw [ReachableStep_oid_iff]
+    exact ⟨obj, hobjAt, List.contains_iff_mem.mpr hmem⟩
+
+-- Mirrors `fieldAsgn_stack_oidC_step_of_ne_oidY` for the FIELD-ASGN-REGION branch.
+theorem fieldAsgn_region_oidC_step_of_ne_oidY {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    {rid oid oid_y : ObjectId} {region : Region} {obj : Object} {field : FieldName}
+    (hregion : cfg.heap.lookup rid = some region)
+    (hlocC : (Reference.OId oid).loc? cfg = some (Location.Rgn rid))
+    (hobj : region.objMap.lookup oid = some obj)
+    (hcfg' : cfg' = { cfg with heap := cfg.heap.insert rid ({ region with objMap := region.objMap.insert oid (obj.insert field (Reference.OId oid_y)) } : Region) })
+    {c : Reference} (hstep : ReachableStep cfg' (Reference.OId oid) c) :
+    c = Reference.OId oid_y ∨ ReachableStep cfg (Reference.OId oid) c := by
+  have hlocEq : (Reference.OId oid).loc? cfg = (Reference.OId oid).loc? cfg' := by
+    rw [hcfg']; exact fieldAsgn_corollary_region_loc_eq vcfg hregion hobj oid
+  have hobjAtC : (Reference.OId oid).objAt? cfg' = some (obj.insert field (Reference.OId oid_y)) := by
+    unfold Reference.objAt?
+    dsimp only
+    rw [← hlocEq, hlocC]
+    dsimp only
+    have hlookup' : cfg'.heap.lookup rid =
+        some ({ region with objMap := region.objMap.insert oid (obj.insert field (Reference.OId oid_y)) } : Region) := by
+      rw [hcfg']; dsimp only; rw [AList.lookup_insert]
+    rw [hlookup']
+    dsimp only [Option.bind]
+    rw [AList.lookup_insert]
+  have hobjAt : (Reference.OId oid).objAt? cfg = some obj := by
+    unfold Reference.objAt?
+    dsimp only
+    rw [hlocC]
+    dsimp only
+    rw [hregion]
+    dsimp only [Option.bind]
+    exact hobj
+  rw [ReachableStep_oid_iff] at hstep
+  obtain ⟨objC, hobjAtC2, hcontainsC⟩ := hstep
+  rw [hobjAtC] at hobjAtC2
+  injection hobjAtC2 with hobjAtCeq
+  rw [← hobjAtCeq] at hcontainsC
+  rcases fieldAsgn_corollary_object_insert_refs_mem (List.contains_iff_mem.mp hcontainsC) with heq | hmem
+  · left; exact heq
+  · right
+    rw [ReachableStep_oid_iff]
+    exact ⟨obj, hobjAt, List.contains_iff_mem.mpr hmem⟩
+
+-- H3 lifted along a `ReachableStep` chain, rooted at an *arbitrary* object confirmed to be inside
+-- region `rid` (not necessarily the region's own bridge object): mirrors
+-- `RegionReachable_oid_confined`'s proof exactly (its `bridge` base case generalized to any
+-- confirmed-in-`rid` starting point), so the conclusion is the same 3-way disjunction: the target
+-- resolves back into `rid` itself, or into some *other* Closed region reached along the way, or
+-- it's a bare region reference.
+theorem reflTransGen_region_confined {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
+    {rid : RegionId} {region : Region} (hlookup : cfg.heap.lookup rid = some region)
+    {oidStart : ObjectId} (hlocStart : (Reference.OId oidStart).loc? cfg = some (Location.Rgn rid))
+    {target : Reference} (hrtg : Relation.ReflTransGen (ReachableStep cfg) (Reference.OId oidStart) target) :
+    (∃ oid ridCur region', target = Reference.OId oid ∧ (Reference.OId oid).loc? cfg = some (Location.Rgn ridCur) ∧
+       cfg.heap.lookup ridCur = some region' ∧ (ridCur = rid ∨ region'.status = Status.Closed)) ∨
+    (∃ ridR, target = Reference.RId ridR) := by
+  induction hrtg with
+  | refl => left; exact ⟨oidStart, rid, region, rfl, hlocStart, hlookup, Or.inl rfl⟩
+  | tail hprev hstep ih =>
+    rename_i b c
+    have hmemrefs : ∃ ridCur region', c ∈ region'.refs ∧ cfg.heap.lookup ridCur = some region' ∧
+        (ridCur = rid ∨ region'.status = Status.Closed) := by
+      rcases ih with ⟨oidB, ridCur, region', heqB, hlocB, hlkB, hcaseB⟩ | ⟨ridB, heqB⟩
+      · subst heqB
+        rw [ReachableStep_oid_iff] at hstep
+        obtain ⟨obj, hobjAt, hcontains⟩ := hstep
+        unfold Reference.objAt? at hobjAt
+        dsimp only at hobjAt
+        rw [hlocB] at hobjAt
+        dsimp only at hobjAt
+        rw [hlkB] at hobjAt
+        exact ⟨ridCur, region', mem_region_refs_of_mem_objMap hobjAt (List.contains_iff_mem.mp hcontains), hlkB, hcaseB⟩
+      · subst heqB
+        rw [ReachableStep_rid_iff] at hstep
+        obtain ⟨regionR, hlkR, hclosedR, obj, hobjlookup, hcontains⟩ := hstep
+        exact ⟨ridB, regionR, mem_region_refs_of_mem_objMap hobjlookup (List.contains_iff_mem.mp hcontains),
+          hlkR, Or.inr hclosedR⟩
+    obtain ⟨ridCur, region', hmemB, hlkCur, hcaseCur⟩ := hmemrefs
+    cases c with
+    | OId oidB =>
+      left
+      have hridEq := vcfg.h3 ridCur oidB region' hlkCur hmemB
+      exact ⟨oidB, ridCur, region', rfl, hridEq, hlkCur, hcaseCur⟩
+    | RId ridB => right; exact ⟨ridB, rfl⟩
+
+-- The specific contradiction FIELD-ASGN-REGION's "G = active frame" backward case needs: a chain
+-- rooted at some object confirmed inside `rid` (Open) can never reach an object confirmed to live
+-- in some *other*, also-Open region -- mirrors `region_reachable_open_ne_absurd` exactly, just
+-- built on `reflTransGen_region_confined`'s more general base case.
+theorem reflTransGen_region_open_ne_absurd {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
+    {rid : RegionId} {region : Region} (hlookup : cfg.heap.lookup rid = some region)
+    {oidStart : ObjectId} (hlocStart : (Reference.OId oidStart).loc? cfg = some (Location.Rgn rid))
+    {oidTarget : ObjectId} {ridT : RegionId} {regionT : Region}
+    (hlocT : (Reference.OId oidTarget).loc? cfg = some (Location.Rgn ridT))
+    (hlkT : cfg.heap.lookup ridT = some regionT) (hopenT : regionT.status = Status.Open) (hne : ridT ≠ rid)
+    (hrtg : Relation.ReflTransGen (ReachableStep cfg) (Reference.OId oidStart) (Reference.OId oidTarget)) : False := by
+  rcases reflTransGen_region_confined vcfg hlookup hlocStart hrtg with
+    ⟨oid', ridCur, region', heq, hloc', hlk', hcase'⟩ | ⟨ridR, heq⟩
+  · rw [Reference.OId.injEq] at heq
+    subst heq
+    rw [hlocT, Option.some_inj, Location.Rgn.injEq] at hloc'
+    subst hloc'
+    rw [hlkT, Option.some_inj] at hlk'
+    subst hlk'
+    rcases hcase' with hcaseEq | hcaseClosed
+    · exact hne hcaseEq
+    · rw [hopenT] at hcaseClosed
+      exact absurd hcaseClosed (by decide)
+  · exact absurd heq (by simp)
