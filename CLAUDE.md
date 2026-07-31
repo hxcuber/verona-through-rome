@@ -1306,3 +1306,8 @@ for details, including `fieldAsgn`'s combined confinement+escape argument, the h
 checkpointed as its own commit (`fieldAsgn`'s commit is `223dbdb`), stopping for explicit user
 confirmation before each next operation — **do not proceed past the next unproved operation without
 asking first**, even though that's the opposite default from the CR6/`Guarantees.lean` work above.
+
+## Comment style
+
+Lean comments (`--`) in this repo must be single-line only. Do not write multi-line/wrapped comment
+blocks above declarations, even for non-obvious rationale — keep each comment to one line, or omit it.
