@@ -1147,12 +1147,116 @@ groundwork, `prove(lean4): stackReachable_invariant_<op>, zero sorry` once the m
   scope when the induction starts, and `induction ... using head_induction_on` auto-reverts any hypothesis
   mentioning the chain's start point, bloating the motive if that point isn't first generalized away.
   Axiom-checked clean (`propext`/`Classical.choice`/`Quot.sound` only).
-- **`merge`/`swap`** — **not yet started**, still literal `sorry` in `Scratch.lean`. `merge` relocates
-  existing objects rather than allocating, so by analogy with `merge_cr3` in `Referencable/` it likely
-  needs no fresh-id argument and possibly no escape argument at all (unconditional `objAt?`/`ReachableStep`
-  agreement, since nothing is created/destroyed, only regrouped between heap keys); `swap` is a genuine
-  two-way exchange and, by analogy with `swap_cr3`, will likely need to combine `fieldAsgn`'s per-hop
-  escape induction with `varAsgn`'s root-escape technique across four sub-branches.
+- **`merge`** — **fully proved, zero `sorry`** (finished 2026-07-31, commit `6a6ab82`, same session as
+  `fieldAsgn` above). Confirmed the `merge_cr3` analogy from the note this bullet used to carry: `objAt?`
+  is indeed fully unconditional (`merge_objAt_eq`, ported near-verbatim from `Referencable/`'s private
+  `merge_corollary_objAt_eq` — the proof only depends on Model-layer facts, so it transplants directly),
+  and `ReachableStep` for `OId` sources is unconditional too (`merge_oid_step_iff`). The one thing the
+  `Referencable/` analogy did *not* anticipate: `ReachableStep` (unlike `RefStep`) has a real `RId` branch,
+  and merge's mutation reassigns `x`'s var slot from `RId rid'` (the merged-away region) to `OId
+  region'.bridgeObjectId` directly — a **genuine value change**, not just a relocation, for that one slot.
+  This is where all the new work went:
+  - **The key insight, `merge_ridPrime_step_iff_bridge`**: `RId rid'` and `OId region'.bridgeObjectId` are
+    *interchangeable as `ReachableStep` sources* — stepping from `RId rid'` is by definition exactly
+    stepping from the region's own (Closed) bridge object's fields. So `Relation.ReflTransGen
+    (ReachableStep cfg) (RId rid') target ↔ ReflTransGen (ReachableStep cfg) (OId region'.bridgeObjectId)
+    target` (`merge_ridPrime_reflTransGen_iff`, whenever `target` is neither of the two source shapes
+    itself) — the reassigned var slot literally reads off the *same* reachable set, one hop shorter. This
+    meant no escape/induction machinery was needed at all, unlike what `fieldAsgn`/`varAsgn` required —
+    the "old" and "new" root values are provably equivalent, not just independently-rooted.
+  - **H2-driven uniqueness** (`merge_ridPrime_not_step_target`, `merge_ridPrime_no_other_frame_var`,
+    `merge_ridPrime_var_unique`): needed to confirm `RId rid'` can *only* ever be `x`'s own var value —
+    never a step target anywhere (so it can't reappear mid-chain), never held by another frame's var, and
+    never held by another var in the *same* frame (H2's global "at most one occurrence of a given `RId`"
+    bound, pinned to exactly 1 by `x`'s own occurrence, forces every other slot to 0). This is what let the
+    proof route around ever needing a `fieldAsgn`-style per-hop escape induction: since `RId rid'` can only
+    be the *root*, not an intermediate node, `hstepIffOfNe`/`hchainTransportUp`/`_Down` transport whole
+    chains unconditionally once the root itself is confirmed `≠ RId rid'`.
+  - Two small generic list lemmas added to `Lemmas.lean` (`stack_refs_eq_flatMap`/`heap_refs_eq_flatMap`,
+    reshaping `Stack.refs`/`Heap.refs` into plain `List.flatMap` form) made the H2 count arguments above go
+    through `Gc.Model.Theorems`'s existing `List.two_le_count_flatMap_of_ne`/`List.count_le_count_flatMap_of_mem`
+    directly, rather than re-deriving count identities from scratch.
+  - Also ported (not otherwise available in this layer): `loc_ne_none_of_mem_objectIds`,
+    `merge_objectIds_perm`, `merge_corollary_union_lookup_left`/`_right`, `merge_corollary_objMap_get_eq`
+    (this last one a thin wrapper around `Gc.Model.Preservation.Common`'s already-public
+    `stackWithIndex_objMap_get_eq_of_last_varMap_update`, so genuinely one line once the wrapper shape was
+    right).
+  - Axiom-checked clean (`propext`/`Classical.choice`/`Quot.sound` only, via `lean_verify` on
+    `stackReachable_invariant_merge`).
+- **`swap`** — **not yet started**, still literal `sorry` in `Scratch.lean`. This is expected to be far
+  larger than any operation done so far — see "Notes for `swap`, gathered while scoping it" immediately
+  below for what's already been learned about its shape before work paused.
+
+### Notes for `swap`, gathered while scoping it (2026-07-31, before work paused)
+
+Read in full before starting: `Gc/Model/Mutation/Swap.lean` (the operation + `swap_cases`) and
+`Gc/Reachability/Referencable/Validity/Preservation/Swap.lean` (the `Referencable/` analogue, 1832 lines —
+by far the largest single-operation file in the project). The latter is **not importable** (this layer's
+independence rule) but its structure is the best available map of what's needed; the account below is
+what differs for `Reachable/`'s `ReachableStep`.
+
+**Why this is bigger than every op done so far, in order of what stacks up:**
+1. `swap` has **four branches** (`swap_cases`): SWAP-STACK, SWAP-REGION-OBJECT, SWAP-REGION-REGION,
+   SWAP-REGION-BRIDGE — every other operation had at most two.
+2. It's a genuine **two-way exchange** (the old value at `x`/the bridge slot is moved into the swapped-in
+   field, and the field's old value moves into `x`), not a one-directional overwrite — so, unlike `merge`,
+   the mutated container's content genuinely changes in a way that needs `fieldAsgn`-style per-hop escape
+   induction (`main_claim`), *and*, unlike `fieldAsgn`, the var/bridge slot also gets a new value that
+   needs `varAsgn`-style root-escape tracing (`resolveV_frameRoot`/`resolveFA_frameReach`, already public
+   in `Lemmas.lean`). `swap_cr3` in `Referencable/` needed both techniques combined; this layer will too.
+3. **New relative to `Referencable/`'s `swap_cr3`** (the same gap `merge` had over `merge_cr3`, but here
+   compounding across all four branches instead of one): `Referencable/`'s `RefStep` only ever sources
+   from `OId` (`hstep.exists_oid_left` is invoked unconditionally throughout `swap_cr3`'s per-hop
+   induction), so SWAP-REGION-REGION's newly-written value (`Reference.RId xrid`) is *vacuous* as an
+   escape case there — a step can never continue from an `RId` source in `RefStep`-world, so
+   `swap_corollary_root_escape`'s `RId` branch just closes by `absurd ... (by simp)`. In `Reachable/`,
+   `ReachableStep` **can** continue from an `RId` source (into a Closed region's bridge object, via
+   `ReachableStep_rid_iff`) — so this branch needs *genuine* handling, not a one-line vacuity dismissal:
+   if `xrid` (the region reference being written into `yoid`'s field) happens to be Closed, a chain can
+   step `RId xrid → (xrid's bridge object's fields) → ...` and keep going, exactly the shape `merge`'s
+   `merge_ridPrime_step_iff_bridge` handled for a *root*, but here it needs to work as a *mid-chain hop*
+   inside the per-hop escape induction instead. This is the single piece of genuinely new proof content
+   `swap` needs beyond a mechanical translation of `swap_cr3`'s structure.
+4. The other three branches' newly-written values are all `OId`-shaped (SWAP-STACK: `xRef`;
+   SWAP-REGION-OBJECT: `xRef` again, but confirmed `OId`-shaped by that branch's own precondition;
+   SWAP-REGION-BRIDGE: `OId region.bridgeObjectId`), so their root-escape cases should translate directly
+   via `resolveV_frameRoot`/`resolveFA_frameReach` the same way `varAsgn`'s did — no new work expected
+   there beyond volume.
+
+**Reusable groundwork already confirmed to exist and apply directly (no re-derivation needed):**
+- All of `Gc.Model.Preservation.Swap`'s `loc?`/`objAt?`-transport corollaries are Model-layer, hence
+  importable as-is: `swap_corollary_stack_loc_eq`, `swap_corollary_region_loc_eq`,
+  `swap_corollary_stack_varmap_loc_eq`, `swap_corollary_stack_eq`, `swap_corollary_region_unique`,
+  `swap_corollary_loc_match_eq`, `swap_corollary_stack_field_eq_yfRef`/`_region_field_eq_yfRef`. These are
+  exactly what `Referencable/`'s private `swap_corollary_region_objAt_mutated`/`_eq_of_ne`,
+  `swap_corollary_stack_objAt_mutated`/`_eq_of_ne`, `swap_corollary_region_stack_loc_eq` (composing the
+  heap-side and stack-side single-mutation facts for the two branches that touch both at once) etc. are
+  built from — those wrapper theorems themselves are `private` in `Referencable/` and must be re-derived
+  in `Reachable/Lemmas.lean`, but their proofs are expected to port with minimal changes since they only
+  reason about `objAt?`/`loc?`, not `RefStep`/`ReachableStep` directly.
+- `resolveV_frameRoot`, `resolveFA_frameReach` — already public in `Reachable/Lemmas.lean`, no porting
+  needed at all (used verbatim by `varAsgn`/`fieldAsgn` already).
+- `FrameReachable_owner_index_le`/`_stk_index_le`-equivalents: `Reachable/Lemmas.lean` already has
+  `fieldAsgn_stack_container_confined`/`_region_container_confined` playing this exact role (the
+  owner-index-bound argument used to show a suspended-rooted chain can never reach the mutated container),
+  reusable directly for `swap`'s analogous confinement needs.
+- `merge_corollary_regionId_unique_index` (S1-based) and `swap_corollary_stackWithIndex_index_inj`/
+  `_find_eq` — both already transitively available via existing imports, used throughout `Referencable/`'s
+  `swap_cr3` for the same kind of frame-identity arguments this layer's proof will also need.
+
+**Recommended approach when picking this back up**: build the four `<branch>_objAt_eq_of_ne`/
+`_objAt_mutated` clusters in `Reachable/Lemmas.lean` first (mechanical ports of the `Referencable/`
+private theorems, swapping only what `objAt?`/`loc?`-level reasoning needs — expect these to be nearly
+identical), then the shared root-escape helper, then tackle the per-hop escape induction one branch at a
+time starting with SWAP-STACK (simplest — stack-only, no heap interaction) before attempting
+SWAP-REGION-REGION (the one branch with genuinely new content, per point 3 above). Verify via `lake build
+Gc.Reachability.Reachable.Scratch` (a raw `lake build` bare invocation does *not* build this module at all,
+since `Gc/Reachability/Reachable/` isn't wired into `Gc.lean`'s default target yet — the LSP's own
+`lean_build` tool likewise only rebuilds the default target, so it can silently report "success" while a
+real compile error sits in this file; a targeted `lake build <qualified name>` via `Bash` is the reliable
+signal here, not the LSP tools, which were observed mid-session to report stale/misleading
+"imports out of date" or empty goal states for this file after out-of-band `lake build` calls touched its
+dependencies).
 
 ## Next planned step
 
@@ -1300,12 +1404,19 @@ being pursued, see `CR5.lean`'s own notes above):
 
 **Active thread as of 2026-07-31 (separate from the above)**: `Gc/Reachability/Reachable/` — the new
 sibling reachability layer described in its own Architecture bullet above. `enter`/`exit`/`makeObjStack`/
-`makeObjRegion`/`makeRegion`/`varAsgn`/`fieldAsgn` are proved (see that section's "per-operation status"
-for details, including `fieldAsgn`'s combined confinement+escape argument, the hardest one so far); only
-`merge` and `swap` are still `sorry` in `Scratch.lean`. This is being worked one operation at a time,
-checkpointed as its own commit (`fieldAsgn`'s commit is `223dbdb`), stopping for explicit user
+`makeObjRegion`/`makeRegion`/`varAsgn`/`fieldAsgn`/`merge` are proved (see that section's "per-operation
+status" for details — `merge`'s commit is `6a6ab82`, and its bullet there covers the
+`RId`-source-can-continue-a-step gap this layer has over `Referencable/`'s `merge_cr3`, worth reading
+before starting `swap` since `swap` hits the same gap, just mid-chain instead of at the root); only `swap`
+is still `sorry` in `Scratch.lean`, and it's expected to be markedly larger than any operation finished so
+far (four branches combining two escape techniques, plus new region-crossing handling) — see
+"Notes for `swap`, gathered while scoping it" immediately after that section for a concrete plan of attack,
+what's already confirmed reusable, and where the genuinely new proof content is expected to be. This is
+being worked one operation at a time, checkpointed as its own commit, stopping for explicit user
 confirmation before each next operation — **do not proceed past the next unproved operation without
-asking first**, even though that's the opposite default from the CR6/`Guarantees.lean` work above.
+asking first**, even though that's the opposite default from the CR6/`Guarantees.lean` work above. (User
+explicitly chose, 2026-07-31, to stop at the `merge` checkpoint rather than start `swap` in the same
+session, given its scoped-out size — this default-stop convention held.)
 
 ## Comment style
 
