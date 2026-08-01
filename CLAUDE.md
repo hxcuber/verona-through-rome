@@ -241,8 +241,9 @@ operation inside it), not operation-first — this matches how work on the layer
 property, ground out across all 9 ops, one commit per op). `Referencable/`'s own layout was later
 refactored to mirror this same property-first shape (see that section above) — the two layers'
 top-level structure (`Semantics.lean`, `Basic.lean`, `Lemmas/` + aggregator, one folder per headline
-property with an `All.lean` dispatcher) now lines up file-for-file, modulo each layer's own specific
-properties and the folder-independence constraint (neither imports the other):
+property with an `All.lean` dispatcher, plus a single-config corollary file per headline single-config
+claim — `CR1.lean`/`CR2.lean`/`CR4.lean` there, `CR6.lean` here) now lines up file-for-file, modulo each
+layer's own specific properties and the folder-independence constraint (neither imports the other):
 
 - `Semantics.lean` — `Reference.deref?` (the `OId` branch is exactly `Referencable`'s `objAt?` restated
   via `do`-notation; the new content is the `RId` branch, which steps into a `Closed` region's bridge
@@ -273,11 +274,35 @@ properties and the folder-independence constraint (neither imports the other):
   `stackWithIndex_find_index_eq_getElem` — generic `stackWithIndex`↔`getLast?`/index facts;
   `stack_container_confined`/`region_container_confined` — owner-index-bound facts, true for any config
   or mutation, reused by `varAsgn`'s/`swap`'s own escape arguments despite living here rather than under
-  `fieldAsgn`, where they were first needed), and `Lemmas/<Op>.lean` (one per `Stmt` constructor) holds
+  `fieldAsgn`, where they were first needed; `closed_region_not_owned`/`predecessor_of_closed_region_object`
+  — the Closed-region analogues of `open_rid_no_step`/`predecessor_of_region_object`: the `RId` source
+  becomes the desired portal hop instead of an impossibility, and the stack-escape branch becomes
+  impossible (via S3+L2: a Closed region can never be owned by an on-stack frame) instead of allowed;
+  `RegionReachable_of_FrameReachable_closed`/`FrameReachable_rid_of_closed_container` — the two halves
+  of `CR6.lean`'s confinement argument below, each a backward induction over the reachability chain
+  dispatching on `predecessor_of_closed_region_object`; `FrameReachable_extend` — a small generic lemma
+  extending a `FrameReachable` witness forward along any further `ReachableStep` chain), and
+  `Lemmas/<Op>.lean` (one per `Stmt` constructor) holds
   the `loc?`/`objAt?`/`ReachableStep` agreement facts and frame-membership/frame-reachability transports
   (`<op>_frame_reachable_iff`) each op's proof needs. `Lemmas.lean` itself is now just a 10-line
   aggregator importing all of `Lemmas/*.lean`, mirroring `Mutation.lean`/`Preservation.lean`'s own
   aggregator shape.
+- `CR6.lean` — the single-config reachability corollary (report.pdf CR6), mirroring `Referencable/`'s
+  `CR1.lean`/`CR2.lean`/`CR4.lean` pattern rather than sitting in `Basic.lean` alongside this layer's
+  other headline `Prop`s: `Lemmas/Common.lean` already imports `Basic.lean` (for `ReachableStep_rid_iff`/
+  `_oid_iff`), so a proof drawing on `Lemmas`-level machinery can't live *in* `Basic.lean` without an
+  import cycle. Two theorems:
+  - **`StackReachable_iff_RegionReachable_of_closed`**: given a Closed region `rid` whose `RId` is
+    itself stack-reachable, an object located inside `rid` (`loc? = Rgn rid`) is `StackReachable` iff
+    it's `RegionReachable cfg rid` — "liveness in a closed region is solely determined by
+    region-reachability." The `↔`'s forward direction doesn't actually need the `RId`-reachable
+    hypothesis: closedness alone forces every path in through the single portal hop `RId rid → bridge`
+    (`RegionReachable_of_FrameReachable_closed`); the hypothesis is only needed by the reverse
+    direction, to glue that portal hop onto the stack (`FrameReachable_extend`).
+  - **`not_StackReachable_rid_implies_not_StackReachable_objects_of_closed`**: the companion, proved
+    via its own noted contrapositive route (`FrameReachable_rid_of_closed_container`: reaching
+    anything inside a Closed region forces the region's own `RId` to already be frame-reachable too)
+    — an unreachable Closed region's contents are all unreachable.
 - `FrameReachableAtLaterFrame/` — one `frameReachableAtLaterFrame_step_<op>.lean` file per `Stmt`
   constructor (all 9 proved, zero `sorry`), plus `All.lean`'s `frameReachableAtLaterFrame_step_all`
   dispatcher (`cases cmd with ...`, mirroring `Referencable/CR3/All.lean`'s
