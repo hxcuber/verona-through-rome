@@ -113,12 +113,14 @@ theorem predecessor_of_region_object {cfg : RuntimeConfig} (vcfg : ValidConfig c
       · subst heq; exact open_rid_no_step hlookup hopen
       · intro hstep'
         rw [ReachableStep_rid_iff] at hstep'
-        obtain ⟨region', hlookup', -, obj, hobjlookup, hcontains⟩ := hstep'
-        have hmemrefs : (Reference.OId oid) ∈ region'.refs :=
-          mem_region_refs_of_mem_objMap hobjlookup (List.contains_iff_mem.mp hcontains)
-        have hloc' := vcfg.h3 rid' oid region' hlookup' hmemrefs
-        rw [hloc] at hloc'
-        injection hloc' with hridEq
+        obtain ⟨region', hlookup', -, hbeq⟩ := hstep'
+        injection hbeq with hbeqOid
+        have hbridgeIn : region'.bridgeObjectId ∈ region'.objMap := vcfg.h1 region'
+          (by unfold Heap.regions; exact List.mem_map_of_mem (AList.lookup_mem_entries hlookup'))
+        have hlocBridge : (Reference.OId region'.bridgeObjectId).loc? cfg = some (Location.Rgn rid') :=
+          (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region', hlookup', hbridgeIn⟩
+        rw [← hbeqOid, hloc] at hlocBridge
+        injection hlocBridge with hridEq
         injection hridEq with hridEq
         exact heq hridEq.symm)
   | OId oid' =>
@@ -156,12 +158,14 @@ theorem predecessor_of_stack_object {cfg : RuntimeConfig} (vcfg : ValidConfig cf
   | RId rid' =>
     exfalso
     rw [ReachableStep_rid_iff] at hstep
-    obtain ⟨region', hlookup', -, obj, hobjlookup, hcontains⟩ := hstep
-    have hmemrefs : (Reference.OId oid) ∈ region'.refs :=
-      mem_region_refs_of_mem_objMap hobjlookup (List.contains_iff_mem.mp hcontains)
-    have hloc' := vcfg.h3 rid' oid region' hlookup' hmemrefs
-    rw [hloc] at hloc'
-    simp at hloc'
+    obtain ⟨region', hlookup', -, hbeq⟩ := hstep
+    injection hbeq with hbeqOid
+    have hbridgeIn : region'.bridgeObjectId ∈ region'.objMap := vcfg.h1 region'
+      (by unfold Heap.regions; exact List.mem_map_of_mem (AList.lookup_mem_entries hlookup'))
+    have hlocBridge : (Reference.OId region'.bridgeObjectId).loc? cfg = some (Location.Rgn rid') :=
+      (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region', hlookup', hbridgeIn⟩
+    rw [← hbeqOid, hloc] at hlocBridge
+    simp at hlocBridge
   | OId oid' =>
     rw [ReachableStep_oid_iff] at hstep
     obtain ⟨obj, hobjAt, hcontains⟩ := hstep

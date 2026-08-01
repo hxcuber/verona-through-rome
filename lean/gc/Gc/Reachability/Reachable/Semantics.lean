@@ -1,23 +1,19 @@
 import Gc.Model.Types
 import Gc.Model.Helpers
 
-def Reference.deref? (cfg : RuntimeConfig) : Reference → Option Object
-  | Reference.RId rid => do
-    let region ← cfg.heap.lookup rid
-    guard (region.status == Status.Closed)
-    region.objMap.lookup region.bridgeObjectId
-  | Reference.OId oid => do
-    let loc ← (Reference.OId oid).loc? cfg
-    match loc with
-    | Location.Rgn rid =>
-      let region ← cfg.heap.lookup rid
-      region.objMap.lookup oid
-    | Location.Stk fid =>
-      let frame ← cfg.stackWithIndex.find? (fun frame => frame.index == fid)
-      frame.objMap.lookup oid
-
-def ReachableStep (cfg : RuntimeConfig) (a b : Reference) : Prop :=
-  ∃ obj, a.deref? cfg = some obj ∧ obj.refs.contains b
+def ReachableStep (cfg : RuntimeConfig) : Reference → Reference → Prop
+  | Reference.RId rid, b =>
+    ∃ region, cfg.heap.lookup rid = some region ∧
+      region.status = Status.Closed ∧ b = Reference.OId region.bridgeObjectId
+  | Reference.OId oid, b =>
+    ∃ obj, (do
+        let loc ← (Reference.OId oid).loc? cfg
+        match loc with
+        | Location.Rgn rid => (cfg.heap.lookup rid).bind (fun region => region.objMap.lookup oid)
+        | Location.Stk fid =>
+          (cfg.stackWithIndex.find? (fun frame => frame.index == fid)).bind
+            (fun frame => frame.objMap.lookup oid)) = some obj ∧
+      obj.refs.contains b
 
 inductive RegionReachable : RuntimeConfig → RegionId → Reference → Prop where
 | bridge : cfg.heap.lookup rid = some region →

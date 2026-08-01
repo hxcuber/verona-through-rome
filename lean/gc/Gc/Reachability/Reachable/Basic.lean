@@ -4,40 +4,21 @@ import Gc.Reachability.Reachable.Semantics
 import Gc.Model.Validity
 import Gc.Model.Preservation
 
--- `deref?`'s `OId` branch is `objAt?` restated via `do`-notation; the new content is `RId` stepping into a Closed region's bridge object.
-theorem deref?_oid_eq_objAt? (cfg : RuntimeConfig) (oid : ObjectId) :
-    (Reference.OId oid).deref? cfg = (Reference.OId oid).objAt? cfg := by
-  simp only [Reference.deref?, Reference.objAt?]
-  cases (Reference.OId oid).loc? cfg with
-  | none => rfl
-  | some loc => cases loc <;> rfl
-
--- `ReachableStep`'s new content vs. `RefStep`: `RId rid` steps to `b` when `rid` is Closed and `b` is a field of its bridge object.
+-- `ReachableStep`'s new content vs. `RefStep`: `RId rid` steps directly to `rid`'s own bridge object when `rid` is Closed.
 theorem ReachableStep_rid_iff (cfg : RuntimeConfig) (rid : RegionId) (b : Reference) :
     ReachableStep cfg (Reference.RId rid) b ↔
-      ∃ region, cfg.heap.lookup rid = some region ∧ region.status = Status.Closed ∧
-        ∃ obj, region.objMap.lookup region.bridgeObjectId = some obj ∧ obj.refs.contains b := by
-  unfold ReachableStep Reference.deref?
-  cases hlookup : cfg.heap.lookup rid with
-  | none => simp [hlookup]
-  | some region =>
-    simp only [hlookup]
-    cases hstatus : region.status with
-    | Open =>
-      have hbeq : (Status.Open == Status.Closed) = false := rfl
-      have hfail : (failure : Option Unit).bind
-          (fun _ => AList.lookup region.bridgeObjectId region.objMap) = none := rfl
-      simp [guard, hstatus, hbeq, hfail]
-    | Closed =>
-      have hbeq : (Status.Closed == Status.Closed) = true := rfl
-      simp [guard, hstatus, hbeq]
+      ∃ region, cfg.heap.lookup rid = some region ∧
+        region.status = Status.Closed ∧ b = Reference.OId region.bridgeObjectId :=
+  Iff.rfl
 
 -- `ReachableStep` on an `OId` source reduces to `objAt?`/`.refs.contains`, the same shape `RefStep` uses.
 theorem ReachableStep_oid_iff (cfg : RuntimeConfig) (oid : ObjectId) (b : Reference) :
     ReachableStep cfg (Reference.OId oid) b ↔
       ∃ obj, (Reference.OId oid).objAt? cfg = some obj ∧ obj.refs.contains b := by
-  unfold ReachableStep
-  rw [deref?_oid_eq_objAt?]
+  simp only [ReachableStep, Reference.objAt?]
+  cases (Reference.OId oid).loc? cfg with
+  | none => rfl
+  | some loc => cases loc <;> rfl
 
 -- `rid` is explicit (not fixed to `frame.regionId`) since `induction h` needs a bare-variable index to generalize over.
 theorem RegionReachable_implies_FrameRechable (cfg : RuntimeConfig) (rid : RegionId) (ref : Reference)
