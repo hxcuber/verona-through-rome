@@ -524,3 +524,46 @@ theorem RegionReachable_of_FrameReachable_closed {cfg : RuntimeConfig} (vcfg : V
       · exact RegionReachable.step hstep (ih oid' haeq hloc'')
       · exact RegionReachable.bridge hlookup hbridgeeq.symm
   exact hback _ hrtg oid rfl hloc
+
+-- The other half of closed-region confinement: reaching an object inside a Closed region forces the
+-- region's own `RId` to already be frame-reachable (the portal hop is unavoidable, not just available).
+theorem FrameReachable_rid_of_closed_container {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
+    {rid : RegionId} {region : Region} (hlookup : cfg.heap.lookup rid = some region)
+    (hclosed : region.status = Status.Closed)
+    {fid : Index} {oid : ObjectId} (hloc : (Reference.OId oid).loc? cfg = some (Location.Rgn rid))
+    (hreach : FrameReachable cfg fid (Reference.OId oid)) :
+    FrameReachable cfg fid (Reference.RId rid) := by
+  rw [FrameReachable_iff_reflTransGen] at hreach
+  obtain ⟨start, hroot, hrtg⟩ := hreach
+  have hback : ∀ ref, Relation.ReflTransGen (ReachableStep cfg) start ref →
+      ∀ oidR, ref = Reference.OId oidR → (Reference.OId oidR).loc? cfg = some (Location.Rgn rid) →
+        FrameReachable cfg fid (Reference.RId rid) := by
+    intro ref hrtg2
+    induction hrtg2 with
+    | refl =>
+      intro oidR heq hloc'
+      exfalso
+      rw [heq] at hroot
+      rcases hroot with ⟨frame, hmem, -, var, hvar⟩ | ⟨frame, hmem, -, region2, hlookup2, hstart⟩
+      · have hmemrefs : (Reference.OId oidR) ∈ frame.refs := mem_frame_refs_of_mem_varMap hvar
+        obtain ⟨frame', hmem', hridEq', -⟩ := vcfg.s3 frame hmem (Reference.OId oidR) hmemrefs rid oidR rfl hloc'
+        exact closed_region_not_owned vcfg hlookup hclosed hmem' hridEq'
+      · injection hstart with hstartEq
+        have hbridgeIn : region2.bridgeObjectId ∈ region2.objMap := vcfg.h1 region2
+          (by unfold Heap.regions; exact List.mem_map_of_mem (AList.lookup_mem_entries hlookup2))
+        have hlocBridge : (Reference.OId region2.bridgeObjectId).loc? cfg =
+            some (Location.Rgn frame.regionId) :=
+          (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region2, hlookup2, hbridgeIn⟩
+        rw [← hstartEq, hloc'] at hlocBridge
+        injection hlocBridge with hlocBridge'
+        injection hlocBridge' with hlocBridge''
+        exact closed_region_not_owned vcfg hlookup hclosed hmem hlocBridge''.symm
+    | tail hprev hstep ih =>
+      intro oidR heq hloc'
+      subst heq
+      rcases predecessor_of_closed_region_object vcfg hlookup hclosed hloc' hstep with
+        ⟨oid', haeq, hloc''⟩ | ⟨haeq, -⟩
+      · exact ih oid' haeq hloc''
+      · rw [haeq] at hprev
+        exact (FrameReachable_iff_reflTransGen cfg fid (Reference.RId rid)).mpr ⟨start, hroot, hprev⟩
+  exact hback _ hrtg oid rfl hloc

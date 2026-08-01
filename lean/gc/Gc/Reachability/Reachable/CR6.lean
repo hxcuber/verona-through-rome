@@ -22,12 +22,14 @@ theorem StackReachable_iff_RegionReachable_of_closed (cfg : RuntimeConfig) (vcfg
     rw [hregionEq] at hreachBridge
     exact ⟨frame0, hmem0, FrameReachable_extend hreachBridge hrtg⟩
 
--- -- Companion to the theorem above, easiest via its contrapositive (`StackReachable` oid → `StackReachable` (RId rid)): an unreachable Closed region's own objects are all unreachable too.
--- theorem not_StackReachable_rid_implies_not_StackReachable_objects_of_closed
---     (cfg : RuntimeConfig) (vcfg : ValidConfig cfg)
---     (rid : RegionId) (region : Region) (hlookup : cfg.heap.lookup rid = some region)
---     (hclosed : region.status = Status.Closed)
---     (hridunreachable : ¬ StackReachable cfg (Reference.RId rid)) :
---     ∀ oid : ObjectId, (Reference.OId oid).loc? cfg = some (Location.Rgn rid) →
---       ¬ StackReachable cfg (Reference.OId oid) := by
---   sorry
+-- Companion to the theorem above, via its contrapositive (`StackReachable` oid → `StackReachable` (RId rid)): an unreachable Closed region's own objects are all unreachable too.
+theorem not_StackReachable_rid_implies_not_StackReachable_objects_of_closed
+    (cfg : RuntimeConfig) (vcfg : ValidConfig cfg)
+    (rid : RegionId) (region : Region) (hlookup : cfg.heap.lookup rid = some region)
+    (hclosed : region.status = Status.Closed)
+    (hridunreachable : ¬ StackReachable cfg (Reference.RId rid)) :
+    ∀ oid : ObjectId, (Reference.OId oid).loc? cfg = some (Location.Rgn rid) →
+      ¬ StackReachable cfg (Reference.OId oid) := by
+  intro oid hloc hstackreach
+  obtain ⟨frame, hmem, hreach⟩ := hstackreach
+  exact hridunreachable ⟨frame, hmem, FrameReachable_rid_of_closed_container vcfg hlookup hclosed hloc hreach⟩
