@@ -86,6 +86,17 @@ theorem l2_of_stackWithIndex {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
   rw [hfeq2] at hlookup
   exact ⟨region, hlookup, hopen⟩
 
+-- L2's contrapositive: an on-stack frame can never own a Closed region.
+theorem closed_region_not_owned {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
+    {rid : RegionId} {region : Region} (hlookup : cfg.heap.lookup rid = some region)
+    (hclosed : region.status = Status.Closed)
+    {frame : FrameWithIndex} (hmem : frame ∈ cfg.stackWithIndex) (hrid : frame.regionId = rid) : False := by
+  obtain ⟨region2, hlookup2, hopen2⟩ := l2_of_stackWithIndex vcfg hmem
+  rw [hrid, hlookup] at hlookup2
+  injection hlookup2 with heq
+  rw [← heq, hclosed] at hopen2
+  exact absurd hopen2 (by decide)
+
 -- No `ReachableStep` sources from an Open region's `RId` (`deref?`'s guard requires Closed).
 theorem open_rid_no_step {cfg : RuntimeConfig} {rid : RegionId} {region : Region}
     (hlookup : cfg.heap.lookup rid = some region) (hopen : region.status = Status.Open)
@@ -148,6 +159,73 @@ theorem predecessor_of_region_object {cfg : RuntimeConfig} (vcfg : ValidConfig c
           injection hridEq with hridEq
           left; rw [hridEq]
       | Stk fid => right; exact ⟨fid, rfl⟩
+
+-- Closed-region analogue of `predecessor_of_region_object`: the "on stack" escape becomes impossible
+-- (S3/L2), and the `RId` source becomes the portal hop instead of `open_rid_no_step`'s contradiction.
+theorem predecessor_of_closed_region_object {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
+    {rid : RegionId} {region : Region} (hlookup : cfg.heap.lookup rid = some region)
+    (hclosed : region.status = Status.Closed) {oid : ObjectId}
+    (hloc : (Reference.OId oid).loc? cfg = some (Location.Rgn rid))
+    {a : Reference} (hstep : ReachableStep cfg a (Reference.OId oid)) :
+    (∃ oid', a = Reference.OId oid' ∧ (Reference.OId oid').loc? cfg = some (Location.Rgn rid)) ∨
+      (a = Reference.RId rid ∧ oid = region.bridgeObjectId) := by
+  cases a with
+  | RId rid' =>
+    right
+    rw [ReachableStep_rid_iff] at hstep
+    obtain ⟨region', hlookup', -, hbeq⟩ := hstep
+    injection hbeq with hbeqOid
+    have hbridgeIn : region'.bridgeObjectId ∈ region'.objMap := vcfg.h1 region'
+      (by unfold Heap.regions; exact List.mem_map_of_mem (AList.lookup_mem_entries hlookup'))
+    have hlocBridge : (Reference.OId region'.bridgeObjectId).loc? cfg = some (Location.Rgn rid') :=
+      (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region', hlookup', hbridgeIn⟩
+    rw [← hbeqOid, hloc] at hlocBridge
+    injection hlocBridge with hridEq
+    injection hridEq with hridEq
+    rw [← hridEq] at hlookup'
+    rw [hlookup] at hlookup'
+    injection hlookup' with hregionEq
+    refine ⟨congrArg Reference.RId hridEq.symm, ?_⟩
+    rw [hregionEq]
+    exact hbeqOid
+  | OId oid' =>
+    left
+    refine ⟨oid', rfl, ?_⟩
+    rw [ReachableStep_oid_iff] at hstep
+    obtain ⟨obj, hobjAt, hcontains⟩ := hstep
+    unfold Reference.objAt? at hobjAt
+    dsimp only at hobjAt
+    cases hloc' : (Reference.OId oid').loc? cfg with
+    | none => rw [hloc'] at hobjAt; simp at hobjAt
+    | some loc =>
+      rw [hloc'] at hobjAt
+      cases loc with
+      | Rgn rid' =>
+        dsimp only at hobjAt
+        cases hlookup' : cfg.heap.lookup rid' with
+        | none => rw [hlookup'] at hobjAt; simp at hobjAt
+        | some region' =>
+          rw [hlookup'] at hobjAt
+          have hmemrefs : (Reference.OId oid) ∈ region'.refs :=
+            mem_region_refs_of_mem_objMap hobjAt (List.contains_iff_mem.mp hcontains)
+          have hridEq := vcfg.h3 rid' oid region' hlookup' hmemrefs
+          rw [hloc] at hridEq
+          injection hridEq with hridEq
+          injection hridEq with hridEq
+          rw [hridEq]
+      | Stk fid =>
+        exfalso
+        dsimp only at hobjAt
+        cases hfind : cfg.stackWithIndex.find? (fun frame => frame.index == fid) with
+        | none => rw [hfind] at hobjAt; simp at hobjAt
+        | some someFrame =>
+          rw [hfind] at hobjAt
+          have hmem : someFrame ∈ cfg.stackWithIndex := List.mem_of_find?_eq_some hfind
+          have hmemrefs : (Reference.OId oid) ∈ someFrame.refs :=
+            mem_frame_refs_of_mem_objMap hobjAt (List.contains_iff_mem.mp hcontains)
+          obtain ⟨frame', hmem', hridEq', -⟩ :=
+            vcfg.s3 someFrame hmem (Reference.OId oid) hmemrefs rid oid rfl hloc
+          exact closed_region_not_owned vcfg hlookup hclosed hmem' hridEq'
 
 -- A predecessor of a stack-resident object is itself stack-resident (H3 rules out any region object pointing at the stack).
 theorem predecessor_of_stack_object {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
@@ -396,3 +474,53 @@ theorem region_container_confined {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
       (FrameReachable_iff_reflTransGen cfg fid (Reference.OId oidB)).mpr ⟨start, hroot, hprefixB⟩
     have hbound := stack_container_confined vcfg hlocB hreachB
     exact le_trans hleB hbound
+
+-- Extends a `FrameReachable` witness forward along any further `ReachableStep` chain.
+theorem FrameReachable_extend {cfg : RuntimeConfig} {fid : Index} {x y : Reference}
+    (hx : FrameReachable cfg fid x) (hxy : Relation.ReflTransGen (ReachableStep cfg) x y) :
+    FrameReachable cfg fid y := by
+  induction hxy with
+  | refl => exact hx
+  | tail _ hstep ih => exact FrameReachable.step hstep ih
+
+-- Closed-region confinement, the key CR6 ingredient: any way of reaching an object inside a Closed
+-- region must factor through the region's own bridge object (the single portal hop `RId rid`).
+theorem RegionReachable_of_FrameReachable_closed {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
+    {rid : RegionId} {region : Region} (hlookup : cfg.heap.lookup rid = some region)
+    (hclosed : region.status = Status.Closed)
+    {fid : Index} {oid : ObjectId} (hloc : (Reference.OId oid).loc? cfg = some (Location.Rgn rid))
+    (hreach : FrameReachable cfg fid (Reference.OId oid)) :
+    RegionReachable cfg rid (Reference.OId oid) := by
+  rw [FrameReachable_iff_reflTransGen] at hreach
+  obtain ⟨start, hroot, hrtg⟩ := hreach
+  have hback : ∀ ref, Relation.ReflTransGen (ReachableStep cfg) start ref →
+      ∀ oidR, ref = Reference.OId oidR → (Reference.OId oidR).loc? cfg = some (Location.Rgn rid) →
+        RegionReachable cfg rid ref := by
+    intro ref hrtg2
+    induction hrtg2 with
+    | refl =>
+      intro oidR heq hloc'
+      exfalso
+      rw [heq] at hroot
+      rcases hroot with ⟨frame, hmem, -, var, hvar⟩ | ⟨frame, hmem, -, region2, hlookup2, hstart⟩
+      · have hmemrefs : (Reference.OId oidR) ∈ frame.refs := mem_frame_refs_of_mem_varMap hvar
+        obtain ⟨frame', hmem', hridEq', -⟩ := vcfg.s3 frame hmem (Reference.OId oidR) hmemrefs rid oidR rfl hloc'
+        exact closed_region_not_owned vcfg hlookup hclosed hmem' hridEq'
+      · injection hstart with hstartEq
+        have hbridgeIn : region2.bridgeObjectId ∈ region2.objMap := vcfg.h1 region2
+          (by unfold Heap.regions; exact List.mem_map_of_mem (AList.lookup_mem_entries hlookup2))
+        have hlocBridge : (Reference.OId region2.bridgeObjectId).loc? cfg =
+            some (Location.Rgn frame.regionId) :=
+          (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region2, hlookup2, hbridgeIn⟩
+        rw [← hstartEq, hloc'] at hlocBridge
+        injection hlocBridge with hlocBridge'
+        injection hlocBridge' with hlocBridge''
+        exact closed_region_not_owned vcfg hlookup hclosed hmem hlocBridge''.symm
+    | tail hprev hstep ih =>
+      intro oidR heq hloc'
+      subst heq
+      rcases predecessor_of_closed_region_object vcfg hlookup hclosed hloc' hstep with
+        ⟨oid', haeq, hloc''⟩ | ⟨-, hbridgeeq⟩
+      · exact RegionReachable.step hstep (ih oid' haeq hloc'')
+      · exact RegionReachable.bridge hlookup hbridgeeq.symm
+  exact hback _ hrtg oid rfl hloc
