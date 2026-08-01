@@ -424,6 +424,7 @@ theorem frameReachableAtLaterFrame_step_makeRegion (x : VarName) :
       hFR3 frame hframeMemCfg _ hLf hlt' oid hloc_cfg hLfReach
     exact (makeRegion_frame_reachable_iff vcfg h' hframeMemCfg hframeLt (Reference.OId oid)).mp hresult_cfg
 
+-- TODO(refactor): duplicates the local transport toolkit stackReachable_invariant_merge builds inline; extract a shared merge_frame_reachable_iff into Lemmas.lean once convenient (see auto-memory project_merge_frame_reachable_iff_refactor).
 theorem frameReachableAtLaterFrame_step_merge (x : VarName) :
     FrameReachableAtLaterFrame_step (Stmt.merge x) := by
   intro cfg cfg' vcfg h hFR3 frame hframeMem frame' hframe'Mem hlt oid hloc hreach
