@@ -4,11 +4,7 @@ import Gc.Reachability.Reachable.Semantics
 import Gc.Model.Validity
 import Gc.Model.Preservation
 
--- `deref?`'s `OId` branch is exactly `Reference.objAt?` restated via `do`-notation; the two
--- differ only on `RId`, where `objAt?` always returns `none` but `deref?` steps into a Closed
--- region's own bridge object. Stated fresh here (rather than importing
--- `Gc.Reachability.Referencable.Semantics.RefStep`, which is defined in terms of `objAt?`) so this
--- layer's machinery doesn't depend on anything under `Gc.Reachability.Referencable`.
+-- `deref?`'s `OId` branch is `objAt?` restated via `do`-notation; the new content is `RId` stepping into a Closed region's bridge object.
 theorem deref?_oid_eq_objAt? (cfg : RuntimeConfig) (oid : ObjectId) :
     (Reference.OId oid).deref? cfg = (Reference.OId oid).objAt? cfg := by
   simp only [Reference.deref?, Reference.objAt?]
@@ -16,9 +12,7 @@ theorem deref?_oid_eq_objAt? (cfg : RuntimeConfig) (oid : ObjectId) :
   | none => rfl
   | some loc => cases loc <;> rfl
 
--- The genuinely new content in `ReachableStep` relative to what `RefStep` alone would give: an
--- `RId rid` steps to `b` exactly when `rid` names a Closed region and `b` is a field of that
--- region's own bridge object.
+-- `ReachableStep`'s new content vs. `RefStep`: `RId rid` steps to `b` when `rid` is Closed and `b` is a field of its bridge object.
 theorem ReachableStep_rid_iff (cfg : RuntimeConfig) (rid : RegionId) (b : Reference) :
     ReachableStep cfg (Reference.RId rid) b ↔
       ∃ region, cfg.heap.lookup rid = some region ∧ region.status = Status.Closed ∧
@@ -38,17 +32,14 @@ theorem ReachableStep_rid_iff (cfg : RuntimeConfig) (rid : RegionId) (b : Refere
       have hbeq : (Status.Closed == Status.Closed) = true := rfl
       simp [guard, hstatus, hbeq]
 
--- `ReachableStep` on an `OId` source reduces to a plain `objAt?`/`.refs.contains` fact, via
--- `deref?_oid_eq_objAt?` -- the same shape `RefStep` itself is defined with.
+-- `ReachableStep` on an `OId` source reduces to `objAt?`/`.refs.contains`, the same shape `RefStep` uses.
 theorem ReachableStep_oid_iff (cfg : RuntimeConfig) (oid : ObjectId) (b : Reference) :
     ReachableStep cfg (Reference.OId oid) b ↔
       ∃ obj, (Reference.OId oid).objAt? cfg = some obj ∧ obj.refs.contains b := by
   unfold ReachableStep
   rw [deref?_oid_eq_objAt?]
 
--- `rid` is an explicit parameter (rather than fixing `rid := frame.regionId` up front): `frame.regionId`
--- is a projection, not a bare variable, so `induction h` needs a bare-variable index to
--- generalize over.
+-- `rid` is explicit (not fixed to `frame.regionId`) since `induction h` needs a bare-variable index to generalize over.
 theorem RegionReachable_implies_FrameRechable (cfg : RuntimeConfig) (rid : RegionId) (ref : Reference)
     (hframe : frame ∈ cfg.stackWithIndex) (hrid : frame.regionId = rid)
     (h : RegionReachable cfg rid ref) :
@@ -67,6 +58,12 @@ def FrameReachable_at_later_frame_implies_FrameReachable_at_frame (cfg : Runtime
     ∀ oid, (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId) →
     FrameReachable cfg frame'.index (Reference.OId oid) →
     FrameReachable cfg frame.index (Reference.OId oid)
+
+-- Single-step preservation of the property above; this layer's analogue of `Referencable`'s CR3 preservation.
+def FrameReachableAtLaterFrame_step (cmd : Stmt) : Prop :=
+  ∀ cfg cfg' : RuntimeConfig, ValidConfig cfg → step cmd cfg = some cfg' →
+    FrameReachable_at_later_frame_implies_FrameReachable_at_frame cfg →
+    FrameReachable_at_later_frame_implies_FrameReachable_at_frame cfg'
 
 def StackReachable_invariant_for_suspended_region_objects (cmd : Stmt) : Prop :=
   ∀ cfg cfg' : RuntimeConfig, ValidConfig cfg → step cmd cfg = some cfg' →

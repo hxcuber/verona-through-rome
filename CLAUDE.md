@@ -26,7 +26,7 @@ All commands below assume `cd lean/gc`.
 - **`lake build` (bare, no target) succeeds end to end**, including `Gc`, `Main`, and the `gc`
   executable, with zero `sorry`s anywhere under `Gc/`. Note: `Gc/Reachability/Reachable/` is not yet
   imported from `Gc.lean`, so it is *not* covered by the bare build — check it via qualified-name
-  builds (e.g. `lake build Gc.Reachability.Reachable.Scratch`) or the Lean LSP tools. Prefer building
+  builds (e.g. `lake build Gc.Reachability.Reachable.Lemmas`) or the Lean LSP tools. Prefer building
   the specific module(s) you're touching by qualified name for faster iteration.
 - Toolchain is pinned via `lean-toolchain` (`leanprover/lean4:v4.29.0-rc6`) and dependencies via
   `lake-manifest.json`; the main dependency is `mathlib`. First builds after a fresh clone can be slow
@@ -195,16 +195,21 @@ it never crosses a region boundary. This is what report.pdf's own reachability n
 ### `Gc/Reachability/Reachable/` — sibling reachability layer over `deref?` (complete, zero `sorry`)
 
 A folder alongside `Referencable/`. Not yet imported from `Gc.lean`, so it isn't built by a bare `lake
-build` — check it via qualified-name builds (`lake build Gc.Reachability.Reachable.Scratch`) or the
+build` — check it via qualified-name builds (`lake build Gc.Reachability.Reachable.Lemmas`) or the
 Lean LSP tools. This layer deliberately does **not** import anything from `Gc.Reachability.Referencable`
 (explicit user instruction) — its own `Semantics.lean` restates `deref?`/`ReachableStep` fresh rather
 than reusing `Referencable`'s `RefStep`, even though the two are almost the same shape. The reason it
 exists as a sibling rather than living inside `Referencable/`: `Reachable/`'s `deref?` is deliberately
 *stronger* than `Referencable/`'s `objAt?` — an `RId` step is allowed to continue into a **Closed**
 region's own bridge object, so a chain can cross a region boundary that `Referencable/` would stop at.
-See `Gc/Reachability/Reachable/Corollaries.lean`'s own header comment for the precise phrasing. See also
+See `Gc/Reachability/Reachable/Basic.lean`'s own header comment for the precise phrasing. See also
 [[project_region_object_reachability_seam]] (memory) on why `RegionReachable`/`FrameReachable` never
 cross an `RId` boundary within one relation.
+
+The folder is organized **property-first** (one top-level unit per headline claim, one file per
+operation inside it), not operation-first — this matches how work on the layer actually happens (one
+property, ground out across all 9 ops, one commit per op), unlike `Referencable/`'s layout which this
+folder deliberately does not mirror:
 
 - `Semantics.lean` — `Reference.deref?` (the `OId` branch is exactly `Referencable`'s `objAt?` restated
   via `do`-notation; the new content is the `RId` branch, which steps into a `Closed` region's bridge
@@ -212,14 +217,16 @@ cross an `RId` boundary within one relation.
   `RegionReachable`/`FrameReachable`/`StackReachable`/`FrameRoot` (same shape as
   `Referencable/Semantics.lean`'s, built on `ReachableStep`), and
   `RegionReachable_iff_reflTransGen`/`FrameReachable_iff_reflTransGen`.
-- `Corollaries.lean` — `deref?_oid_eq_objAt?`/`ReachableStep_rid_iff`/`ReachableStep_oid_iff` (unfolding
-  lemmas for the two `ReachableStep` sources), `RegionReachable_implies_FrameRechable`, and:
+- `Basic.lean` — the "start reading here" file: `deref?_oid_eq_objAt?`/`ReachableStep_rid_iff`/
+  `ReachableStep_oid_iff` (unfolding lemmas for the two `ReachableStep` sources),
+  `RegionReachable_implies_FrameRechable`, and the two headline `Prop` definitions the rest of the
+  folder proves per-operation instances of:
   - `FrameReachable_at_later_frame_implies_FrameReachable_at_frame cfg` — a CR3-style property (same
-    shape as `Referencable`'s report.pdf `CR3`, restated over this layer's own `FrameReachable`). Used as
-    an explicit hypothesis by `StackReachable_invariant_for_suspended_region_objects` below; its own
-    single-step preservation across every mutation is proved separately, in `Scratch2.lean` (not yet
-    proved to hold at `RuntimeConfig.start`, nor bundled into a `ValidReachableConfig`-style invariant
-    the way `Referencable/`'s `CR3` is).
+    shape as `Referencable`'s report.pdf `CR3`, restated over this layer's own `FrameReachable`), plus
+    its `FrameReachableAtLaterFrame_step cmd` single-step-preservation wrapper. Used as an explicit
+    hypothesis by `StackReachable_invariant_for_suspended_region_objects` below; not yet proved to hold
+    at `RuntimeConfig.start`, nor bundled into a `ValidReachableConfig`-style invariant the way
+    `Referencable/`'s `CR3` is.
   - `StackReachable_invariant_for_suspended_region_objects cmd` — the layer's headline claim: for a
     `ValidConfig cfg`, a mutation `cmd`, and a frame `frame` whose region is *suspended* (index strictly
     below the active/last frame's) and holds some `oid`, `StackReachable cfg (OId oid) ↔ StackReachable
@@ -227,29 +234,34 @@ cross an `RId` boundary within one relation.
     region" (the user's own reformulation of report.pdf Section 5 paragraph 4's claim; deliberately
     drops the paper's "as long as the active region remains active" qualifier, judged unnecessary for
     this single-step, per-operation formulation).
-- `Lemmas.lean` — a growing, per-operation reusable lemma toolkit (mirrors `Referencable/Validity/
-  Preservation/*.lean`'s per-op corollary convention, but kept in one file since the eventual per-op
-  split isn't decided yet). Holds general machinery (`SafeRef`/`predecessor_safe`/
-  `safe_reflTransGen_transport` — a backward, H3/L2-driven chase; `stackWithIndex_find_index_eq_getElem`,
-  `stackWithIndex_getLast_mem` — generic `stackWithIndex`↔`getLast?`/index facts) and per-operation
-  corollaries proving the `loc?`/`objAt?`/`ReachableStep` agreement facts and frame-membership
-  transports each op's proof needs.
-- `Scratch.lean` — one `stackReachable_invariant_<op>` theorem per `Stmt` constructor (all 9 proved,
-  zero `sorry`), plus a `stackReachable_invariant_all` dispatcher (`cases cmd with ...`) mirroring
-  `Referencable/Validity/Preservation.lean`'s `allPreserve_ValidConfig` pattern. Despite the name, this
-  file holds genuine, load-bearing proof content, not throwaway exploration — kept as one file rather
-  than split per-op since the layer is still mid-draft architecturally.
-- `Scratch2.lean` — one `frameReachableAtLaterFrame_step_<op>` theorem per `Stmt` constructor (all 9
-  proved, zero `sorry`), plus a `frameReachableAtLaterFrame_step_all` dispatcher; proves
-  `FrameReachableAtLaterFrame_step cmd`, i.e. single-step preservation of
-  `FrameReachable_at_later_frame_implies_FrameReachable_at_frame` (see the `Corollaries.lean` bullet
-  above). Unlike `Scratch.lean`'s property (which only needs *some* witness frame reaching `oid`), this
-  one needs reachability specifically from the given earlier frame, so `varAsgn`/`fieldAsgn`/`swap` each
-  need a genuine index-bound "escape" argument (frame.index ≤ frameY.index for whatever frame the
-  reachability chain actually rooted from, via `fieldAsgn_region_container_confined` — fully generic
-  despite the name) rather than just transport. `merge`'s proof rebuilds its own local transport toolkit
-  here rather than sharing one with `Scratch.lean`'s `merge` proof, unlike every other op (which shares a
-  single `<op>_frame_reachable_iff` in `Lemmas.lean`) — a known duplication, not yet cleaned up.
+- `Lemmas/` — the per-operation reusable lemma toolkit both proof passes below draw on:
+  `Lemmas/Common.lean` holds generic, non-operation-specific machinery (`SafeRef`/`predecessor_safe`/
+  `safe_reflTransGen_transport` — a backward, H3/L2-driven chase; `stackWithIndex_mem_getElem_eq`/
+  `stackWithIndex_find_index_eq_getElem` — generic `stackWithIndex`↔`getLast?`/index facts;
+  `stack_container_confined`/`region_container_confined` — owner-index-bound facts, true for any config
+  or mutation, reused by `varAsgn`'s/`swap`'s own escape arguments despite living here rather than under
+  `fieldAsgn`, where they were first needed), and `Lemmas/<Op>.lean` (one per `Stmt` constructor) holds
+  the `loc?`/`objAt?`/`ReachableStep` agreement facts and frame-membership/frame-reachability transports
+  (`<op>_frame_reachable_iff`) each op's proof needs. `Lemmas.lean` itself is now just a 10-line
+  aggregator importing all of `Lemmas/*.lean`, mirroring `Mutation.lean`/`Preservation.lean`'s own
+  aggregator shape.
+- `FrameReachableAtLaterFrame/` — one `frameReachableAtLaterFrame_step_<op>.lean` file per `Stmt`
+  constructor (all 9 proved, zero `sorry`), plus `All.lean`'s `frameReachableAtLaterFrame_step_all`
+  dispatcher (`cases cmd with ...`, mirroring `Referencable/Validity/Preservation.lean`'s
+  `allPreserve_ValidConfig` pattern); proves `FrameReachableAtLaterFrame_step cmd`, i.e. single-step
+  preservation of `FrameReachable_at_later_frame_implies_FrameReachable_at_frame` (see the `Basic.lean`
+  bullet above). Unlike `StackReachableInvariant/`'s property (which only needs *some* witness frame
+  reaching `oid`), this one needs reachability specifically from the given earlier frame, so
+  `varAsgn`/`fieldAsgn`/`swap` each need a genuine index-bound "escape" argument (frame.index ≤
+  frameY.index for whatever frame the reachability chain actually rooted from, via
+  `region_container_confined`) rather than just transport.
+- `StackReachableInvariant/` — one `stackReachable_invariant_<op>.lean` file per `Stmt` constructor (all
+  9 proved, zero `sorry`), plus `All.lean`'s `stackReachable_invariant_all` dispatcher; proves
+  `StackReachable_invariant_for_suspended_region_objects cmd`. `merge`'s proof (in both this folder and
+  `FrameReachableAtLaterFrame/`) shares its RId-`rid'`-avoidance transport toolkit via
+  `merge_frame_transport_down`/`_up`, `merge_chain_transport_down`, and `merge_frame_reachable_iff` in
+  `Lemmas/Merge.lean`, matching the `<op>_frame_reachable_iff` shape used by every other op, rather than
+  each proof rebuilding its own local copy.
 
 ## Proof-engineering gotchas (recurring across this codebase's proof style)
 

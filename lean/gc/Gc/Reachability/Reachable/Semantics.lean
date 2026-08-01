@@ -42,16 +42,13 @@ inductive FrameReachable : RuntimeConfig → Index → Reference → Prop where
 def StackReachable (cfg : RuntimeConfig) (ref : Reference) : Prop :=
     ∃ frame ∈ cfg.stackWithIndex, FrameReachable cfg frame.index ref
 
--- the two ways FrameReachable can start a path: from a stack variable's value, or from
--- the frame's own region's bridge object
+-- The two ways `FrameReachable` can start: a stack variable's value, or the frame's own bridge object.
 def FrameRoot (cfg : RuntimeConfig) (fid : Index) (start : Reference) : Prop :=
   (∃ frame ∈ cfg.stackWithIndex, frame.index = fid ∧ ∃ var, frame.varMap.lookup var = some start) ∨
   (∃ frame ∈ cfg.stackWithIndex, frame.index = fid ∧
     ∃ region, cfg.heap.lookup frame.regionId = some region ∧ start = Reference.OId region.bridgeObjectId)
 
--- RegionReachable is exactly "reachable from the bridge object by zero or more RefSteps" --
--- `bridge` is the `refl` case and `step` is the `tail` case, so this is a straight
--- induction, not a change to the definition itself.
+-- `RegionReachable` is exactly reachable from the bridge object by zero or more steps (`bridge`=`refl`, `step`=`tail`).
 theorem RegionReachable_iff_reflTransGen (cfg : RuntimeConfig) (rid : RegionId) (ref : Reference) :
     RegionReachable cfg rid ref ↔
       ∃ region, cfg.heap.lookup rid = some region ∧
@@ -71,8 +68,7 @@ theorem RegionReachable_iff_reflTransGen (cfg : RuntimeConfig) (rid : RegionId) 
     | tail _ hstep ih =>
       exact RegionReachable.step hstep ih
 
--- Same idea for FrameReachable, except there are two possible roots (a var's value, or
--- the frame's bridge object) instead of one, captured by FrameRoot.
+-- Same idea for `FrameReachable`, but with two possible roots (captured by `FrameRoot`) instead of one.
 theorem FrameReachable_iff_reflTransGen (cfg : RuntimeConfig) (fid : Index) (ref : Reference) :
     FrameReachable cfg fid ref ↔
       ∃ start, FrameRoot cfg fid start ∧ Relation.ReflTransGen (ReachableStep cfg) start ref := by
