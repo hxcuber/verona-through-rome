@@ -426,7 +426,297 @@ theorem frameReachableAtLaterFrame_step_makeRegion (x : VarName) :
 
 theorem frameReachableAtLaterFrame_step_merge (x : VarName) :
     FrameReachableAtLaterFrame_step (Stmt.merge x) := by
-  sorry
+  intro cfg cfg' vcfg h hFR3 frame hframeMem frame' hframe'Mem hlt oid hloc hreach
+  have h' : merge x cfg = some cfg' := h
+  have vcfg' : ValidConfig cfg' := merge_valid vcfg h'
+  obtain ⟨frame1, rid', region1, region', hframe1, hxref, hregion1, hregion', hclosed, hopen, hcfg'⟩ :=
+    merge_cases h'
+  have stack_eq : cfg.stack = cfg.stack.dropLast ++ [frame1] :=
+    (List.dropLast_append_getLast? frame1 hframe1).symm
+  have hframe1MemStack : frame1 ∈ cfg.stack := by
+    rw [stack_eq]; exact List.mem_append_right _ (List.mem_singleton_self _)
+  have hlast1_mem : ({ frame1 with index := cfg.stack.dropLast.length } : FrameWithIndex) ∈ cfg.stackWithIndex := by
+    have hframe1_get : cfg.stack[cfg.stack.dropLast.length]? = some frame1 := by
+      conv_lhs => rw [stack_eq]; simp
+    obtain ⟨hh1, hheq⟩ := List.getElem?_eq_some_iff.mp hframe1_get
+    unfold RuntimeConfig.stackWithIndex
+    exact List.mem_mapIdx.mpr ⟨cfg.stack.dropLast.length, hh1, by rw [hheq]⟩
+  have hridNe1 : ∀ G0 : FrameWithIndex, G0 ∈ cfg.stackWithIndex → G0.regionId ≠ rid' := by
+    intro G0 hG0mem hc
+    obtain ⟨region0, hlk0, hopen0⟩ := l2_of_stackWithIndex vcfg hG0mem
+    rw [hc, hregion'] at hlk0
+    injection hlk0 with hlk0eq
+    rw [← hlk0eq] at hopen0
+    exact absurd (hopen0.symm.trans hclosed) (by decide)
+  have hridNeFrame1 : ∀ G0 : FrameWithIndex, G0 ∈ cfg.stackWithIndex →
+      G0.index < cfg.stack.dropLast.length → G0.regionId ≠ frame1.regionId := by
+    intro G0 hG0mem hG0lt hc
+    have hidxeq := merge_corollary_regionId_unique_index vcfg.s1 hG0mem hlast1_mem hc
+    exact absurd hidxeq (Nat.ne_of_lt hG0lt)
+  have hstepIffOfNe : ∀ a : Reference, a ≠ Reference.RId rid' → ∀ b, ReachableStep cfg a b ↔ ReachableStep cfg' a b := by
+    intro a hane b
+    cases a with
+    | OId oid0 => exact merge_oid_step_iff vcfg h' oid0 b
+    | RId rid0 =>
+      have hne0 : rid0 ≠ rid' := fun hc => hane (by rw [hc])
+      exact merge_rid_step_iff_of_ne hframe1 hxref hregion1 hregion' hclosed hopen hcfg' hne0 b
+  have hnotTarget : ∀ a, ¬ ReachableStep cfg a (Reference.RId rid') :=
+    merge_ridPrime_not_step_target vcfg hframe1MemStack hxref
+  have hchainAvoids : ∀ {start target : Reference}, start ≠ Reference.RId rid' →
+      Relation.ReflTransGen (ReachableStep cfg) start target → target ≠ Reference.RId rid' := by
+    intro start target hstartne hrtg
+    induction hrtg with
+    | refl => exact hstartne
+    | tail _ hstep _ => intro hc; rw [hc] at hstep; exact hnotTarget _ hstep
+  have hchainTransportUp : ∀ {start target : Reference}, start ≠ Reference.RId rid' →
+      Relation.ReflTransGen (ReachableStep cfg) start target →
+      Relation.ReflTransGen (ReachableStep cfg') start target := by
+    intro start target hstartne hrtg
+    induction hrtg with
+    | refl => exact Relation.ReflTransGen.refl
+    | tail hprev hstep ih =>
+      rename_i prev cur
+      exact Relation.ReflTransGen.tail ih ((hstepIffOfNe prev (hchainAvoids hstartne hprev) cur).mp hstep)
+  have hneRidFrame1 : rid' ≠ frame1.regionId := merge_corollary_rid_ne_regionId hregion1 hregion' hclosed hopen
+  have hnotTargetCfg' : ∀ a, ¬ ReachableStep cfg' a (Reference.RId rid') := by
+    intro a hstep
+    by_cases hane : a = Reference.RId rid'
+    · subst hane
+      rw [ReachableStep_rid_iff] at hstep
+      obtain ⟨region2, hlookup2, -, -⟩ := hstep
+      have hnone : cfg'.heap.lookup rid' = none := by
+        rw [hcfg']; dsimp only
+        rw [AList.lookup_insert_ne hneRidFrame1, AList.lookup_erase]
+      rw [hnone] at hlookup2
+      exact absurd hlookup2 (by simp)
+    · exact hnotTarget a ((hstepIffOfNe a hane (Reference.RId rid')).mpr hstep)
+  have hchainAvoidsCfg' : ∀ {start target : Reference}, start ≠ Reference.RId rid' →
+      Relation.ReflTransGen (ReachableStep cfg') start target → target ≠ Reference.RId rid' := by
+    intro start target hstartne hrtg
+    induction hrtg with
+    | refl => exact hstartne
+    | tail _ hstep _ => intro hc; rw [hc] at hstep; exact hnotTargetCfg' _ hstep
+  have hchainTransportDown : ∀ {start target : Reference}, start ≠ Reference.RId rid' →
+      Relation.ReflTransGen (ReachableStep cfg') start target →
+      Relation.ReflTransGen (ReachableStep cfg) start target := by
+    intro start target hstartne hrtg
+    induction hrtg with
+    | refl => exact Relation.ReflTransGen.refl
+    | tail hprev hstep ih =>
+      rename_i prev cur
+      exact Relation.ReflTransGen.tail ih
+        ((hstepIffOfNe prev (hchainAvoidsCfg' hstartne hprev) cur).mpr hstep)
+  have frame_transport_down : ∀ fr : FrameWithIndex, fr ∈ cfg'.stackWithIndex →
+      fr.index < cfg.stack.dropLast.length → fr ∈ cfg.stackWithIndex := by
+    intro fr hfr hltfr
+    obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hfr
+    have hidx_n : fr.index = n := by rw [← hfeq]
+    have hlt2 : n < cfg.stack.dropLast.length := by rw [← hidx_n]; exact hltfr
+    have e1 : cfg.stack[n]? = cfg.stack.dropLast[n]? := by
+      conv_lhs => rw [stack_eq]
+      rw [List.getElem?_append_left hlt2]
+    have e2 : cfg'.stack[n]? = cfg.stack.dropLast[n]? := by
+      rw [hcfg']; dsimp only; rw [List.getElem?_append_left hlt2]
+    have hfr_get? : cfg'.stack[n]? = some fr.toFrame := by
+      rw [show fr.toFrame = cfg'.stack[n] from by rw [← hfeq]]
+      exact List.getElem?_eq_getElem hn
+    have hcfgn : cfg.stack[n]? = some fr.toFrame := by rw [e1, ← e2, hfr_get?]
+    obtain ⟨h1, heq⟩ := List.getElem?_eq_some_iff.mp hcfgn
+    unfold RuntimeConfig.stackWithIndex
+    exact List.mem_mapIdx.mpr ⟨n, h1, by rw [heq, ← hidx_n]⟩
+  have frame_transport_up : ∀ fr : FrameWithIndex, fr ∈ cfg.stackWithIndex →
+      fr.index < cfg.stack.dropLast.length → fr ∈ cfg'.stackWithIndex := by
+    intro fr hfr hltfr
+    obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hfr
+    have hidx_n : fr.index = n := by rw [← hfeq]
+    have hlt2 : n < cfg.stack.dropLast.length := by rw [← hidx_n]; exact hltfr
+    have e1 : cfg.stack[n]? = cfg.stack.dropLast[n]? := by
+      conv_lhs => rw [stack_eq]
+      rw [List.getElem?_append_left hlt2]
+    have e2 : cfg'.stack[n]? = cfg.stack.dropLast[n]? := by
+      rw [hcfg']; dsimp only; rw [List.getElem?_append_left hlt2]
+    have hfr_get? : cfg.stack[n]? = some fr.toFrame := by
+      rw [show fr.toFrame = cfg.stack[n] from by rw [← hfeq]]
+      exact List.getElem?_eq_getElem hn
+    have hcfg'n : cfg'.stack[n]? = some fr.toFrame := by rw [e2, ← e1, hfr_get?]
+    obtain ⟨h1, heq⟩ := List.getElem?_eq_some_iff.mp hcfg'n
+    unfold RuntimeConfig.stackWithIndex
+    exact List.mem_mapIdx.mpr ⟨n, h1, by rw [heq, ← hidx_n]⟩
+  have hframeRootIffNe : ∀ {fid : Index}, fid < cfg.stack.dropLast.length → ∀ (start : Reference),
+      FrameRoot cfg fid start ↔ FrameRoot cfg' fid start := by
+    intro fid hfidlt start
+    constructor
+    · rintro (⟨G0, hG0mem, hG0idx, var, hvar⟩ | ⟨G0, hG0mem, hG0idx, region0, hlk0, hbridge0⟩)
+      · have hG0lt : G0.index < cfg.stack.dropLast.length := hG0idx ▸ hfidlt
+        exact Or.inl ⟨G0, frame_transport_up G0 hG0mem hG0lt, hG0idx, var, hvar⟩
+      · have hG0lt : G0.index < cfg.stack.dropLast.length := hG0idx ▸ hfidlt
+        have hlk0' : cfg'.heap.lookup G0.regionId = some region0 := by
+          rw [hcfg']; dsimp only
+          rw [AList.lookup_insert_ne (hridNeFrame1 G0 hG0mem hG0lt), AList.lookup_erase_ne (hridNe1 G0 hG0mem)]
+          exact hlk0
+        exact Or.inr ⟨G0, frame_transport_up G0 hG0mem hG0lt, hG0idx, region0, hlk0', hbridge0⟩
+    · rintro (⟨G0, hG0mem, hG0idx, var, hvar⟩ | ⟨G0, hG0mem, hG0idx, region0, hlk0, hbridge0⟩)
+      · have hG0lt : G0.index < cfg.stack.dropLast.length := hG0idx ▸ hfidlt
+        exact Or.inl ⟨G0, frame_transport_down G0 hG0mem hG0lt, hG0idx, var, hvar⟩
+      · have hG0lt : G0.index < cfg.stack.dropLast.length := hG0idx ▸ hfidlt
+        have hG0memCfg := frame_transport_down G0 hG0mem hG0lt
+        have hlk0' : cfg.heap.lookup G0.regionId = some region0 := by
+          rw [hcfg'] at hlk0; dsimp only at hlk0
+          rw [AList.lookup_insert_ne (hridNeFrame1 G0 hG0memCfg hG0lt),
+            AList.lookup_erase_ne (hridNe1 G0 hG0memCfg)] at hlk0
+          exact hlk0
+        exact Or.inr ⟨G0, hG0memCfg, hG0idx, region0, hlk0', hbridge0⟩
+  have frameReachIffNe : ∀ {fid : Index}, fid < cfg.stack.dropLast.length → ∀ (ref : Reference),
+      FrameReachable cfg fid ref ↔ FrameReachable cfg' fid ref := by
+    intro fid hfidlt ref
+    rw [FrameReachable_iff_reflTransGen, FrameReachable_iff_reflTransGen]
+    constructor
+    · rintro ⟨start, hroot, hrtg⟩
+      have hstartne : start ≠ Reference.RId rid' := by
+        rintro rfl
+        rcases hroot with ⟨G0, hG0mem, hG0idx, var, hvar⟩ | ⟨G0, hG0mem, hG0idx, region0, hlk0, hbridge0⟩
+        · have hG0lt : G0.index < cfg.stack.dropLast.length := hG0idx ▸ hfidlt
+          have hG0memStack : G0.toFrame ∈ cfg.stack := by
+            obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hG0mem
+            rw [← hfeq]; exact List.getElem_mem hn
+          exact merge_ridPrime_no_other_frame_var vcfg hframe1MemStack hxref hG0memStack
+            (hridNeFrame1 G0 hG0mem hG0lt) hvar
+        · exact absurd hbridge0 (by simp)
+      exact ⟨start, (hframeRootIffNe hfidlt start).mp hroot, hchainTransportUp hstartne hrtg⟩
+    · rintro ⟨start, hroot, hrtg⟩
+      have hstartne : start ≠ Reference.RId rid' := by
+        rintro rfl
+        rcases hroot with ⟨G0, hG0mem, hG0idx, var, hvar⟩ | ⟨G0, hG0mem, hG0idx, region0, hlk0, hbridge0⟩
+        · have hG0lt : G0.index < cfg.stack.dropLast.length := hG0idx ▸ hfidlt
+          have hG0memCfg := frame_transport_down G0 hG0mem hG0lt
+          have hG0memStack : G0.toFrame ∈ cfg.stack := by
+            obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hG0memCfg
+            rw [← hfeq]; exact List.getElem_mem hn
+          exact merge_ridPrime_no_other_frame_var vcfg hframe1MemStack hxref hG0memStack
+            (hridNeFrame1 G0 hG0memCfg hG0lt) hvar
+        · exact absurd hbridge0 (by simp)
+      exact ⟨start, (hframeRootIffNe hfidlt start).mpr hroot, hchainTransportDown hstartne hrtg⟩
+  have hlenEq2 : cfg.stack.length = cfg.stack.dropLast.length + 1 := by rw [stack_eq]; simp
+  set newFrame1 : Frame := ({ regionId := frame1.regionId, bridgeVar := frame1.bridgeVar, objMap := frame1.objMap, varMap := frame1.varMap.insert x (Reference.OId region'.bridgeObjectId) } : Frame) with newFrame1_def
+  have hcfg'stack : cfg'.stack = cfg.stack.dropLast ++ [newFrame1] := by rw [hcfg']
+  have hnewFrame1_get : cfg'.stack[cfg.stack.dropLast.length]? = some newFrame1 := by rw [hcfg'stack]; simp
+  have hLf' : ({ newFrame1 with index := cfg.stack.dropLast.length } : FrameWithIndex) ∈ cfg'.stackWithIndex := by
+    obtain ⟨hh1, hheq⟩ := List.getElem?_eq_some_iff.mp hnewFrame1_get
+    unfold RuntimeConfig.stackWithIndex
+    exact List.mem_mapIdx.mpr ⟨cfg.stack.dropLast.length, hh1, by rw [hheq]⟩
+  have hstackLenEq : cfg.stack.length = cfg'.stack.length := by
+    have hlenApp : cfg'.stack.length = cfg.stack.dropLast.length + 1 := by rw [hcfg'stack]; simp
+    omega
+  have hallLt : ∀ fr : FrameWithIndex, fr ∈ cfg'.stackWithIndex → fr.index < cfg.stack.dropLast.length + 1 := by
+    intro fr hfr
+    obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hfr
+    have hidx : fr.index = n := by rw [← hfeq]
+    have hn' : n < cfg'.stack.length := hn
+    rw [← hstackLenEq, hlenEq2] at hn'
+    rw [hidx]; exact hn'
+  have hframeLt : frame.index < cfg.stack.dropLast.length := by
+    have h2 := hallLt frame' hframe'Mem
+    exact lt_of_lt_of_le hlt (Nat.le_of_lt_succ h2)
+  have hframeMemCfg : frame ∈ cfg.stackWithIndex := frame_transport_down frame hframeMem hframeLt
+  have hframeRidNeRidPrime : frame.regionId ≠ rid' := hridNe1 frame hframeMemCfg
+  have hframeRidNeFrame1 : frame.regionId ≠ frame1.regionId := hridNeFrame1 frame hframeMemCfg hframeLt
+  have hloc_cfg : (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId) := by
+    rw [oid_loc_rgn_iff_in_heap vcfg]
+    rw [oid_loc_rgn_iff_in_heap vcfg'] at hloc
+    obtain ⟨region1', hlookup1', hmem1'⟩ := hloc
+    have hlookup1'' : cfg.heap.lookup frame.regionId = some region1' := by
+      rw [hcfg'] at hlookup1'; dsimp only at hlookup1'
+      rw [AList.lookup_insert_ne hframeRidNeFrame1, AList.lookup_erase_ne hframeRidNeRidPrime] at hlookup1'
+      exact hlookup1'
+    exact ⟨region1', hlookup1'', hmem1'⟩
+  by_cases hframe'eq : frame'.index = cfg.stack.dropLast.length
+  · -- frame' IS the merged (last) frame.
+    rw [FrameReachable_iff_reflTransGen] at hreach
+    obtain ⟨start, hroot, hrtg⟩ := hreach
+    have hoidNeRidPrime : Reference.OId oid ≠ Reference.RId rid' := by intro hc; exact absurd hc (by simp)
+    have hoidNeBridge : oid ≠ region'.bridgeObjectId := by
+      intro hc
+      subst hc
+      have hbridgeMem : region' ∈ cfg.heap.regions := by
+        unfold Heap.regions
+        exact List.mem_map_of_mem (AList.lookup_mem_entries hregion')
+      have hbridgeIn : region'.bridgeObjectId ∈ region'.objMap := vcfg.h1 region' hbridgeMem
+      have hlocBridge : (Reference.OId region'.bridgeObjectId).loc? cfg = some (Location.Rgn rid') :=
+        (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region', hregion', hbridgeIn⟩
+      rw [hloc_cfg] at hlocBridge
+      injection hlocBridge with hlocBridgeEq
+      injection hlocBridgeEq with hlocBridgeEq
+      exact hframeRidNeRidPrime hlocBridgeEq
+    rcases hroot with ⟨Gf, hGfmem, hGfidx, var, hvar⟩ | ⟨Gf, hGfmem, hGfidx, region0, hlk0, hbridge0⟩
+    · have hGfeq : Gf = { newFrame1 with index := cfg.stack.dropLast.length } :=
+        swap_corollary_stackWithIndex_index_inj hGfmem hLf' (hGfidx.trans hframe'eq)
+      rw [hGfeq] at hvar
+      by_cases hveq : var = x
+      · rw [hveq] at hvar
+        rw [newFrame1_def] at hvar
+        dsimp only at hvar
+        rw [AList.lookup_insert] at hvar
+        injection hvar with hvarEq
+        rw [← hvarEq] at hrtg
+        have hne2 : Reference.OId oid ≠ Reference.OId region'.bridgeObjectId := by
+          intro hc; injection hc with hc; exact hoidNeBridge hc
+        have hrtgDown : Relation.ReflTransGen (ReachableStep cfg) (Reference.OId region'.bridgeObjectId)
+            (Reference.OId oid) := hchainTransportDown (by intro hc; exact absurd hc (by simp)) hrtg
+        have hrtgRidPrime : Relation.ReflTransGen (ReachableStep cfg) (Reference.RId rid') (Reference.OId oid) :=
+          (merge_ridPrime_reflTransGen_iff vcfg hregion' hclosed hoidNeRidPrime hne2).mpr hrtgDown
+        have hFrameReach : FrameReachable cfg (cfg.stack.dropLast.length) (Reference.OId oid) :=
+          (FrameReachable_iff_reflTransGen cfg (cfg.stack.dropLast.length) (Reference.OId oid)).mpr
+            ⟨Reference.RId rid', Or.inl ⟨{ frame1 with index := cfg.stack.dropLast.length }, hlast1_mem, rfl, x,
+              hxref⟩, hrtgRidPrime⟩
+        have hresult_cfg : FrameReachable cfg frame.index (Reference.OId oid) :=
+          hFR3 frame hframeMemCfg { frame1 with index := cfg.stack.dropLast.length } hlast1_mem hframeLt oid
+            hloc_cfg hFrameReach
+        exact (frameReachIffNe hframeLt (Reference.OId oid)).mp hresult_cfg
+      · rw [newFrame1_def] at hvar
+        dsimp only at hvar
+        rw [AList.lookup_insert_ne hveq] at hvar
+        have hstartne : start ≠ Reference.RId rid' := by
+          intro hc
+          rw [hc] at hvar
+          exact merge_ridPrime_var_unique vcfg hframe1MemStack hxref hveq hvar
+        have hrtgDown := hchainTransportDown hstartne hrtg
+        have hFrameReach : FrameReachable cfg (cfg.stack.dropLast.length) (Reference.OId oid) :=
+          (FrameReachable_iff_reflTransGen cfg (cfg.stack.dropLast.length) (Reference.OId oid)).mpr
+            ⟨start, Or.inl ⟨{ frame1 with index := cfg.stack.dropLast.length }, hlast1_mem, rfl, var, hvar⟩,
+              hrtgDown⟩
+        have hresult_cfg : FrameReachable cfg frame.index (Reference.OId oid) :=
+          hFR3 frame hframeMemCfg { frame1 with index := cfg.stack.dropLast.length } hlast1_mem hframeLt oid
+            hloc_cfg hFrameReach
+        exact (frameReachIffNe hframeLt (Reference.OId oid)).mp hresult_cfg
+    · have hGfeq : Gf = { newFrame1 with index := cfg.stack.dropLast.length } :=
+        swap_corollary_stackWithIndex_index_inj hGfmem hLf' (hGfidx.trans hframe'eq)
+      rw [hGfeq, newFrame1_def] at hlk0
+      dsimp only at hlk0
+      rw [hcfg'] at hlk0
+      dsimp only at hlk0
+      rw [AList.lookup_insert] at hlk0
+      injection hlk0 with hlk0Eq
+      rw [← hlk0Eq] at hbridge0
+      dsimp only at hbridge0
+      have hstartne : start ≠ Reference.RId rid' := by rw [hbridge0]; intro hc; exact absurd hc (by simp)
+      have hrtgDown := hchainTransportDown hstartne hrtg
+      have hFrameReach : FrameReachable cfg (cfg.stack.dropLast.length) (Reference.OId oid) :=
+        (FrameReachable_iff_reflTransGen cfg (cfg.stack.dropLast.length) (Reference.OId oid)).mpr
+          ⟨start, Or.inr ⟨{ frame1 with index := cfg.stack.dropLast.length }, hlast1_mem, rfl, region1, hregion1,
+            hbridge0⟩, hrtgDown⟩
+      have hresult_cfg : FrameReachable cfg frame.index (Reference.OId oid) :=
+        hFR3 frame hframeMemCfg { frame1 with index := cfg.stack.dropLast.length } hlast1_mem hframeLt oid
+          hloc_cfg hFrameReach
+      exact (frameReachIffNe hframeLt (Reference.OId oid)).mp hresult_cfg
+  · -- frame' is not the merged frame: unconditional transport both ways.
+    have h2 := hallLt frame' hframe'Mem
+    have hframe'Lt : frame'.index < cfg.stack.dropLast.length :=
+      lt_of_le_of_ne (Nat.le_of_lt_succ h2) hframe'eq
+    have hreach_cfg : FrameReachable cfg frame'.index (Reference.OId oid) :=
+      (frameReachIffNe hframe'Lt (Reference.OId oid)).mpr hreach
+    have hresult_cfg : FrameReachable cfg frame.index (Reference.OId oid) :=
+      hFR3 frame hframeMemCfg frame' (frame_transport_down frame' hframe'Mem hframe'Lt) hlt oid hloc_cfg hreach_cfg
+    exact (frameReachIffNe hframeLt (Reference.OId oid)).mp hresult_cfg
 
 theorem frameReachableAtLaterFrame_step_varAsgn (x : VarName) (yf : FieldAccess) :
     FrameReachableAtLaterFrame_step (Stmt.varAsgn x yf) := by
