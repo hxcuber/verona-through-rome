@@ -1144,7 +1144,7 @@ theorem makeObjStack_step_eq {cfg cfg' : RuntimeConfig} (h : makeObjStack x cfg 
 -- `FrameReachable` agrees between `cfg`/`cfg'`, both directions, for any frame with index
 -- strictly below the last one (content is literally untouched there).
 theorem makeObjStack_frame_reachable_iff {cfg cfg' : RuntimeConfig} (h : makeObjStack x cfg = some cfg')
-    {X : FrameWithIndex} (hXmem : X ∈ cfg.stackWithIndex) (hXlt : X.index < cfg.stack.length - 1)
+    {X : FrameWithIndex} (_hXmem : X ∈ cfg.stackWithIndex) (hXlt : X.index < cfg.stack.length - 1)
     (ref : Reference) : FrameReachable cfg X.index ref ↔ FrameReachable cfg' X.index ref := by
   obtain ⟨lastFrame, hlast, hcfg'⟩ := makeObjStack_cases h
   rw [FrameReachable_iff_reflTransGen, FrameReachable_iff_reflTransGen, makeObjStack_step_eq h]
