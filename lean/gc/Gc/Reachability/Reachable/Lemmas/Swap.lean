@@ -20,24 +20,22 @@ theorem reflTransGen_rid_source_open_absurd {cfg : RuntimeConfig} (vcfg : ValidC
     (hrtg : Relation.ReflTransGen (ReachableStep cfg) (Reference.RId rid0) (Reference.OId oidTarget)) : False := by
   rcases hrtg.cases_head with heq | ⟨c, hstep, hrest⟩
   · exact absurd heq (by simp)
-  · obtain ⟨region0, hregion0, hclosed0, obj0, hobj0, hcontains0⟩ := (ReachableStep_rid_iff cfg rid0 c).mp hstep
+  · rw [ReachableStep_rid_iff] at hstep
+    obtain ⟨region0, hregion0, hclosed0, hbeq⟩ := hstep
     have hbridgeMem : region0 ∈ cfg.heap.regions := by
       unfold Heap.regions
       exact List.mem_map_of_mem (AList.lookup_mem_entries hregion0)
     have hbridgeIn : region0.bridgeObjectId ∈ region0.objMap := vcfg.h1 region0 hbridgeMem
     have hlocBridge : (Reference.OId region0.bridgeObjectId).loc? cfg = some (Location.Rgn rid0) :=
       (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region0, hregion0, hbridgeIn⟩
-    have hstepBridge : ReachableStep cfg (Reference.OId region0.bridgeObjectId) c :=
-      (merge_ridPrime_step_iff_bridge vcfg hregion0 hclosed0 c).mp hstep
-    have hrtgBridge : Relation.ReflTransGen (ReachableStep cfg) (Reference.OId region0.bridgeObjectId)
-        (Reference.OId oidTarget) := Relation.ReflTransGen.head hstepBridge hrest
+    rw [hbeq] at hrest
     have hne : ridT ≠ rid0 := by
       intro heq
       rw [heq, hregion0] at hlkT
       injection hlkT with hlkTeq
       rw [← hlkTeq, hclosed0] at hopenT
       exact absurd hopenT (by decide)
-    exact reflTransGen_region_open_ne_absurd vcfg hregion0 hlocBridge hlocT hlkT hopenT hne hrtgBridge
+    exact reflTransGen_region_open_ne_absurd vcfg hregion0 hlocBridge hlocT hlkT hopenT hne hrest
 
 -- Heap `bridgeObjectId` transports across a region-objMap-only mutation (used for `FrameRoot`'s bridge disjunct, which never reads `objMap`).
 theorem swap_region_heap_bridge_eq {cfg : RuntimeConfig} {rid : RegionId}

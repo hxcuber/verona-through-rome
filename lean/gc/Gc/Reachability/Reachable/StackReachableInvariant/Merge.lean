@@ -30,22 +30,6 @@ theorem stackReachable_invariant_merge (x : VarName) :
     obtain ⟨hh1, hheq⟩ := List.getElem?_eq_some_iff.mp hframe1_get
     unfold RuntimeConfig.stackWithIndex
     exact List.mem_mapIdx.mpr ⟨cfg.stack.dropLast.length, hh1, by rw [hheq]⟩
-  -- `frame.regionId` is never `rid'` (L2/precondition) nor `frame1.regionId` (S1, different indices).
-  have hneRidFrame : frame.regionId ≠ rid' := merge_regionId_ne_ridPrime vcfg hregion' hclosed frame hframeMem
-  -- `oid` is never `region'`'s bridge object (lives in `rid' ≠ frame.regionId`, by `loc?`'s functionality).
-  have hoidNeBridge : oid ≠ region'.bridgeObjectId := by
-    intro hc
-    subst hc
-    have hbridgeMem : region' ∈ cfg.heap.regions := by
-      unfold Heap.regions
-      exact List.mem_map_of_mem (AList.lookup_mem_entries hregion')
-    have hbridgeIn : region'.bridgeObjectId ∈ region'.objMap := vcfg.h1 region' hbridgeMem
-    have hlocBridge : (Reference.OId region'.bridgeObjectId).loc? cfg = some (Location.Rgn rid') :=
-      (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region', hregion', hbridgeIn⟩
-    rw [hloc] at hlocBridge
-    injection hlocBridge with hlocBridgeEq
-    injection hlocBridgeEq with hlocBridgeEq
-    exact hneRidFrame hlocBridgeEq
   have hlenEq2 : cfg.stack.length = cfg.stack.dropLast.length + 1 := by rw [stack_eq]; simp
   set newFrame1 : Frame := ({ regionId := frame1.regionId, bridgeVar := frame1.bridgeVar, objMap := frame1.objMap, varMap := frame1.varMap.insert x (Reference.OId region'.bridgeObjectId) } : Frame) with newFrame1_def
   have hcfg'stack : cfg'.stack = cfg.stack.dropLast ++ [newFrame1] := by rw [hcfg']
@@ -94,14 +78,12 @@ theorem stackReachable_invariant_merge (x : VarName) :
           rw [AList.lookup_insert] at hvar
           injection hvar with hvarEq
           rw [← hvarEq] at hrtg
-          have hne2 : Reference.OId oid ≠ Reference.OId region'.bridgeObjectId := by
-            intro hc; injection hc with hc; exact hoidNeBridge hc
           have hrtgDown : Relation.ReflTransGen (ReachableStep cfg) (Reference.OId region'.bridgeObjectId)
               (Reference.OId oid) :=
             merge_chain_transport_down vcfg h' hframe1 hxref hregion1 hregion' hclosed hopen hcfg'
               (by intro hc; exact absurd hc (by simp)) hrtg
           have hrtgRidPrime : Relation.ReflTransGen (ReachableStep cfg) (Reference.RId rid') (Reference.OId oid) :=
-            (merge_ridPrime_reflTransGen_iff vcfg hregion' hclosed hoidNeRidPrime hne2).mpr hrtgDown
+            (merge_ridPrime_reflTransGen_iff hregion' hclosed hoidNeRidPrime).mpr hrtgDown
           have hFrameReach : FrameReachable cfg (cfg.stack.dropLast.length) (Reference.OId oid) :=
             (FrameReachable_iff_reflTransGen cfg (cfg.stack.dropLast.length) (Reference.OId oid)).mpr
               ⟨Reference.RId rid', Or.inl ⟨{ frame1 with index := cfg.stack.dropLast.length }, hlast1_mem, rfl, x,

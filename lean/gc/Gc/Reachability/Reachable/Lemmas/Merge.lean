@@ -310,20 +310,8 @@ theorem merge_ridPrime_not_step_target (vcfg : ValidConfig cfg) {frame : Frame} 
   cases a with
   | RId ridA =>
     rw [ReachableStep_rid_iff] at hstep
-    obtain ⟨regionA, hlookupA, -, obj, hobjlookup, hcontains⟩ := hstep
-    have hmemrefs : Reference.RId rid' ∈ regionA.refs :=
-      mem_region_refs_of_mem_objMap hobjlookup (List.contains_iff_mem.mp hcontains)
-    have hcount_heap : 1 ≤ cfg.heap.refs.count (Reference.RId rid') := by
-      rw [heap_refs_eq_flatMap]
-      apply List.count_pos_iff.mpr
-      rw [List.mem_flatMap]
-      exact ⟨⟨ridA, regionA⟩, AList.lookup_mem_entries hlookupA, hmemrefs⟩
-    have hcount_stack : 1 ≤ cfg.stack.refs.count (Reference.RId rid') := by
-      rw [stack_refs_eq_flatMap]
-      apply List.count_pos_iff.mpr
-      rw [List.mem_flatMap]
-      exact ⟨frame, hframemem, mem_frame_refs_of_mem_varMap hxref⟩
-    omega
+    obtain ⟨regionA, hlookupA, -, hbeq⟩ := hstep
+    simp at hbeq
   | OId oidA =>
     rw [ReachableStep_oid_iff] at hstep
     obtain ⟨obj, hobjAt, hcontains⟩ := hstep
@@ -393,47 +381,31 @@ theorem merge_ridPrime_not_step_target (vcfg : ValidConfig cfg) {frame : Frame} 
                 hmemrefs (mem_frame_refs_of_mem_varMap hxref)
             omega
 
--- `RId rid'` and `OId region'.bridgeObjectId` are interchangeable `ReachableStep` sources (Closed region = its bridge object's fields).
-theorem merge_ridPrime_step_iff_bridge (vcfg : ValidConfig cfg) {rid' : RegionId} {region' : Region}
-    (hregion' : cfg.heap.lookup rid' = some region') (hclosed : region'.status = Status.Closed)
-    (b : Reference) :
-    ReachableStep cfg (Reference.RId rid') b ↔ ReachableStep cfg (Reference.OId region'.bridgeObjectId) b := by
-  have hbridgeMem : region' ∈ cfg.heap.regions := by
-    unfold Heap.regions
-    exact List.mem_map_of_mem (AList.lookup_mem_entries hregion')
-  have hbridgeIn : region'.bridgeObjectId ∈ region'.objMap := vcfg.h1 region' hbridgeMem
-  have hloc : (Reference.OId region'.bridgeObjectId).loc? cfg = some (Location.Rgn rid') :=
-    (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region', hregion', hbridgeIn⟩
-  rw [ReachableStep_rid_iff, ReachableStep_oid_iff]
-  unfold Reference.objAt?
-  dsimp only
-  rw [hloc]
-  dsimp only
-  rw [hregion']
-  constructor
-  · rintro ⟨region2, hlookup2, -, obj, hobj, hcontains⟩
-    injection hlookup2 with hlookup2eq
-    subst hlookup2eq
-    exact ⟨obj, hobj, hcontains⟩
-  · rintro ⟨obj, hobj, hcontains⟩
-    exact ⟨region', rfl, hclosed, obj, hobj, hcontains⟩
+-- `RId rid'`'s single outgoing `ReachableStep` always lands on its own bridge object.
+theorem merge_ridPrime_step_bridge {rid' : RegionId} {region' : Region}
+    (hregion' : cfg.heap.lookup rid' = some region') (hclosed : region'.status = Status.Closed) :
+    ReachableStep cfg (Reference.RId rid') (Reference.OId region'.bridgeObjectId) := by
+  rw [ReachableStep_rid_iff]
+  exact ⟨region', hregion', hclosed, rfl⟩
 
 -- Chain-level version: a `RId rid'`-rooted chain to `target` exists iff a (one-hop-shorter) `region'.bridgeObjectId`-rooted one does.
-theorem merge_ridPrime_reflTransGen_iff (vcfg : ValidConfig cfg) {rid' : RegionId} {region' : Region}
+theorem merge_ridPrime_reflTransGen_iff {rid' : RegionId} {region' : Region}
     (hregion' : cfg.heap.lookup rid' = some region') (hclosed : region'.status = Status.Closed)
-    {target : Reference} (hne1 : target ≠ Reference.RId rid')
-    (hne2 : target ≠ Reference.OId region'.bridgeObjectId) :
+    {target : Reference} (hne1 : target ≠ Reference.RId rid') :
     Relation.ReflTransGen (ReachableStep cfg) (Reference.RId rid') target ↔
     Relation.ReflTransGen (ReachableStep cfg) (Reference.OId region'.bridgeObjectId) target := by
   constructor
   · intro hrtg
     rcases hrtg.cases_head with heq | ⟨c, hstep, hrest⟩
     · exact absurd heq.symm hne1
-    · exact Relation.ReflTransGen.head ((merge_ridPrime_step_iff_bridge vcfg hregion' hclosed c).mp hstep) hrest
+    · rw [ReachableStep_rid_iff] at hstep
+      obtain ⟨region2, hlookup2, -, hbeq⟩ := hstep
+      rw [hregion'] at hlookup2
+      injection hlookup2 with hlookup2eq
+      rw [hbeq, ← hlookup2eq] at hrest
+      exact hrest
   · intro hrtg
-    rcases hrtg.cases_head with heq | ⟨c, hstep, hrest⟩
-    · exact absurd heq.symm hne2
-    · exact Relation.ReflTransGen.head ((merge_ridPrime_step_iff_bridge vcfg hregion' hclosed c).mpr hstep) hrest
+    exact Relation.ReflTransGen.head (merge_ridPrime_step_bridge hregion' hclosed) hrtg
 
 -- `x`'s own varMap entry is the only occurrence of `RId rid'` on the stack: no other frame can hold it too, or H2's count bound would be exceeded.
 theorem merge_ridPrime_no_other_frame_var (vcfg : ValidConfig cfg) {frame : Frame} {rid' : RegionId}

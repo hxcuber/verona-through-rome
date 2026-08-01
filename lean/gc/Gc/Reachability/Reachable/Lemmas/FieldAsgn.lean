@@ -424,30 +424,32 @@ theorem reflTransGen_region_confined {cfg : RuntimeConfig} (vcfg : ValidConfig c
   | refl => left; exact ⟨oidStart, rid, region, rfl, hlocStart, hlookup, Or.inl rfl⟩
   | tail hprev hstep ih =>
     rename_i b c
-    have hmemrefs : ∃ ridCur region', c ∈ region'.refs ∧ cfg.heap.lookup ridCur = some region' ∧
-        (ridCur = rid ∨ region'.status = Status.Closed) := by
-      rcases ih with ⟨oidB, ridCur, region', heqB, hlocB, hlkB, hcaseB⟩ | ⟨ridB, heqB⟩
-      · subst heqB
-        rw [ReachableStep_oid_iff] at hstep
-        obtain ⟨obj, hobjAt, hcontains⟩ := hstep
-        unfold Reference.objAt? at hobjAt
-        dsimp only at hobjAt
-        rw [hlocB] at hobjAt
-        dsimp only at hobjAt
-        rw [hlkB] at hobjAt
-        exact ⟨ridCur, region', mem_region_refs_of_mem_objMap hobjAt (List.contains_iff_mem.mp hcontains), hlkB, hcaseB⟩
-      · subst heqB
-        rw [ReachableStep_rid_iff] at hstep
-        obtain ⟨regionR, hlkR, hclosedR, obj, hobjlookup, hcontains⟩ := hstep
-        exact ⟨ridB, regionR, mem_region_refs_of_mem_objMap hobjlookup (List.contains_iff_mem.mp hcontains),
-          hlkR, Or.inr hclosedR⟩
-    obtain ⟨ridCur, region', hmemB, hlkCur, hcaseCur⟩ := hmemrefs
-    cases c with
-    | OId oidB =>
+    rcases ih with ⟨oidB, ridCur, region', heqB, hlocB, hlkB, hcaseB⟩ | ⟨ridB, heqB⟩
+    · subst heqB
+      rw [ReachableStep_oid_iff] at hstep
+      obtain ⟨obj, hobjAt, hcontains⟩ := hstep
+      unfold Reference.objAt? at hobjAt
+      dsimp only at hobjAt
+      rw [hlocB] at hobjAt
+      dsimp only at hobjAt
+      rw [hlkB] at hobjAt
+      have hmemB : c ∈ region'.refs :=
+        mem_region_refs_of_mem_objMap hobjAt (List.contains_iff_mem.mp hcontains)
+      cases c with
+      | OId oidB =>
+        left
+        have hridEq := vcfg.h3 ridCur oidB region' hlkB hmemB
+        exact ⟨oidB, ridCur, region', rfl, hridEq, hlkB, hcaseB⟩
+      | RId ridB => right; exact ⟨ridB, rfl⟩
+    · subst heqB
+      rw [ReachableStep_rid_iff] at hstep
+      obtain ⟨regionR, hlkR, hclosedR, hbeq⟩ := hstep
       left
-      have hridEq := vcfg.h3 ridCur oidB region' hlkCur hmemB
-      exact ⟨oidB, ridCur, region', rfl, hridEq, hlkCur, hcaseCur⟩
-    | RId ridB => right; exact ⟨ridB, rfl⟩
+      have hbridgeIn : regionR.bridgeObjectId ∈ regionR.objMap := vcfg.h1 regionR
+        (by unfold Heap.regions; exact List.mem_map_of_mem (AList.lookup_mem_entries hlkR))
+      have hlocBridge : (Reference.OId regionR.bridgeObjectId).loc? cfg = some (Location.Rgn ridB) :=
+        (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨regionR, hlkR, hbridgeIn⟩
+      exact ⟨regionR.bridgeObjectId, ridB, regionR, hbeq, hlocBridge, hlkR, Or.inr hclosedR⟩
 
 -- A chain rooted inside Open region `rid` can never reach an object confirmed to live in a different Open region (mirrors `region_reachable_open_ne_absurd`).
 theorem reflTransGen_region_open_ne_absurd {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)

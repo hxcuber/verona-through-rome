@@ -69,19 +69,6 @@ theorem frameReachableAtLaterFrame_step_merge (x : VarName) :
     rw [FrameReachable_iff_reflTransGen] at hreach
     obtain ⟨start, hroot, hrtg⟩ := hreach
     have hoidNeRidPrime : Reference.OId oid ≠ Reference.RId rid' := by intro hc; exact absurd hc (by simp)
-    have hoidNeBridge : oid ≠ region'.bridgeObjectId := by
-      intro hc
-      subst hc
-      have hbridgeMem : region' ∈ cfg.heap.regions := by
-        unfold Heap.regions
-        exact List.mem_map_of_mem (AList.lookup_mem_entries hregion')
-      have hbridgeIn : region'.bridgeObjectId ∈ region'.objMap := vcfg.h1 region' hbridgeMem
-      have hlocBridge : (Reference.OId region'.bridgeObjectId).loc? cfg = some (Location.Rgn rid') :=
-        (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region', hregion', hbridgeIn⟩
-      rw [hloc_cfg] at hlocBridge
-      injection hlocBridge with hlocBridgeEq
-      injection hlocBridgeEq with hlocBridgeEq
-      exact hframeRidNeRidPrime hlocBridgeEq
     rcases hroot with ⟨Gf, hGfmem, hGfidx, var, hvar⟩ | ⟨Gf, hGfmem, hGfidx, region0, hlk0, hbridge0⟩
     · have hGfeq : Gf = { newFrame1 with index := cfg.stack.dropLast.length } :=
         swap_corollary_stackWithIndex_index_inj hGfmem hLf' (hGfidx.trans hframe'eq)
@@ -93,14 +80,12 @@ theorem frameReachableAtLaterFrame_step_merge (x : VarName) :
         rw [AList.lookup_insert] at hvar
         injection hvar with hvarEq
         rw [← hvarEq] at hrtg
-        have hne2 : Reference.OId oid ≠ Reference.OId region'.bridgeObjectId := by
-          intro hc; injection hc with hc; exact hoidNeBridge hc
         have hrtgDown : Relation.ReflTransGen (ReachableStep cfg) (Reference.OId region'.bridgeObjectId)
             (Reference.OId oid) :=
           merge_chain_transport_down vcfg h' hframe1 hxref hregion1 hregion' hclosed hopen hcfg'
             (by intro hc; exact absurd hc (by simp)) hrtg
         have hrtgRidPrime : Relation.ReflTransGen (ReachableStep cfg) (Reference.RId rid') (Reference.OId oid) :=
-          (merge_ridPrime_reflTransGen_iff vcfg hregion' hclosed hoidNeRidPrime hne2).mpr hrtgDown
+          (merge_ridPrime_reflTransGen_iff hregion' hclosed hoidNeRidPrime).mpr hrtgDown
         have hFrameReach : FrameReachable cfg (cfg.stack.dropLast.length) (Reference.OId oid) :=
           (FrameReachable_iff_reflTransGen cfg (cfg.stack.dropLast.length) (Reference.OId oid)).mpr
             ⟨Reference.RId rid', Or.inl ⟨{ frame1 with index := cfg.stack.dropLast.length }, hlast1_mem, rfl, x,
