@@ -5,7 +5,7 @@ import Gc.Model.Mutation.Mutation
 import Gc.Model.Mutation.Stmt
 import Gc.Model.Preservation
 import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.Basic
+import Gc.Reachability.Reachable.StackReachableInvariant.Def
 import Gc.Reachability.Reachable.Lemmas
 
 theorem stackReachable_invariant_enter (xf : FieldAccess) (bridgeVar : VarName) :

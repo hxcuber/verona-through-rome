@@ -4,7 +4,7 @@ import Gc.Model.Validity
 import Gc.Model.Mutation.Mutation
 import Gc.Model.Preservation
 import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.Basic
+import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Def
 import Gc.Reachability.Reachable.Lemmas.Common
 import Gc.Reachability.Reachable.Lemmas.VarAsgn
 import Gc.Reachability.Reachable.Lemmas.FieldAsgn

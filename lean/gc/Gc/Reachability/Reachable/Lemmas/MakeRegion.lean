@@ -4,14 +4,13 @@ import Gc.Model.Validity
 import Gc.Model.Mutation.Mutation
 import Gc.Model.Preservation
 import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.Basic
 import Gc.Reachability.Reachable.Lemmas.Common
 import Gc.Reachability.Reachable.Lemmas.MakeObjStack
 import Gc.Reachability.Reachable.Lemmas.Merge
 
 -- ===== makeRegion =====
 
--- A step sourced at the freshly-allocated region id is always impossible (the region doesn't exist yet, so `deref?`'s heap lookup guard fails).
+-- A step sourced at the freshly-allocated region id is always impossible (the region doesn't exist yet, so `ReachableStep`'s heap lookup guard fails).
 theorem freshRegionId_no_step {cfg : RuntimeConfig} {b : Reference} :
     ¬ ReachableStep cfg (Reference.RId cfg.freshRegionId) b := by
   rw [ReachableStep_rid_iff]

@@ -4,7 +4,6 @@ import Gc.Model.Validity
 import Gc.Model.Mutation.Mutation
 import Gc.Model.Preservation
 import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.Basic
 
 -- Generic, non-operation-specific helper lemmas shared across `Lemmas/<Op>.lean`, re-derived independently of `Gc.Reachability.Referencable`.
 
@@ -97,7 +96,7 @@ theorem closed_region_not_owned {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
   rw [← heq, hclosed] at hopen2
   exact absurd hopen2 (by decide)
 
--- No `ReachableStep` sources from an Open region's `RId` (`deref?`'s guard requires Closed).
+-- No `ReachableStep` sources from an Open region's `RId` (the `RId` branch requires Closed).
 theorem open_rid_no_step {cfg : RuntimeConfig} {rid : RegionId} {region : Region}
     (hlookup : cfg.heap.lookup rid = some region) (hopen : region.status = Status.Open)
     {b : Reference} : ¬ ReachableStep cfg (Reference.RId rid) b := by

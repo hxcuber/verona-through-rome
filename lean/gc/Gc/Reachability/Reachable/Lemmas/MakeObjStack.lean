@@ -4,7 +4,6 @@ import Gc.Model.Validity
 import Gc.Model.Mutation.Mutation
 import Gc.Model.Preservation
 import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.Basic
 import Gc.Reachability.Reachable.Lemmas.Common
 
 -- The freshly-allocated object id is never already present in the last frame's own objMap.

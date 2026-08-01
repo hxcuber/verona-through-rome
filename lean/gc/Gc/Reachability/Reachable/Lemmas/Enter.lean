@@ -4,7 +4,6 @@ import Gc.Model.Validity
 import Gc.Model.Mutation.Mutation
 import Gc.Model.Preservation
 import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.Basic
 import Gc.Reachability.Reachable.Lemmas.Common
 
 -- An on-stack frame's region is never what `enter` opens (L2: on-stack is Open, `enter` requires Closed).

@@ -222,52 +222,51 @@ independence from `Gc.Reachability.Reachable` (neither folder imports the other)
   Multi-step CR5 (chaining `CR5_step` over an arbitrary-length trace, the actual report.pdf claim
   rather than just one operation) is not currently being pursued.
 
-### `Gc/Reachability/Reachable/` — sibling reachability layer over `deref?` (complete, zero `sorry`)
+### `Gc/Reachability/Reachable/` — sibling reachability layer over `ReachableStep` (complete, zero `sorry`)
 
 A folder alongside `Referencable/`. Not yet imported from `Gc.lean`, so it isn't built by a bare `lake
 build` — check it via qualified-name builds (`lake build Gc.Reachability.Reachable.Lemmas`) or the
 Lean LSP tools. This layer deliberately does **not** import anything from `Gc.Reachability.Referencable`
-(explicit user instruction) — its own `Semantics.lean` restates `deref?`/`ReachableStep` fresh rather
-than reusing `Referencable`'s `RefStep`, even though the two are almost the same shape. The reason it
-exists as a sibling rather than living inside `Referencable/`: `Reachable/`'s `deref?` is deliberately
-*stronger* than `Referencable/`'s `objAt?` — an `RId` step is allowed to continue into a **Closed**
-region's own bridge object, so a chain can cross a region boundary that `Referencable/` would stop at.
-See `Gc/Reachability/Reachable/Basic.lean`'s own header comment for the precise phrasing. See also
+(explicit user instruction) — its own `Semantics.lean` restates `ReachableStep` fresh rather than
+reusing `Referencable`'s `RefStep`, even though the two are almost the same shape. The reason it
+exists as a sibling rather than living inside `Referencable/`: `Reachable/`'s `ReachableStep` is
+deliberately *stronger* than `Referencable/`'s `objAt?`/`RefStep` — an `RId` step is allowed to continue
+into a **Closed** region's own bridge object, so a chain can cross a region boundary that `Referencable/`
+would stop at.
+See `Gc/Reachability/Reachable/Semantics.lean`'s own header comment for the precise phrasing. See also
 [[project_region_object_reachability_seam]] (memory) on why `RegionReachable`/`FrameReachable` never
 cross an `RId` boundary within one relation.
 
 The folder is organized **property-first** (one top-level unit per headline claim, one file per
 operation inside it), not operation-first — this matches how work on the layer actually happens (one
-property, ground out across all 9 ops, one commit per op). `Referencable/`'s own layout was later
-refactored to mirror this same property-first shape (see that section above) — the two layers'
-top-level structure (`Semantics.lean`, `Basic.lean`, `Lemmas/` + aggregator, one folder per headline
-property with an `All.lean` dispatcher, plus a single-config corollary file per headline single-config
-claim — `CR1.lean`/`CR2.lean`/`CR4.lean` there, `CR6.lean` here) now lines up file-for-file, modulo each
-layer's own specific properties and the folder-independence constraint (neither imports the other):
+property, ground out across all 9 ops, one commit per op). There is no catch-all `Basic.lean`: every
+`Prop` definition lives directly in the same directory as the proofs that instantiate it, and generic
+unfolding facts about `Semantics.lean`'s own definitions live in `Semantics.lean` itself, right next to
+what they unfold.
 
-- `Semantics.lean` — `Reference.deref?` (the `OId` branch is exactly `Referencable`'s `objAt?` restated
-  via `do`-notation; the new content is the `RId` branch, which steps into a `Closed` region's bridge
-  object, `none` if `Open`), `ReachableStep` (`a` steps to `b` via `deref?`, not `objAt?`),
+- `Semantics.lean` — `ReachableStep` itself (the `OId` branch is exactly `Referencable`'s `objAt?`
+  restated via `do`-notation; the new content is the `RId` branch, which steps into a `Closed` region's
+  bridge object, no step at all if `Open`), plus its unfolding lemmas `ReachableStep_rid_iff`/
+  `ReachableStep_oid_iff`;
   `RegionReachable`/`FrameReachable`/`StackReachable`/`FrameRoot` (same shape as
-  `Referencable/Semantics.lean`'s, built on `ReachableStep`), and
+  `Referencable/Semantics.lean`'s, built on `ReachableStep`), plus `RegionReachable_implies_FrameReachable`
+  (a general, currently-unused-elsewhere corollary connecting the two); and
   `RegionReachable_iff_reflTransGen`/`FrameReachable_iff_reflTransGen`.
-- `Basic.lean` — the "start reading here" file: `deref?_oid_eq_objAt?`/`ReachableStep_rid_iff`/
-  `ReachableStep_oid_iff` (unfolding lemmas for the two `ReachableStep` sources),
-  `RegionReachable_implies_FrameRechable`, and the two headline `Prop` definitions the rest of the
-  folder proves per-operation instances of:
-  - `FrameReachable_at_later_frame_implies_FrameReachable_at_frame cfg` — a CR3-style property (same
-    shape as `Referencable`'s report.pdf `CR3`, restated over this layer's own `FrameReachable`), plus
-    its `FrameReachableAtLaterFrame_step cmd` single-step-preservation wrapper. Used as an explicit
-    hypothesis by `StackReachable_invariant_for_suspended_region_objects` below; not yet proved to hold
-    at `RuntimeConfig.start`, nor bundled into a `ValidReachableConfig`-style invariant the way
-    `Referencable/`'s `CR3` is.
-  - `StackReachable_invariant_for_suspended_region_objects cmd` — the layer's headline claim: for a
-    `ValidConfig cfg`, a mutation `cmd`, and a frame `frame` whose region is *suspended* (index strictly
-    below the active/last frame's) and holds some `oid`, `StackReachable cfg (OId oid) ↔ StackReachable
-    cfg' (OId oid)` — "liveness of objects in suspended regions is invariant to activity in an active
-    region" (the user's own reformulation of report.pdf Section 5 paragraph 4's claim; deliberately
-    drops the paper's "as long as the active region remains active" qualifier, judged unnecessary for
-    this single-step, per-operation formulation).
+- `FrameReachableAtLaterFrame/Def.lean` — the two headline `Prop` definitions the rest of that folder
+  proves per-operation instances of: `FrameReachable_at_later_frame_implies_FrameReachable_at_frame cfg`
+  — a CR3-style property (same shape as `Referencable`'s report.pdf `CR3`, restated over this layer's
+  own `FrameReachable`) — and its `FrameReachableAtLaterFrame_step cmd` single-step-preservation
+  wrapper. Used as an explicit hypothesis by `StackReachable_invariant_for_suspended_region_objects`
+  below; not yet proved to hold at `RuntimeConfig.start`, nor bundled into a `ValidReachableConfig`-style
+  invariant the way `Referencable/`'s `CR3` is.
+- `StackReachableInvariant/Def.lean` — `StackReachable_invariant_for_suspended_region_objects cmd`, the
+  layer's headline claim (imports `FrameReachableAtLaterFrame/Def.lean` for the hypothesis above): for a
+  `ValidConfig cfg`, a mutation `cmd`, and a frame `frame` whose region is *suspended* (index strictly
+  below the active/last frame's) and holds some `oid`, `StackReachable cfg (OId oid) ↔ StackReachable
+  cfg' (OId oid)` — "liveness of objects in suspended regions is invariant to activity in an active
+  region" (the user's own reformulation of report.pdf Section 5 paragraph 4's claim; deliberately
+  drops the paper's "as long as the active region remains active" qualifier, judged unnecessary for
+  this single-step, per-operation formulation).
 - `Lemmas/` — the per-operation reusable lemma toolkit both proof passes below draw on:
   `Lemmas/Common.lean` holds generic, non-operation-specific machinery (`SafeRef`/`predecessor_safe`/
   `safe_reflTransGen_transport` — a backward, H3/L2-driven chase; `stackWithIndex_mem_getElem_eq`/
@@ -288,10 +287,9 @@ layer's own specific properties and the folder-independence constraint (neither 
   aggregator importing all of `Lemmas/*.lean`, mirroring `Mutation.lean`/`Preservation.lean`'s own
   aggregator shape.
 - `CR6.lean` — the single-config reachability corollary (report.pdf CR6), mirroring `Referencable/`'s
-  `CR1.lean`/`CR2.lean`/`CR4.lean` pattern rather than sitting in `Basic.lean` alongside this layer's
-  other headline `Prop`s: `Lemmas/Common.lean` already imports `Basic.lean` (for `ReachableStep_rid_iff`/
-  `_oid_iff`), so a proof drawing on `Lemmas`-level machinery can't live *in* `Basic.lean` without an
-  import cycle. Two theorems:
+  `CR1.lean`/`CR2.lean`/`CR4.lean` pattern: a proof drawing on `Lemmas`-level machinery can't live in
+  `Semantics.lean` without an import cycle (`Lemmas/Common.lean` imports `Semantics.lean`), so it gets
+  its own file instead. Two theorems:
   - **`StackReachable_iff_RegionReachable_of_closed`**: given a Closed region `rid` whose `RId` is
     itself stack-reachable, an object located inside `rid` (`loc? = Rgn rid`) is `StackReachable` iff
     it's `RegionReachable cfg rid` — "liveness in a closed region is solely determined by
@@ -307,7 +305,7 @@ layer's own specific properties and the folder-independence constraint (neither 
   constructor (all 9 proved, zero `sorry`), plus `All.lean`'s `frameReachableAtLaterFrame_step_all`
   dispatcher (`cases cmd with ...`, mirroring `Referencable/CR3/All.lean`'s
   `allPreserve_ValidReachableConfig` pattern); proves `FrameReachableAtLaterFrame_step cmd`, i.e. single-step
-  preservation of `FrameReachable_at_later_frame_implies_FrameReachable_at_frame` (see the `Basic.lean`
+  preservation of `FrameReachable_at_later_frame_implies_FrameReachable_at_frame` (see the `Def.lean`
   bullet above). Unlike `StackReachableInvariant/`'s property (which only needs *some* witness frame
   reaching `oid`), this one needs reachability specifically from the given earlier frame, so
   `varAsgn`/`fieldAsgn`/`swap` each need a genuine index-bound "escape" argument (frame.index ≤

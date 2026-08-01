@@ -15,6 +15,20 @@ def ReachableStep (cfg : RuntimeConfig) : Reference → Reference → Prop
             (fun frame => frame.objMap.lookup oid)) = some obj ∧
       obj.refs.contains b
 
+theorem ReachableStep_rid_iff (cfg : RuntimeConfig) (rid : RegionId) (b : Reference) :
+    ReachableStep cfg (Reference.RId rid) b ↔
+      ∃ region, cfg.heap.lookup rid = some region ∧
+        region.status = Status.Closed ∧ b = Reference.OId region.bridgeObjectId :=
+  Iff.rfl
+
+theorem ReachableStep_oid_iff (cfg : RuntimeConfig) (oid : ObjectId) (b : Reference) :
+    ReachableStep cfg (Reference.OId oid) b ↔
+      ∃ obj, (Reference.OId oid).objAt? cfg = some obj ∧ obj.refs.contains b := by
+  simp only [ReachableStep, Reference.objAt?]
+  cases (Reference.OId oid).loc? cfg with
+  | none => rfl
+  | some loc => cases loc <;> rfl
+
 inductive RegionReachable : RuntimeConfig → RegionId → Reference → Prop where
 | bridge : cfg.heap.lookup rid = some region →
     region.bridgeObjectId = oid →
@@ -34,6 +48,18 @@ inductive FrameReachable : RuntimeConfig → Index → Reference → Prop where
 | step : ReachableStep cfg ref' ref →
     FrameReachable cfg fid ref' →
     FrameReachable cfg fid ref
+
+theorem RegionReachable_implies_FrameReachable (cfg : RuntimeConfig) (rid : RegionId) (ref : Reference)
+    (hframe : frame ∈ cfg.stackWithIndex) (hrid : frame.regionId = rid)
+    (h : RegionReachable cfg rid ref) :
+    FrameReachable cfg frame.index ref := by
+  induction h with
+  | bridge hlookup hbridge =>
+    subst hrid
+    exact FrameReachable.bridge hframe hlookup hbridge
+  | step hstep _ ih =>
+    subst hrid
+    exact FrameReachable.step hstep (ih hframe rfl)
 
 def StackReachable (cfg : RuntimeConfig) (ref : Reference) : Prop :=
     ∃ frame ∈ cfg.stackWithIndex, FrameReachable cfg frame.index ref
