@@ -7,6 +7,7 @@ import Gc.Reachability.Reachable.Semantics
 import Gc.Reachability.Reachable.Basic
 import Gc.Reachability.Reachable.Lemmas.Common
 import Gc.Reachability.Reachable.Lemmas.MakeObjStack
+import Gc.Reachability.Reachable.Lemmas.Merge
 
 -- ===== makeRegion =====
 
@@ -181,42 +182,105 @@ theorem makeRegion_oid_step_iff {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig c
       simp [Object.refs] at hcontains
   · rw [ReachableStep_oid_iff, ReachableStep_oid_iff, makeRegion_objAt_eq_of_ne vcfg h hne]
 
--- `ReachableStep` agrees for every `RId`-sourced step: the fresh region is vacuous both sides (doesn't exist in `cfg`; empty bridge object in `cfg'`).
-theorem makeRegion_rid_step_iff {cfg cfg' : RuntimeConfig}
-    (h : makeRegion x cfg = some cfg') (rid : RegionId) (b : Reference) :
+-- `ReachableStep` agrees for every `RId`-sourced step whose source isn't the freshly-allocated region itself.
+theorem makeRegion_rid_step_iff_of_ne {cfg cfg' : RuntimeConfig}
+    (h : makeRegion x cfg = some cfg') {rid : RegionId} (hne : rid ≠ cfg.freshRegionId) (b : Reference) :
     ReachableStep cfg (Reference.RId rid) b ↔ ReachableStep cfg' (Reference.RId rid) b := by
   obtain ⟨frame, hlast, hcfg'⟩ := makeRegion_cases h
-  by_cases heq : rid = cfg.freshRegionId
-  · subst heq
-    constructor
-    · intro hstep; exact absurd hstep freshRegionId_no_step
-    · intro hstep
-      exfalso
-      rw [ReachableStep_rid_iff] at hstep
-      obtain ⟨region, hlookup, -, obj, hobjlookup, hcontains⟩ := hstep
-      have hlookup' : cfg'.heap.lookup cfg.freshRegionId = some ({ bridgeObjectId := cfg.freshObjectId, objMap := (∅ : ObjMap).insert cfg.freshObjectId ∅, status := Status.Closed } : Region) := by
-        rw [hcfg']; dsimp only; rw [AList.lookup_insert]
-      rw [hlookup'] at hlookup
-      injection hlookup with hlookupEq
-      rw [← hlookupEq] at hobjlookup
-      dsimp only at hobjlookup
-      rw [AList.lookup_insert] at hobjlookup
-      injection hobjlookup with hobjlookup
-      rw [← hobjlookup] at hcontains
-      simp [Object.refs] at hcontains
-  · have hlookup' : cfg'.heap.lookup rid = cfg.heap.lookup rid := by
-      rw [hcfg']; dsimp only; rw [AList.lookup_insert_ne heq]
-    rw [ReachableStep_rid_iff, ReachableStep_rid_iff, hlookup']
+  have hlookup' : cfg'.heap.lookup rid = cfg.heap.lookup rid := by
+    rw [hcfg']; dsimp only; rw [AList.lookup_insert_ne hne]
+  rw [ReachableStep_rid_iff, ReachableStep_rid_iff, hlookup']
 
--- `ReachableStep` agrees between `cfg`/`cfg'` completely, as a literal function equality.
-theorem makeRegion_step_eq {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
-    (h : makeRegion x cfg = some cfg') :
-    ReachableStep cfg = ReachableStep cfg' := by
-  funext a b
-  apply propext
+-- `ReachableStep` agrees for every source that isn't the freshly-allocated region reference itself.
+theorem makeRegion_step_iff_of_ne {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : makeRegion x cfg = some cfg') {a : Reference} (hane : a ≠ Reference.RId cfg.freshRegionId)
+    (b : Reference) : ReachableStep cfg a b ↔ ReachableStep cfg' a b := by
   cases a with
   | OId oid => exact makeRegion_oid_step_iff vcfg h oid b
-  | RId rid => exact makeRegion_rid_step_iff h rid b
+  | RId rid =>
+    have hne : rid ≠ cfg.freshRegionId := fun heq => hane (by rw [heq])
+    exact makeRegion_rid_step_iff_of_ne h hne b
+
+-- `RId cfg.freshRegionId` is never a `ReachableStep cfg'` target: `RId`-sourced steps only ever land on an `OId`, and it's written only into a `varMap`, which no `ReachableStep_oid_iff` field step ever reads.
+theorem makeRegion_freshRid_not_target {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : makeRegion x cfg = some cfg') {a : Reference} :
+    ¬ ReachableStep cfg' a (Reference.RId cfg.freshRegionId) := by
+  intro hstep
+  cases a with
+  | RId ridA =>
+    rw [ReachableStep_rid_iff] at hstep
+    obtain ⟨regionA, hlookupA, -, hbeq⟩ := hstep
+    simp at hbeq
+  | OId oidA =>
+    have hstepCfg : ReachableStep cfg (Reference.OId oidA) (Reference.RId cfg.freshRegionId) :=
+      (makeRegion_oid_step_iff vcfg h oidA (Reference.RId cfg.freshRegionId)).mpr hstep
+    rw [ReachableStep_oid_iff] at hstepCfg
+    obtain ⟨obj, hobjAt, hcontains⟩ := hstepCfg
+    unfold Reference.objAt? at hobjAt
+    dsimp only at hobjAt
+    cases hloc' : (Reference.OId oidA).loc? cfg with
+    | none => rw [hloc'] at hobjAt; simp at hobjAt
+    | some loc =>
+      rw [hloc'] at hobjAt
+      cases loc with
+      | Rgn ridR =>
+        dsimp only at hobjAt
+        cases hlookupR : cfg.heap.lookup ridR with
+        | none => rw [hlookupR] at hobjAt; simp at hobjAt
+        | some regionR =>
+          rw [hlookupR] at hobjAt
+          have hmemrefs : Reference.RId cfg.freshRegionId ∈ regionR.refs :=
+            mem_region_refs_of_mem_objMap hobjAt (List.contains_iff_mem.mp hcontains)
+          have hmemHeap : Reference.RId cfg.freshRegionId ∈ cfg.heap.refs := by
+            rw [heap_refs_eq_flatMap, List.mem_flatMap]
+            exact ⟨⟨ridR, regionR⟩, AList.lookup_mem_entries hlookupR, hmemrefs⟩
+          have hmemCfg : Reference.RId cfg.freshRegionId ∈ cfg.refs := List.mem_append_right _ hmemHeap
+          exact RuntimeConfig.freshRegionId_not_mem cfg (vcfg.hs2 cfg.freshRegionId hmemCfg)
+      | Stk fidR =>
+        dsimp only at hobjAt
+        cases hfind : cfg.stackWithIndex.find? (fun f => f.index == fidR) with
+        | none => rw [hfind] at hobjAt; simp at hobjAt
+        | some someFrame =>
+          rw [hfind] at hobjAt
+          have hmemrefs : Reference.RId cfg.freshRegionId ∈ someFrame.refs :=
+            mem_frame_refs_of_mem_objMap hobjAt (List.contains_iff_mem.mp hcontains)
+          have hmemSWI : someFrame ∈ cfg.stackWithIndex := List.mem_of_find?_eq_some hfind
+          have hmemstack0 : someFrame.toFrame ∈ cfg.stack := by
+            obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hmemSWI
+            rw [← hfeq]; exact List.getElem_mem hn
+          have hmemStack : Reference.RId cfg.freshRegionId ∈ cfg.stack.refs := by
+            rw [stack_refs_eq_flatMap, List.mem_flatMap]
+            exact ⟨someFrame.toFrame, hmemstack0, hmemrefs⟩
+          have hmemCfg : Reference.RId cfg.freshRegionId ∈ cfg.refs := List.mem_append_left _ hmemStack
+          exact RuntimeConfig.freshRegionId_not_mem cfg (vcfg.hs2 cfg.freshRegionId hmemCfg)
+
+-- A `cfg`-chain transports unconditionally into `cfg'`: `RId cfg.freshRegionId` can't source a `ReachableStep cfg` (it doesn't exist yet), so every hop qualifies for `makeRegion_step_iff_of_ne`.
+theorem makeRegion_reflTransGen_transport_up {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : makeRegion x cfg = some cfg') {start target : Reference}
+    (hrtg : Relation.ReflTransGen (ReachableStep cfg) start target) :
+    Relation.ReflTransGen (ReachableStep cfg') start target := by
+  induction hrtg with
+  | refl => exact Relation.ReflTransGen.refl
+  | tail hprev hstep ih =>
+    rename_i b c
+    have hbne : b ≠ Reference.RId cfg.freshRegionId := by
+      intro heq; rw [heq] at hstep; exact freshRegionId_no_step hstep
+    exact ih.tail ((makeRegion_step_iff_of_ne vcfg h hbne c).mp hstep)
+
+-- A `cfg'`-chain rooted away from the fresh region transports back into `cfg`: `makeRegion_freshRid_not_target` keeps every node off `RId cfg.freshRegionId`, so every hop qualifies too.
+theorem makeRegion_reflTransGen_transport_down {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : makeRegion x cfg = some cfg') {start : Reference} (hstartne : start ≠ Reference.RId cfg.freshRegionId) :
+    ∀ {target : Reference}, Relation.ReflTransGen (ReachableStep cfg') start target →
+      target ≠ Reference.RId cfg.freshRegionId ∧ Relation.ReflTransGen (ReachableStep cfg) start target := by
+  intro target hrtg
+  induction hrtg with
+  | refl => exact ⟨hstartne, Relation.ReflTransGen.refl⟩
+  | tail hprev hstep ih =>
+    rename_i b c
+    obtain ⟨hbne, ihrtg⟩ := ih
+    have hcne : c ≠ Reference.RId cfg.freshRegionId := by
+      intro heq; rw [heq] at hstep; exact makeRegion_freshRid_not_target vcfg h hstep
+    exact ⟨hcne, ihrtg.tail ((makeRegion_step_iff_of_ne vcfg h hbne c).mpr hstep)⟩
 
 -- Every `cfg'.stackWithIndex` member is either an unchanged pre-existing frame or the last frame with `varMap` updated.
 theorem makeRegion_frame_cases {cfg cfg' : RuntimeConfig} {x : VarName}
@@ -278,10 +342,10 @@ theorem makeRegion_frame_reachable_iff {cfg cfg' : RuntimeConfig} {x : VarName} 
     {X : FrameWithIndex} (_hXmem : X ∈ cfg.stackWithIndex) (hXlt : X.index < cfg.stack.length - 1)
     (ref : Reference) : FrameReachable cfg X.index ref ↔ FrameReachable cfg' X.index ref := by
   obtain ⟨lastFrame, hlast, hcfg'⟩ := makeRegion_cases h
-  rw [FrameReachable_iff_reflTransGen, FrameReachable_iff_reflTransGen, makeRegion_step_eq vcfg h]
+  rw [FrameReachable_iff_reflTransGen, FrameReachable_iff_reflTransGen]
   constructor
   · rintro ⟨start, hroot, hrtg⟩
-    refine ⟨start, ?_, hrtg⟩
+    refine ⟨start, ?_, makeRegion_reflTransGen_transport_up vcfg h hrtg⟩
     rcases hroot with ⟨Xf, hXfmem, hXfidx, var, hvar⟩ | ⟨Xf, hXfmem, hXfidx, regionX, hlookup, hbridge⟩
     · exact Or.inl ⟨Xf, makeRegion_frame_mem_up h hXfmem (hXfidx ▸ hXlt), hXfidx, var, hvar⟩
     · have hXfne : Xf.regionId ≠ cfg.freshRegionId := by
@@ -293,7 +357,27 @@ theorem makeRegion_frame_reachable_iff {cfg cfg' : RuntimeConfig} {x : VarName} 
         rw [hcfg']; dsimp only; rw [AList.lookup_insert_ne hXfne]; exact hlookup
       exact Or.inr ⟨Xf, makeRegion_frame_mem_up h hXfmem (hXfidx ▸ hXlt), hXfidx, regionX, hlookup', hbridge⟩
   · rintro ⟨start, hroot, hrtg⟩
-    refine ⟨start, ?_, hrtg⟩
+    have hstartne : start ≠ Reference.RId cfg.freshRegionId := by
+      rcases hroot with ⟨Xf, hXfmem, hXfidx, var, hvar⟩ | ⟨Xf, hXfmem, hXfidx, regionX, hlookup, hbridge⟩
+      · rcases makeRegion_frame_cases h hXfmem with ⟨hXfmemcfg, -⟩ | ⟨lf, hlf, -, -, -, -, hXfidx2⟩
+        · intro heq
+          rw [heq] at hvar
+          have hmemrefs : Reference.RId cfg.freshRegionId ∈ Xf.refs := mem_frame_refs_of_mem_varMap hvar
+          have hmemstack0 : Xf.toFrame ∈ cfg.stack := by
+            obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hXfmemcfg
+            rw [← hfeq]; exact List.getElem_mem hn
+          have hmemStack : Reference.RId cfg.freshRegionId ∈ cfg.stack.refs := by
+            rw [stack_refs_eq_flatMap, List.mem_flatMap]
+            exact ⟨Xf.toFrame, hmemstack0, hmemrefs⟩
+          have hmemCfg : Reference.RId cfg.freshRegionId ∈ cfg.refs := List.mem_append_left _ hmemStack
+          exact RuntimeConfig.freshRegionId_not_mem cfg (vcfg.hs2 cfg.freshRegionId hmemCfg)
+        · exfalso
+          have hXeq : X.index = cfg.stack.dropLast.length := by rw [← hXfidx, hXfidx2]
+          rw [hXeq, List.length_dropLast] at hXlt
+          exact absurd hXlt (lt_irrefl _)
+      · rw [hbridge]; simp
+    obtain ⟨-, hrtgCfg⟩ := makeRegion_reflTransGen_transport_down vcfg h hstartne hrtg
+    refine ⟨start, ?_, hrtgCfg⟩
     rcases hroot with ⟨Xf, hXfmem, hXfidx, var, hvar⟩ | ⟨Xf, hXfmem, hXfidx, regionX, hlookup, hbridge⟩
     · rcases makeRegion_frame_cases h hXfmem with ⟨hXfmemcfg, -⟩ | ⟨lf, hlf, -, -, -, -, hXfidx2⟩
       · exact Or.inl ⟨Xf, hXfmemcfg, hXfidx, var, hvar⟩

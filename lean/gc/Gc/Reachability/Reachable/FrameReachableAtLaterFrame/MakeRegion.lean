@@ -69,7 +69,6 @@ theorem frameReachableAtLaterFrame_step_makeRegion (x : VarName) :
     subst hlf'
     rw [FrameReachable_iff_reflTransGen] at hreach
     obtain ⟨start, hroot, hrtg⟩ := hreach
-    rw [← makeRegion_step_eq vcfg h'] at hrtg
     have hframe'Idx' : frame'.index = cfg.stack.length - 1 := by rw [hframe'Idx, List.length_dropLast]
     have hLfReach : FrameReachable cfg (cfg.stack.length - 1) (Reference.OId oid) := by
       rcases hroot with ⟨Xf, hXfmem, hXfidx, var, hvar⟩ | ⟨Xf, hXfmem, hXfidx, regionX, hlookupX, hbridge⟩
@@ -81,12 +80,46 @@ theorem frameReachableAtLaterFrame_step_makeRegion (x : VarName) :
           injection hvar with hstart
           exfalso
           rw [← hstart] at hrtg
-          rcases hrtg.cases_head with heqStart | ⟨c, hstep, -⟩
+          rcases hrtg.cases_head with heqStart | ⟨c, hstep, hrest⟩
           · cases heqStart
-          · exact absurd hstep freshRegionId_no_step
+          · rw [ReachableStep_rid_iff] at hstep
+            obtain ⟨region2, hlookup2, -, hbeq⟩ := hstep
+            have hlookup2' : cfg'.heap.lookup cfg.freshRegionId = some ({ bridgeObjectId := cfg.freshObjectId, objMap := (∅ : ObjMap).insert cfg.freshObjectId ∅, status := Status.Closed } : Region) := by
+              rw [hcfg']; dsimp only; rw [AList.lookup_insert]
+            rw [hlookup2'] at hlookup2
+            injection hlookup2 with hlookup2eq
+            rw [← hlookup2eq] at hbeq
+            dsimp only at hbeq
+            rw [hbeq] at hrest
+            rcases hrest.cases_head with heq2 | ⟨c2, hstep2, -⟩
+            · injection heq2 with heq2
+              rw [← heq2, makeRegion_corollary_loc_fresh h'] at hloc
+              injection hloc with hloc
+              injection hloc with hloc
+              exact hframeRidNe hloc.symm
+            · rw [ReachableStep_oid_iff, makeRegion_fresh_objAt_cfg' h'] at hstep2
+              obtain ⟨obj, hobjEq, hcontains⟩ := hstep2
+              injection hobjEq with hobjEq
+              rw [← hobjEq] at hcontains
+              simp [Object.refs] at hcontains
         · rw [AList.lookup_insert_ne hveq] at hvar
+          have hstackEq : cfg.stack = cfg.stack.dropLast ++ [lastFrame] :=
+            (List.dropLast_append_getLast? lastFrame hlast).symm
+          have hmemLast : lastFrame ∈ cfg.stack :=
+            hstackEq ▸ List.mem_append_right _ (List.mem_singleton_self lastFrame)
+          have hstartne : start ≠ Reference.RId cfg.freshRegionId := by
+            intro heq
+            rw [heq] at hvar
+            have hmemrefs : Reference.RId cfg.freshRegionId ∈ lastFrame.refs :=
+              mem_frame_refs_of_mem_varMap hvar
+            have hmemStack : Reference.RId cfg.freshRegionId ∈ cfg.stack.refs := by
+              rw [stack_refs_eq_flatMap, List.mem_flatMap]
+              exact ⟨lastFrame, hmemLast, hmemrefs⟩
+            have hmemCfg : Reference.RId cfg.freshRegionId ∈ cfg.refs := List.mem_append_left _ hmemStack
+            exact RuntimeConfig.freshRegionId_not_mem cfg (vcfg.hs2 cfg.freshRegionId hmemCfg)
+          obtain ⟨-, hrtgCfg⟩ := makeRegion_reflTransGen_transport_down vcfg h' hstartne hrtg
           exact (FrameReachable_iff_reflTransGen cfg (cfg.stack.length - 1) (Reference.OId oid)).mpr
-            ⟨start, Or.inl ⟨{ lastFrame with index := cfg.stack.length - 1 }, hLf, rfl, var, hvar⟩, hrtg⟩
+            ⟨start, Or.inl ⟨{ lastFrame with index := cfg.stack.length - 1 }, hLf, rfl, var, hvar⟩, hrtgCfg⟩
       · have hXfeq : Xf = frame' := swap_corollary_stackWithIndex_index_inj hXfmem hframe'Mem hXfidx
         have hXfridEq : Xf.regionId = lastFrame.regionId := by rw [hXfeq]; exact hframe'RegionId
         have hne : Xf.regionId ≠ cfg.freshRegionId := by
@@ -98,9 +131,11 @@ theorem frameReachableAtLaterFrame_step_makeRegion (x : VarName) :
         have hlookup' : cfg'.heap.lookup Xf.regionId = cfg.heap.lookup Xf.regionId := by
           rw [hcfg']; dsimp only; rw [AList.lookup_insert_ne hne]
         rw [hlookup', hXfridEq] at hlookupX
+        have hstartne : start ≠ Reference.RId cfg.freshRegionId := by rw [hbridge]; simp
+        obtain ⟨-, hrtgCfg⟩ := makeRegion_reflTransGen_transport_down vcfg h' hstartne hrtg
         exact (FrameReachable_iff_reflTransGen cfg (cfg.stack.length - 1) (Reference.OId oid)).mpr
           ⟨start, Or.inr ⟨{ lastFrame with index := cfg.stack.length - 1 }, hLf, rfl, regionX, hlookupX, hbridge⟩,
-            hrtg⟩
+            hrtgCfg⟩
     have hlt' : frame.index < ({ lastFrame with index := cfg.stack.length - 1 } : FrameWithIndex).index := by
       show frame.index < cfg.stack.length - 1
       rw [← hframe'Idx']; exact hlt
