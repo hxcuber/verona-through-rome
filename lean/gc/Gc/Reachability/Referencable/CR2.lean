@@ -4,7 +4,7 @@ import Gc.Model.Validity
 import Gc.Model.Preservation.Common
 import Gc.Reachability.Referencable.Semantics
 import Gc.Reachability.Referencable.Path
-import Gc.Reachability.Referencable.Corollaries.Common
+import Gc.Reachability.Referencable.Lemmas.Common
 
 -- report.pdf CR2 is proved via three pieces: (1) every element of a path ending in an object
 -- reference must itself be an object reference -- an `RId` can only ever be the *last* element

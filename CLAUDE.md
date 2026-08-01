@@ -26,8 +26,13 @@ All commands below assume `cd lean/gc`.
 - **`lake build` (bare, no target) succeeds end to end**, including `Gc`, `Main`, and the `gc`
   executable, with zero `sorry`s anywhere under `Gc/`. Note: `Gc/Reachability/Reachable/` is not yet
   imported from `Gc.lean`, so it is *not* covered by the bare build — check it via qualified-name
-  builds (e.g. `lake build Gc.Reachability.Reachable.Lemmas`) or the Lean LSP tools. Prefer building
-  the specific module(s) you're touching by qualified name for faster iteration.
+  builds (e.g. `lake build Gc.Reachability.Reachable.Lemmas`) or the Lean LSP tools. Likewise
+  `Gc/Reachability/Referencable/CR3/All.lean` (`allPreserve_ValidReachableConfig`) and
+  `Gc/Reachability/Referencable/CR5/All.lean` (`cr5_step_all`) are not imported from `Gc.lean` either
+  — the bare build covers every individual `CR3/<Op>.lean`/`CR5/<Op>.lean` file (via `Gc.lean`'s own
+  explicit per-op imports) but not these two dispatcher aggregators themselves; check them via
+  qualified-name builds too. Prefer building the specific module(s) you're touching by qualified name
+  for faster iteration.
 - Toolchain is pinned via `lean-toolchain` (`leanprover/lean4:v4.29.0-rc6`) and dependencies via
   `lake-manifest.json`; the main dependency is `mathlib`. First builds after a fresh clone can be slow
   because of mathlib — subsequent builds reuse `.lake/build`.
@@ -78,7 +83,7 @@ The proof development has three layers under `Gc/`.
   `merge` — each takes a `RuntimeConfig` and returns `Option RuntimeConfig`, `none` meaning the
   transition is stuck/illegal, e.g. an out-of-region write) **and** a public `<op>_cases` lemma
   unpacking the `do`-block into its explicit disjunction-of-∃-bundles branches — reused by both
-  `Gc/Model/Preservation/<Op>.lean` and `Gc/Reachability/Referencable/Validity/Preservation/<Op>.lean`.
+  `Gc/Model/Preservation/<Op>.lean` and `Gc/Reachability/Referencable/Lemmas/<Op>.lean`.
 - `Mutation/Stmt.lean` — reifies a single operation as data: `inductive Stmt` (one constructor per
   operation, carrying its arguments) plus `step : Stmt → RuntimeConfig → Option RuntimeConfig`
   dispatching to the real operation. Lets later layers state "for all 9 operations" claims by
@@ -112,63 +117,85 @@ per-operation proof here reasons about reachability chains.
 `RefStep` (defined in `Semantics.lean`) stops dead the moment a chain hits a region reference (`RId`) —
 it never crosses a region boundary. This is what report.pdf's own reachability notion formalizes.
 
+The folder is organized **property-first** (one top-level unit per headline claim, one file per
+operation inside it), mirroring `Gc/Reachability/Reachable/`'s own layout (see that section below) —
+this was a deliberate refactor away from an earlier operation-first `Validity/Preservation/<Op>.lean`
+layout, done to match how work on this layer actually happens (one property, ground out across all 9
+ops, one commit per op) and to make the two reachability layers easier to cross-reference. The refactor
+was file-reorganization only (splitting/renaming, `private`→public where a lemma crossed a file
+boundary) — no proof content or lemma statement changed, and it kept `Referencable/`'s pre-existing
+independence from `Gc.Reachability.Reachable` (neither folder imports the other).
+
 - `Semantics.lean` — `RefStep` (`a` steps to `b` when `b` is a field value of the object `a` currently
-  resolves to, via `Reference.objAt?`) and `RefStep.exists_oid_left`; `RegionReachable` (reachable from
-  a region's bridge object, staying inside the region), `StackReachable`/`FrameReachable` (reachable
-  from stack variables, optionally scoped to one frame's stack-index), and `FrameRoot` (the two ways a
-  `FrameReachable` chain can start: a stack var's value, or a frame's own region's bridge object). Also
-  proves `RegionReachable_iff_reflTransGen`/`FrameReachable_iff_reflTransGen`, converting the inductive
-  props to `Relation.ReflTransGen (RefStep cfg) start ref` form — the representation almost every
-  CR1–CR5 proof actually works with.
+  resolves to, via `Reference.objAt?`) and `RefStep.exists_oid_left`; `RegionReferencable` (reachable
+  from a region's bridge object, staying inside the region), `StackReferencable`/`FrameReferencable`
+  (reachable from stack variables, optionally scoped to one frame's stack-index), and `FrameRoot` (the
+  two ways a `FrameReferencable` chain can start: a stack var's value, or a frame's own region's bridge
+  object). Also proves `RegionReferencable_iff_reflTransGen`/`FrameReferencable_iff_reflTransGen`,
+  converting the inductive props to `Relation.ReflTransGen (RefStep cfg) start ref` form — the
+  representation almost every CR1–CR5 proof actually works with.
+- `Basic.lean` — the "start reading here" file: `CR3` and `ValidReachableConfig` (below), plus
+  `Suspended`/`CR5_helper_step`/`CR5_step` and the `cr5_step_of_helper` upgrade lemma (also below) —
+  the headline `Prop` definitions the rest of the folder proves per-operation instances of.
 - `Path.lean` — a thin `Path`/`ValidPath` wrapper (`path.refs : List Reference`, valid when consecutive
   refs are linked by `RefStep`) used specifically by the CR2 proof, which needs to reason about *every*
   element of a chain (via `List.IsChain` induction), not just its endpoints.
-- `Corollaries/` — the reusable, non-operation-specific reachability lemmas, split into
-  `Corollaries/{Common,CR1,CR2,CR4}.lean` (each downstream file imports exactly what it needs).
-  - **`Common.lean`**: `RegionReachable_stays_in_region` (H3-driven: once a chain resolves into a
-    region, it never leaves), `ReflTransGen_rgn_confined` (the region-chain analogue of CR2, rooted at
-    an arbitrary point), `FrameRoot_upper_bound`/`RefStep_upper_bound_step`/`ReflTransGen_upper_bound`
-    (the S2/S3-driven upper-index-bound argument behind CR2), `FrameReachable_owner_index_le`/
-    `_stk_index_le` (packaged wrappers: anything reached along a `FrameReachable cfg frameY.index _`
-    chain has owner/slot index `≤ frameY.index` — the workhorses several `<op>_cr3`/`CR5_step` proofs
-    call for their "already visible from some no-later frame" argument), and
-    `resolveV_frameRoot`/`resolveFA_frameReach` (a shared pair used across `FieldAsgn`/`VarAsgn`/`Swap`).
+- `CR1.lean`, `CR2.lean`, `CR4.lean` — the single-config reachability corollaries (report.pdf CR1/CR2/
+  CR4), each proved once over an arbitrary `ValidConfig`/`ValidReachableConfig` rather than per
+  operation, so unlike CR3/CR5 below they don't get their own per-op folder:
   - **`CR1.lean`**: if a region has an associated (on-stack) frame, everything region-reachable in it is
     also frame-reachable from that frame.
   - **`CR2.lean`**: a path rooted at frame F, ending at an object in F's own region, never passes
     through any *other* frame's stack slot. Built from the S2/S3-driven upper/lower index bounds in
-    `Common.lean`, combined via `le_antisymm`.
+    `Lemmas/Common.lean`, combined via `le_antisymm`.
   - **`CR4.lean`**: an object living in a region owned by (on-stack) frame `frame` is stack-wide
-    reachable (`StackReachable`) iff it's already reachable from `frame` alone (`FrameReachable cfg
-    frame.index _`). Covers both an in-region object and a region reference (`RId`) one field-hop
+    reachable (`StackReferencable`) iff it's already reachable from `frame` alone (`FrameReferencable
+    cfg frame.index _`). Covers both an in-region object and a region reference (`RId`) one field-hop
     beyond an in-region object — the `RId` case leans on `H2`'s global uniqueness of a region
     reference's storage location to trace the chain back to the in-region object.
+- `Lemmas/` — the per-operation reusable lemma toolkit both `CR3/` and `CR5/` below draw on:
+  `Lemmas/Common.lean` holds generic, non-operation-specific machinery (`RegionReferencable_stays_in_region`
+  — H3-driven: once a chain resolves into a region, it never leaves; `ReflTransGen_rgn_confined` — the
+  region-chain analogue of CR2, rooted at an arbitrary point; `FrameRoot_upper_bound`/
+  `RefStep_upper_bound_step`/`ReflTransGen_upper_bound` — the S2/S3-driven upper-index-bound argument
+  behind CR2; `FrameReferencable_owner_index_le`/`_stk_index_le` — packaged wrappers: anything reached
+  along a `FrameReferencable cfg frameY.index _` chain has owner/slot index `≤ frameY.index`, the
+  workhorses several `<op>_cr3`/`CR5_step` proofs call for their "already visible from some no-later
+  frame" argument; `resolveV_frameRoot`/`resolveFA_frameReach` — a shared pair used across
+  `FieldAsgn`/`VarAsgn`/`Swap`), and `Lemmas/<Op>.lean` (one per `Stmt` constructor) holds the
+  `objAt?`/`loc?`/`RefStep` agreement facts and frame-membership/frame-reachability transports
+  (`<op>_corollary_frameReferencable_iff`(`_of_lt`)) each op's `CR3`/`CR5` proof needs — all originally
+  `private` inside a single per-op `Validity/Preservation/<Op>.lean` file, made public when that file
+  was split into this toolkit plus `CR3/<Op>.lean`. `Lemmas.lean` itself is just a 10-line aggregator
+  importing all of `Lemmas/*.lean`, mirroring `Mutation.lean`/`Preservation.lean`'s own aggregator shape.
 - `Invariants.lean` — cross-config properties about reachability being preserved for suspended regions
   and earlier frames across a transition; definitions only, no proofs (superseded in practice by
   `CR5_step` below).
 - `Guarantees.lean` — empty (placeholder for the eventual GC-safety theorems).
-- `Validity/` — `CR3`, a `ValidConfig`-style invariant *specifically* about reachability:
+- `CR3/` — `CR3`, a `ValidConfig`-style invariant *specifically* about reachability (defined in
+  `Basic.lean`):
 
   ```
   def CR3 (cfg : RuntimeConfig) : Prop :=
     ∀ frame ∈ cfg.stackWithIndex, ∀ frame' ∈ cfg.stackWithIndex,
       frame.index < frame'.index →
       ∀ oid, (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId) →
-      FrameReachable cfg frame'.index (Reference.OId oid) →
-      FrameReachable cfg frame.index (Reference.OId oid)
+      FrameReferencable cfg frame'.index (Reference.OId oid) →
+      FrameReferencable cfg frame.index (Reference.OId oid)
   ```
 
   ("if an object lives in a suspended region owned by an earlier frame F, and is frame-reachable from
   some later frame F', it's already frame-reachable from F itself" — report.pdf CR3). Unlike L1–HS2,
   CR3 isn't provable from a `ValidConfig` snapshot alone — it's proved to hold at `RuntimeConfig.start`
-  (`Validity/Start.lean`) and preserved by every `Mutation.lean` operation
-  (`Validity/Preservation/*.lean`), mirroring `Gc/Model/Preservation/*.lean`'s per-operation pattern.
-  `ValidReachableConfig cfg extends ValidConfig cfg` with a `cr3` field. All 9 operations proved, zero
-  `sorry`; `Validity/Preservation.lean` aggregates them (`allPreserve_ValidReachableConfig`).
+  (`CR3/Start.lean`) and preserved by every `Mutation.lean` operation (`CR3/<Op>.lean`, one file per
+  `Stmt` constructor, each proving `<op>_cr3`/`<op>_reachable_valid` by drawing on `Lemmas/<Op>.lean`),
+  mirroring `Gc/Model/Preservation/*.lean`'s per-operation pattern. `ValidReachableConfig cfg extends
+  ValidConfig cfg` with a `cr3` field (also in `Basic.lean`). All 9 operations proved, zero `sorry`;
+  `CR3/All.lean` aggregates them (`allPreserve_ValidReachableConfig`).
 
-  Also has `CR5.lean` (report.pdf CR5: "activity in an active region and frame cannot affect the
-  stack-reachability of objects within suspended regions"), formalized as a per-operation single-step
-  fact (mirroring how CR3 itself is proved):
+- `CR5/` — report.pdf CR5 ("activity in an active region and frame cannot affect the stack-reachability
+  of objects within suspended regions"), formalized as a per-operation single-step fact (mirroring how
+  CR3 itself is proved), with `Suspended`/`CR5_step`/`cr5_step_of_helper` defined in `Basic.lean`:
 
   ```
   def Suspended (cfg : RuntimeConfig) (i : Index) : Prop :=
@@ -176,18 +203,21 @@ it never crosses a region boundary. This is what report.pdf's own reachability n
 
   def CR5_step (cmd : Stmt) : Prop :=
     ∀ cfg cfg' : RuntimeConfig, ValidReachableConfig cfg → step cmd cfg = some cfg' →
-      ∀ i, Suspended cfg i → ∀ ref, FrameReachable cfg i ref →
-      (StackReachable cfg ref ↔ StackReachable cfg' ref)
+      ∀ i, Suspended cfg i → ∀ ref, FrameReferencable cfg i ref →
+      (StackReferencable cfg ref ↔ StackReferencable cfg' ref)
   ```
 
-  `CR5_step` is deliberately *restricted* to references already `FrameReachable` from the suspended
-  frame — an unrestricted `∀ ref, StackReachable cfg ref ↔ StackReachable cfg' ref` is false (e.g.
-  `makeObjStack` can make a brand-new object `StackReachable` in `cfg'` via the active frame's own
-  fresh var, with no connection to any suspended region). `cr5_step_of_helper` upgrades a simpler
-  `CR5_helper_step` (`FrameReachable cfg i ref ↔ FrameReachable cfg' i ref`) into the restricted
-  `StackReachable` form for free, since once `ref` is already `FrameReachable` from the suspended
-  frame, `StackReachable cfg ref` is trivially witnessed and `StackReachable cfg' ref` falls out of
-  unfolding `FrameRoot`. All 9 operations proved, zero `sorry`, dispatched by `cr5_step_all`.
+  `CR5_step` is deliberately *restricted* to references already `FrameReferencable` from the suspended
+  frame — an unrestricted `∀ ref, StackReferencable cfg ref ↔ StackReferencable cfg' ref` is false (e.g.
+  `makeObjStack` can make a brand-new object `StackReferencable` in `cfg'` via the active frame's own
+  fresh var, with no connection to any suspended region). `Basic.lean`'s `cr5_step_of_helper` upgrades a
+  simpler `CR5_helper_step` (`FrameReferencable cfg i ref ↔ FrameReferencable cfg' i ref`) into the
+  restricted `StackReferencable` form for free, since once `ref` is already `FrameReferencable` from the
+  suspended frame, `StackReferencable cfg ref` is trivially witnessed and `StackReferencable cfg' ref`
+  falls out of unfolding `FrameRoot`. `CR5/<Op>.lean` (one file per `Stmt` constructor) each prove
+  `cr5_step_<op>` by opening with `apply cr5_step_of_helper` and drawing on `Lemmas/<Op>.lean` — there's
+  no separately-named per-operation `CR5_helper_step` fact, traded away for a cleaner public API. All 9
+  operations proved, zero `sorry`; `CR5/All.lean` aggregates them (`cr5_step_all`).
 
   Multi-step CR5 (chaining `CR5_step` over an arbitrary-length trace, the actual report.pdf claim
   rather than just one operation) is not currently being pursued.
@@ -208,8 +238,11 @@ cross an `RId` boundary within one relation.
 
 The folder is organized **property-first** (one top-level unit per headline claim, one file per
 operation inside it), not operation-first — this matches how work on the layer actually happens (one
-property, ground out across all 9 ops, one commit per op), unlike `Referencable/`'s layout which this
-folder deliberately does not mirror:
+property, ground out across all 9 ops, one commit per op). `Referencable/`'s own layout was later
+refactored to mirror this same property-first shape (see that section above) — the two layers'
+top-level structure (`Semantics.lean`, `Basic.lean`, `Lemmas/` + aggregator, one folder per headline
+property with an `All.lean` dispatcher) now lines up file-for-file, modulo each layer's own specific
+properties and the folder-independence constraint (neither imports the other):
 
 - `Semantics.lean` — `Reference.deref?` (the `OId` branch is exactly `Referencable`'s `objAt?` restated
   via `do`-notation; the new content is the `RId` branch, which steps into a `Closed` region's bridge
@@ -247,8 +280,8 @@ folder deliberately does not mirror:
   aggregator shape.
 - `FrameReachableAtLaterFrame/` — one `frameReachableAtLaterFrame_step_<op>.lean` file per `Stmt`
   constructor (all 9 proved, zero `sorry`), plus `All.lean`'s `frameReachableAtLaterFrame_step_all`
-  dispatcher (`cases cmd with ...`, mirroring `Referencable/Validity/Preservation.lean`'s
-  `allPreserve_ValidConfig` pattern); proves `FrameReachableAtLaterFrame_step cmd`, i.e. single-step
+  dispatcher (`cases cmd with ...`, mirroring `Referencable/CR3/All.lean`'s
+  `allPreserve_ValidReachableConfig` pattern); proves `FrameReachableAtLaterFrame_step cmd`, i.e. single-step
   preservation of `FrameReachable_at_later_frame_implies_FrameReachable_at_frame` (see the `Basic.lean`
   bullet above). Unlike `StackReachableInvariant/`'s property (which only needs *some* witness frame
   reaching `oid`), this one needs reachability specifically from the given earlier frame, so

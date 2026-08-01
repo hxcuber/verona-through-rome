@@ -5,16 +5,16 @@ import Gc.Model.Preservation.Common
 import Gc.Reachability.Referencable.Semantics
 
 /-!
-Generic, non-CR-specific reachability facts shared across `Corollaries/CR1.lean`,
-`Corollaries/CR2.lean`, `Corollaries/CR4.lean`, and several `Gc/Reachability/Referencable/Validity/
-Preservation/*.lean` files. Extracted from the original monolithic `Corollaries.lean` (mirrors
-`Gc/Model/Preservation/Common.lean`'s own consolidation).
+Generic, non-CR-specific reachability facts shared across `CR1.lean`,
+`CR2.lean`, `CR4.lean`, and several `Gc/Reachability/Referencable/Lemmas/*.lean` files. Extracted
+from the original monolithic `Corollaries.lean` (mirrors `Gc/Model/Preservation/Common.lean`'s own
+consolidation).
 -/
 
 -- Generalized over `ref` (rather than fixing `ref := Reference.OId oid` up front) so that
 -- `induction h` below works directly: `h`'s type is stated over a bare-variable index, and
 -- the `∀ oid, ref = Reference.OId oid → ...` hypothesis is vacuous in a hypothetical `RId` case.
-private theorem RegionReferencable_stays_in_region_aux (cfg : RuntimeConfig) (hvalid : ValidConfig cfg)
+theorem RegionReferencable_stays_in_region_aux (cfg : RuntimeConfig) (hvalid : ValidConfig cfg)
     (rid : RegionId) (ref : Reference) (h : RegionReferencable cfg rid ref) :
     ∀ oid, ref = Reference.OId oid → ref.loc? cfg = some (Location.Rgn rid) := by
   induction h with
@@ -112,7 +112,7 @@ theorem ReflTransGen_rgn_confined (cfg : RuntimeConfig) (hvalid : ValidConfig cf
 -- bounded `≤ frame.index` by IH), H3 pins the target back into the *same* `rid_a`, so the IH's
 -- own bound applies unchanged.
 -- `start`'s own bound, directly from `FrameRoot`'s two disjuncts (no chain induction needed).
--- Used by `Corollaries/CR2.lean`'s own path-based upper bound, and by `ReflTransGen_upper_bound`/
+-- Used by `CR2.lean`'s own path-based upper bound, and by `ReflTransGen_upper_bound`/
 -- `FrameReferencable_owner_index_le`/`FrameReferencable_stk_index_le` below.
 theorem FrameRoot_upper_bound (cfg : RuntimeConfig) (hvalid : ValidConfig cfg)
     (frame : FrameWithIndex) (start : Reference) (hroot : FrameRoot cfg frame.index start) :
@@ -155,7 +155,7 @@ theorem FrameRoot_upper_bound (cfg : RuntimeConfig) (hvalid : ValidConfig cfg)
       rw [hidx_eq, hidx1]
 
 -- One RefStep hop, propagating an already-known upper bound on the source to the target. Used by
--- `Corollaries/CR2.lean`'s own `Path_bound_of_head_bound` and by `ReflTransGen_upper_bound` below.
+-- `CR2.lean`'s own `Path_bound_of_head_bound` and by `ReflTransGen_upper_bound` below.
 theorem RefStep_upper_bound_step (cfg : RuntimeConfig) (hvalid : ValidConfig cfg)
     (frame : FrameWithIndex) (a b : Reference) (hr : RefStep cfg a b)
     (oida : ObjectId) (ha_eq : a = Reference.OId oida)
@@ -280,7 +280,7 @@ theorem FrameReferencable_stk_index_le (cfg : RuntimeConfig) (hvalid : ValidConf
 
 -- An allocated object id always resolves somewhere (never `none`) -- needed because the backward
 -- step below has to determine whether the *successor* in a step resolves `Stk` or `Rgn` before it
--- can pick which of S2/S3 to chain through. Used by `Corollaries/CR2.lean`'s own
+-- can pick which of S2/S3 to chain through. Used by `CR2.lean`'s own
 -- `RefStep_lower_bound_step`, and directly by `Merge`/`Exit`'s CR3 preservation proofs.
 theorem loc_ne_none_of_mem_objectIds (cfg : RuntimeConfig) (hvalid : ValidConfig cfg) (oid : ObjectId)
     (hmem : oid ∈ cfg.objectIds) : (Reference.OId oid).loc? cfg ≠ none := by

@@ -2,7 +2,7 @@ import Gc.Model.Types
 import Gc.Model.Mutation.Mutation
 
 -- A single `Mutation.lean` operation, reified as data so it can be quantified over (used by
--- `Gc/Reachability/Referencable/Validity/CR5.lean` to state "every operation" facts, and by `AllPreserve`
+-- `Gc/Reachability/Referencable/Basic.lean`/`CR5/*.lean` to state "every operation" facts, and by `AllPreserve`
 -- below to dispatch a generic config-preservation claim to each operation's own proof).
 inductive Stmt where
   | enter (xf : FieldAccess) (bridgeVar : VarName)

@@ -1,8 +1,8 @@
 import Gc.Model.Mutation.Exit
 import Gc.Model.Preservation.Exit
 import Gc.Model.Preservation.Common
-import Gc.Reachability.Referencable.Validity.Reachable
-import Gc.Reachability.Referencable.Corollaries.Common
+import Gc.Reachability.Referencable.Basic
+import Gc.Reachability.Referencable.Lemmas.Common
 
 theorem exit_corollary_stackWithIndex_eq {cfg : RuntimeConfig} {poppedFrame : Frame}
     (hlast : cfg.stack.getLast? = some poppedFrame) :
@@ -16,7 +16,7 @@ theorem exit_corollary_stackWithIndex_eq {cfg : RuntimeConfig} {poppedFrame : Fr
 
 -- Every frame surviving into `cfg'.stackWithIndex` is the *exact same* record as some frame in
 -- `cfg.stackWithIndex` (the mutation only ever drops the last element, never touches earlier ones).
-private theorem exit_corollary_frame_old {cfg cfg' : RuntimeConfig} {poppedFrame : Frame}
+theorem exit_corollary_frame_old {cfg cfg' : RuntimeConfig} {poppedFrame : Frame}
     (hlast : cfg.stack.getLast? = some poppedFrame) (hcfg'stack : cfg'.stack = cfg.stack.dropLast) :
     ∀ frame ∈ cfg'.stackWithIndex, frame ∈ cfg.stackWithIndex := by
   intro frame hframe
@@ -29,7 +29,7 @@ private theorem exit_corollary_frame_old {cfg cfg' : RuntimeConfig} {poppedFrame
 -- The popped frame's own region can never be an earlier (surviving) frame's own region: by
 -- S1-index-uniqueness, equal regionIds force equal indices, but the popped frame's own index
 -- (`cfg.stack.dropLast.length`) is strictly above every surviving frame's.
-private theorem exit_corollary_regionId_ne {cfg : RuntimeConfig} (s1 : S1 cfg) {poppedFrame : Frame}
+theorem exit_corollary_regionId_ne {cfg : RuntimeConfig} (s1 : S1 cfg) {poppedFrame : Frame}
     (hlast : cfg.stack.getLast? = some poppedFrame) :
     ∀ frame ∈ cfg.stack.dropLast.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)),
       frame.regionId ≠ poppedFrame.regionId := by
@@ -50,7 +50,7 @@ private theorem exit_corollary_regionId_ne {cfg : RuntimeConfig} (s1 : S1 cfg) {
   rw [hidxeq] at hframe_lt
   exact absurd hframe_lt (lt_irrefl _)
 
-private theorem exit_corollary_objAt_loc_some {cfg : RuntimeConfig} {oid : ObjectId} {obj : Object}
+theorem exit_corollary_objAt_loc_some {cfg : RuntimeConfig} {oid : ObjectId} {obj : Object}
     (hobjAt : (Reference.OId oid).objAt? cfg = some obj) : (Reference.OId oid).loc? cfg ≠ none := by
   intro hnone
   unfold Reference.objAt? at hobjAt
@@ -63,7 +63,7 @@ private theorem exit_corollary_objAt_loc_some {cfg : RuntimeConfig} {oid : Objec
 -- every other region/frame is either untouched (AList.lookup_insert_ne) or, for the popped
 -- region itself, its objMap component (all objAt? actually reads) is unaffected by the status
 -- flip.
-private theorem exit_corollary_objAt_eq_of_ne_none (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
+theorem exit_corollary_objAt_eq_of_ne_none (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
     (h : exit cfg = some cfg') (oid : ObjectId) (hne' : (Reference.OId oid).loc? cfg' ≠ none) :
     (Reference.OId oid).objAt? cfg = (Reference.OId oid).objAt? cfg' := by
   obtain ⟨poppedFrame, region, hlen, hlast, hlookupPopped, hopenPopped, hcfg'⟩ := exit_cases h
@@ -122,7 +122,7 @@ private theorem exit_corollary_objAt_eq_of_ne_none (vcfg : ValidConfig cfg) (vcf
 -- region can never be a surviving frame's own region, by exit_corollary_regionId_ne), and the
 -- inductive `step` case transports via exit_corollary_objAt_eq_of_ne_none once we know (via HS1
 -- + the direction we're proving) that the relevant oid actually survives.
-private theorem exit_corollary_frameRoot_iff (vcfg : ValidConfig cfg)
+theorem exit_corollary_frameRoot_iff (vcfg : ValidConfig cfg)
     (h : exit cfg = some cfg')
     (frame0 : FrameWithIndex) (hframe0' : frame0 ∈ cfg'.stackWithIndex) (start : Reference) :
     FrameRoot cfg frame0.index start ↔ FrameRoot cfg' frame0.index start := by
@@ -153,9 +153,9 @@ private theorem exit_corollary_frameRoot_iff (vcfg : ValidConfig cfg)
       exact Or.inr ⟨frame1, hframe0, rfl, region1, hheap_eq.symm.trans hlookup1, hstart⟩
 
 -- A `RefStep`-target held by any resolved object is itself already in `cfg.refs` -- mirrors the
--- membership-chasing already done inline in `Corollaries.lean`'s `RefStep_lower_bound_step`, just
+-- membership-chasing already done inline in `CR2.lean`'s `RefStep_lower_bound_step`, just
 -- packaged as its own standalone fact (needed here to feed HS1 for the survival side-condition).
-private theorem exit_corollary_objAt_target_mem_refs {cfg : RuntimeConfig} {oid oidb : ObjectId} {obj : Object}
+theorem exit_corollary_objAt_target_mem_refs {cfg : RuntimeConfig} {oid oidb : ObjectId} {obj : Object}
     (hobjAt : (Reference.OId oid).objAt? cfg = some obj) (hcontains : obj.refs.contains (Reference.OId oidb)) :
     Reference.OId oidb ∈ cfg.refs := by
   unfold Reference.objAt? at hobjAt
@@ -208,7 +208,7 @@ private theorem exit_corollary_objAt_target_mem_refs {cfg : RuntimeConfig} {oid 
 -- A `RefStep`-hop valid in cfg' is also valid in cfg: surviving content is untouched, and the
 -- hop's own `objAt?` success on its source already gives the survival side-condition
 -- `exit_corollary_objAt_eq_of_ne_none` needs -- no extra bookkeeping required for this direction.
-private theorem exit_corollary_refStep_down (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
+theorem exit_corollary_refStep_down (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
     (h : exit cfg = some cfg') {a b : Reference} (hstep : RefStep cfg' a b) : RefStep cfg a b := by
   obtain ⟨oid, rfl⟩ := hstep.exists_oid_left
   obtain ⟨obj, hobjAt, hcontains⟩ := hstep
@@ -218,7 +218,7 @@ private theorem exit_corollary_refStep_down (vcfg : ValidConfig cfg) (vcfg' : Va
 -- Downward chain transport: immediate from exit_corollary_refStep_down, hop by hop. Safe to
 -- induct directly on `ReflTransGen` (unlike `FrameReferencable`): its relation/start arguments are
 -- genuine *parameters*, not indices, so nothing outside the chain itself needs to be reverted.
-private theorem exit_corollary_reflTransGen_down (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
+theorem exit_corollary_reflTransGen_down (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
     (h : exit cfg = some cfg') {start ref : Reference}
     (hrtg : Relation.ReflTransGen (RefStep cfg') start ref) :
     Relation.ReflTransGen (RefStep cfg) start ref := by
@@ -227,7 +227,7 @@ private theorem exit_corollary_reflTransGen_down (vcfg : ValidConfig cfg) (vcfg'
   | tail _ hstep ih => exact ih.tail (exit_corollary_refStep_down vcfg vcfg' h hstep)
 
 -- Every element reached by a cfg'-chain rooted at an already-alive `start` is itself alive.
-private theorem exit_corollary_reflTransGen_alive {cfg' : RuntimeConfig} {start ref : Reference}
+theorem exit_corollary_reflTransGen_alive {cfg' : RuntimeConfig} {start ref : Reference}
     (hrtg : Relation.ReflTransGen (RefStep cfg') start ref)
     (hstart_alive : ∀ oid, start = Reference.OId oid → (Reference.OId oid).loc? cfg' ≠ none)
     (vcfg' : ValidConfig cfg') :
@@ -244,7 +244,7 @@ private theorem exit_corollary_reflTransGen_alive {cfg' : RuntimeConfig} {start 
 
 -- Upward chain transport: each hop needs its source already known cfg'-alive, tracked via
 -- exit_corollary_reflTransGen_alive applied to the (already-transported) prefix.
-private theorem exit_corollary_reflTransGen_up (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
+theorem exit_corollary_reflTransGen_up (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
     (h : exit cfg = some cfg') {start ref : Reference}
     (hrtg : Relation.ReflTransGen (RefStep cfg) start ref)
     (hstart_alive : ∀ oid, start = Reference.OId oid → (Reference.OId oid).loc? cfg' ≠ none) :
@@ -262,7 +262,7 @@ private theorem exit_corollary_reflTransGen_up (vcfg : ValidConfig cfg) (vcfg' :
 -- A `FrameRoot`'s own start reference is always alive: the var-disjunct's value transports
 -- through HS1 (it's directly in the owning frame's own refs), the bridge-disjunct's through H1
 -- (the region's bridge object is always in its own objMap).
-private theorem exit_corollary_frameRoot_alive {cfg' : RuntimeConfig} (vcfg' : ValidConfig cfg')
+theorem exit_corollary_frameRoot_alive {cfg' : RuntimeConfig} (vcfg' : ValidConfig cfg')
     {fid : Index} {start : Reference} (hroot : FrameRoot cfg' fid start) :
     ∀ oid, start = Reference.OId oid → (Reference.OId oid).loc? cfg' ≠ none := by
   rcases hroot with ⟨frame1, hframe1, _, var, hlookup1⟩ | ⟨frame1, hframe1, _, region1, hlookup1, hstart⟩
@@ -308,27 +308,3 @@ theorem exit_corollary_frameReferencable_iff (vcfg : ValidConfig cfg) (vcfg' : V
     have hroot_down := (exit_corollary_frameRoot_iff vcfg h frame0 hframe0' start).mpr hroot
     exact ⟨start, hroot_down, exit_corollary_reflTransGen_down vcfg vcfg' h hrtg⟩
 
-theorem exit_cr3 : ValidReachableConfig cfg →
-  exit cfg = some cfg' →
-  CR3 cfg' := by
-  intro vrcfg h
-  have vcfg := vrcfg.toValidConfig
-  have vcfg' := exit_valid vcfg h
-  obtain ⟨poppedFrame, region, hlen, hlast, hlookupPopped, hopenPopped, hcfg'⟩ := exit_cases h
-  unfold CR3
-  intro frame hframeMem frame' hframe'Mem hlt oid hloc hreach
-  have hframeOld : frame ∈ cfg.stackWithIndex := exit_corollary_frame_old hlast (by rw [hcfg']) frame hframeMem
-  have hframe'Old : frame' ∈ cfg.stackWithIndex := exit_corollary_frame_old hlast (by rw [hcfg']) frame' hframe'Mem
-  have hlocDown : (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId) :=
-    (exit_corollary_1 vcfg h (Reference.OId oid)).mpr hloc
-  have hreachDown : FrameReferencable cfg frame'.index (Reference.OId oid) :=
-    (exit_corollary_frameReferencable_iff vcfg vcfg' h frame' hframe'Mem (Reference.OId oid)).mpr hreach
-  have hconcDown : FrameReferencable cfg frame.index (Reference.OId oid) :=
-    vrcfg.cr3 frame hframeOld frame' hframe'Old hlt oid hlocDown hreachDown
-  exact (exit_corollary_frameReferencable_iff vcfg vcfg' h frame hframeMem (Reference.OId oid)).mp hconcDown
-
-theorem exit_reachable_valid : ValidReachableConfig cfg →
-  exit cfg = some cfg' →
-  ValidReachableConfig cfg' := by
-  intro vrcfg h
-  exact { exit_valid vrcfg.toValidConfig h with cr3 := exit_cr3 vrcfg h }

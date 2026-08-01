@@ -1,13 +1,13 @@
 import Gc.Model.Mutation.Enter
 import Gc.Model.Preservation.Enter
 import Gc.Model.Preservation.Common
-import Gc.Reachability.Referencable.Validity.Reachable
-import Gc.Reachability.Referencable.Corollaries.Common
+import Gc.Reachability.Referencable.Basic
+import Gc.Reachability.Referencable.Lemmas.Common
 
 
 -- Old (already-on-stack) frames' own region can never be the entered region: L2 says every
 -- on-stack frame's own region is already Open, but `enter` requires the entered region Closed.
-private theorem enter_corollary_regionId_ne (vcfg : ValidConfig cfg)
+theorem enter_corollary_regionId_ne (vcfg : ValidConfig cfg)
     (rid : RegionId) (region : Region) (hclosed : region.status = Status.Closed)
     (hlookup : cfg.heap.lookup rid = some region) :
     ∀ frame ∈ cfg.stackWithIndex, frame.regionId ≠ rid := by
@@ -24,7 +24,7 @@ private theorem enter_corollary_regionId_ne (vcfg : ValidConfig cfg)
   rw [← hregion_eq, hclosed] at hopen'
   exact absurd hopen' (by decide)
 
-private theorem enter_corollary_frame_mem (h : enter xf a cfg = some cfg') :
+theorem enter_corollary_frame_mem (h : enter xf a cfg = some cfg') :
     ∀ frame ∈ cfg.stackWithIndex, frame ∈ cfg'.stackWithIndex := by
   intro frame hframe
   obtain ⟨rid, region, _, _, _, hcfg'⟩ := enter_cases h
@@ -95,7 +95,7 @@ theorem enter_corollary_objAt_eq (vcfg : ValidConfig cfg) (vcfg' : ValidConfig c
         rw [← hidx0']; exact swap_corollary_stackWithIndex_find_eq hmem0mem'
       rw [hfind0, hfind0', hframe0_eq]
 
-private theorem enter_corollary_objAt_eq_ref (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
+theorem enter_corollary_objAt_eq_ref (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
     (h : enter xf a cfg = some cfg') :
     ∀ ref : Reference, ref.objAt? cfg = ref.objAt? cfg' := by
   intro ref
@@ -103,7 +103,7 @@ private theorem enter_corollary_objAt_eq_ref (vcfg : ValidConfig cfg) (vcfg' : V
   | RId _ => rfl
   | OId oid => exact enter_corollary_objAt_eq vcfg vcfg' h oid
 
-private theorem enter_corollary_refStep_iff (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
+theorem enter_corollary_refStep_iff (vcfg : ValidConfig cfg) (vcfg' : ValidConfig cfg')
     (h : enter xf a cfg = some cfg') :
     ∀ x y, RefStep cfg x y ↔ RefStep cfg' x y := by
   intro x y
@@ -115,7 +115,7 @@ private theorem enter_corollary_refStep_iff (vcfg : ValidConfig cfg) (vcfg' : Va
 -- same index must (by index-injectivity) actually *be* `frame0`, whose own varMap is untouched
 -- and whose own region is never the entered one (`enter_corollary_regionId_ne`), so its heap
 -- lookup is untouched too.
-private theorem enter_corollary_frameRoot_iff (vcfg : ValidConfig cfg)
+theorem enter_corollary_frameRoot_iff (vcfg : ValidConfig cfg)
     (h : enter xf a cfg = some cfg')
     (frame0 : FrameWithIndex) (hframe0 : frame0 ∈ cfg.stackWithIndex) (start : Reference) :
     FrameRoot cfg frame0.index start ↔ FrameRoot cfg' frame0.index start := by
@@ -154,7 +154,7 @@ theorem enter_corollary_frameReferencable_iff (vcfg : ValidConfig cfg) (vcfg' : 
     exact ⟨start, (enter_corollary_frameRoot_iff vcfg h frame0 hframe0 start).mpr hroot,
       hrtg.mono (fun x y hxy => (enter_corollary_refStep_iff vcfg vcfg' h x y).mpr hxy)⟩
 
-private theorem enter_corollary_mem_index_lt {cfg : RuntimeConfig} {frame : FrameWithIndex}
+theorem enter_corollary_mem_index_lt {cfg : RuntimeConfig} {frame : FrameWithIndex}
     (hframe : frame ∈ cfg.stackWithIndex) : frame.index < cfg.stack.length := by
   obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hframe
   have : frame.index = n := by rw [← hfeq]
@@ -162,7 +162,7 @@ private theorem enter_corollary_mem_index_lt {cfg : RuntimeConfig} {frame : Fram
 
 -- Every frame in the post-mutation stack is either an old frame or exactly the freshly pushed one
 -- (whose own index is `cfg.stack.length`, strictly above every old frame's index).
-private theorem enter_corollary_stackWithIndex_cases
+theorem enter_corollary_stackWithIndex_cases
     {cfg cfg' : RuntimeConfig} {a : VarName}
     (rid : RegionId) (region : Region) (hcfg' : cfg' = { cfg with
       stack := cfg.stack ++ [{ regionId := rid, bridgeVar := a, objMap := ∅, varMap := ∅ }],
@@ -177,85 +177,3 @@ private theorem enter_corollary_stackWithIndex_cases
   · exact Or.inl hold
   · right; rw [hnew]
 
-theorem enter_cr3 : ValidReachableConfig cfg →
-  enter xf a cfg = some cfg' →
-  CR3 cfg' := by
-  intro vrcfg h
-  have vcfg := vrcfg.toValidConfig
-  have vcfg' := enter_valid vcfg h
-  obtain ⟨rid, region, _, hlookupRid, hclosed, hcfg'⟩ := enter_cases h
-  unfold CR3
-  intro frame hframeMem frame' hframe'Mem hlt oid hloc hreach
-  -- `frame` is always an old frame: nothing in cfg'.stackWithIndex has index > cfg.stack.length,
-  -- so `frame.index < frame'.index` rules out `frame` being the newly-pushed one.
-  have hframeCases := enter_corollary_stackWithIndex_cases rid region hcfg' frame hframeMem
-  have hframe'Cases := enter_corollary_stackWithIndex_cases rid region hcfg' frame' hframe'Mem
-  have hframeOld : frame ∈ cfg.stackWithIndex := by
-    rcases hframeCases with hold | hnew
-    · exact hold
-    · exfalso
-      rcases hframe'Cases with hold' | hnew'
-      · have hcontra := hlt.trans (enter_corollary_mem_index_lt hold')
-        rw [hnew] at hcontra
-        exact absurd hcontra (lt_irrefl _)
-      · rw [hnew, hnew'] at hlt
-        exact absurd hlt (lt_irrefl _)
-  clear hframeCases
-  -- `frame'` is either an old frame, or exactly the newly-pushed one.
-  rcases hframe'Cases with hframe'Old | hframe'New
-  · -- Old/old case: transport everything down to `cfg`, apply `vrcfg.cr3`, transport back up.
-    have hlocDown : (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId) := by
-      rw [enter_corollary_2 vcfg h oid]; exact hloc
-    have hreachDown : FrameReferencable cfg frame'.index (Reference.OId oid) :=
-      (enter_corollary_frameReferencable_iff vcfg vcfg' h frame' hframe'Old (Reference.OId oid)).mpr hreach
-    have hconcDown : FrameReferencable cfg frame.index (Reference.OId oid) :=
-      vrcfg.cr3 frame hframeOld frame' hframe'Old hlt oid hlocDown hreachDown
-    exact (enter_corollary_frameReferencable_iff vcfg vcfg' h frame hframeOld (Reference.OId oid)).mp hconcDown
-  · -- `frame'` is the fresh, empty frame: its only possible root is its own region's bridge
-    -- object, giving `RegionReferencable cfg' rid oid`, forcing `oid`'s region to be `rid` --
-    -- contradicting `frame.regionId ≠ rid` (frame is old) together with `hloc`'s region `frame.regionId`.
-    exfalso
-    rw [FrameReferencable_iff_reflTransGen] at hreach
-    obtain ⟨start, hroot, hrtg⟩ := hreach
-    have hnewFrameWI : ({ regionId := rid, bridgeVar := a, objMap := ∅, varMap := ∅, index := cfg.stack.length } :
-        FrameWithIndex) ∈ cfg'.stackWithIndex := by
-      rw [hcfg']
-      unfold RuntimeConfig.stackWithIndex
-      dsimp only
-      rw [List.mapIdx_concat]
-      exact List.mem_append_right _ (List.mem_singleton_self _)
-    have hframe'eq : frame' = { regionId := rid, bridgeVar := a, objMap := ∅, varMap := ∅, index := cfg.stack.length } :=
-      swap_corollary_stackWithIndex_index_inj hframe'Mem hnewFrameWI (by rw [hframe'New])
-    unfold FrameRoot at hroot
-    rw [hframe'eq] at hroot
-    dsimp only at hroot
-    rcases hroot with ⟨frame1, hframe1, hidx1, var, hlookup1⟩ | ⟨frame1, hframe1, hidx1, region1, hlookup1, hstart⟩
-    · have heq1 : frame1 = { regionId := rid, bridgeVar := a, objMap := ∅, varMap := ∅, index := cfg.stack.length } :=
-        swap_corollary_stackWithIndex_index_inj hframe1 hnewFrameWI hidx1
-      rw [heq1] at hlookup1
-      dsimp only at hlookup1
-      exact absurd hlookup1 (by simp)
-    · have heq1 : frame1 = { regionId := rid, bridgeVar := a, objMap := ∅, varMap := ∅, index := cfg.stack.length } :=
-        swap_corollary_stackWithIndex_index_inj hframe1 hnewFrameWI hidx1
-      rw [heq1] at hlookup1
-      dsimp only at hlookup1
-      rw [hcfg'] at hlookup1
-      dsimp only at hlookup1
-      rw [AList.lookup_insert] at hlookup1
-      injection hlookup1 with hregion1_eq
-      have hstart_eq : start = Reference.OId region.bridgeObjectId := by rw [hstart, ← hregion1_eq]
-      have hlookup1open : cfg'.heap.lookup rid = some { region with status := Status.Open } := by
-        rw [hcfg']; dsimp only; rw [AList.lookup_insert]
-      rw [hstart_eq] at hrtg
-      have hoidReach : RegionReferencable cfg' rid (Reference.OId oid) :=
-        (RegionReferencable_iff_reflTransGen cfg' rid (Reference.OId oid)).mpr
-          ⟨{ region with status := Status.Open }, hlookup1open, hrtg⟩
-      have hoidLoc := RegionReferencable_stays_in_region vcfg' hoidReach
-      rw [hoidLoc, Option.some.injEq, Location.Rgn.injEq] at hloc
-      exact enter_corollary_regionId_ne vcfg rid region hclosed hlookupRid frame hframeOld hloc.symm
-
-theorem enter_reachable_valid : ValidReachableConfig cfg →
-  enter xf a cfg = some cfg' →
-  ValidReachableConfig cfg' := by
-  intro vrcfg h
-  exact { enter_valid vrcfg.toValidConfig h with cr3 := enter_cr3 vrcfg h }

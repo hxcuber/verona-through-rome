@@ -3,8 +3,8 @@ import Gc.Model.Helpers
 import Gc.Model.Validity
 import Gc.Model.Preservation.Common
 import Gc.Reachability.Referencable.Semantics
-import Gc.Reachability.Referencable.Validity.Reachable
-import Gc.Reachability.Referencable.Corollaries.Common
+import Gc.Reachability.Referencable.Basic
+import Gc.Reachability.Referencable.Lemmas.Common
 
 -- Unpacks a `Rgn`-located `objAt?` success into the concrete region and objMap lookup witnessing
 -- it -- used to line up two `Rgn`-located objects against the *same* region record before

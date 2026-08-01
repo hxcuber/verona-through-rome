@@ -6,7 +6,7 @@ import Gc.Model.Theorems
 import Mathlib.Data.List.Infix
 
 -- Generic, non-operation-specific facts reused across several `Preservation` files (both the
--- `Gc/Model/Preservation/*.lean` layer and `Gc/Reachability/Referencable/Validity/Preservation/*.lean`'s CR3
+-- `Gc/Model/Preservation/*.lean` layer and `Gc/Reachability/Referencable/CR3/*.lean`'s CR3
 -- layer). Each of these originally lived in whichever operation's own file first needed it
 -- (`heap_objectIds_of_mem` in `Exit.lean`, the `stackWithIndex` pair in `Swap.lean`,
 -- `regionId_unique_index` in `Merge.lean`), which meant unrelated operations had to import that

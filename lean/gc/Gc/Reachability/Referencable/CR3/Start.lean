@@ -1,5 +1,5 @@
 import Gc.Model.Start
-import Gc.Reachability.Referencable.Validity.Reachable
+import Gc.Reachability.Referencable.Basic
 
 theorem RuntimeConfig.start_cr3 : CR3 RuntimeConfig.start := by
   unfold CR3
