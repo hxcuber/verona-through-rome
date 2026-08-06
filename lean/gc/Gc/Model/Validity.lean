@@ -41,21 +41,9 @@ def S3 (cfg : RuntimeConfig) : Prop :=
     ∃ frame' ∈ cfg.stackWithIndex,
       frame'.regionId = rid' ∧ frame'.index <= frame.index
 
--- No dangling pointers: every object reference stored anywhere (a stack frame's varMap/objMap,
--- or a heap region's objMap) actually points at a currently allocated object id. Unlike H2/H3/S2/S3,
--- which only constrain refs that are already known to resolve somewhere, HS1 is what rules out a
--- ref value coincidentally matching an id that hasn't been allocated yet (e.g. a not-yet-fresh
--- RuntimeConfig.freshObjectId), which would otherwise let a later object creation retroactively
--- "resolve" a stale/unrelated reference.
 def HS1 (cfg : RuntimeConfig) : Prop :=
   ∀ oid, Reference.OId oid ∈ cfg.refs → oid ∈ cfg.objectIds
 
--- No dangling region pointers: every region reference stored anywhere (a stack frame's varMap/objMap,
--- or a heap region's objMap) actually points at a currently allocated region id. Mirrors HS1 but for
--- Reference.RId/RegionId instead of Reference.OId/ObjectId, and for exactly the same reason: after
--- decoupling RuntimeConfig.freshRegionId from RuntimeConfig.freshObjectId, nothing else rules out a
--- stale/dangling RId ref value coincidentally matching a not-yet-allocated freshRegionId, which would
--- otherwise let a later makeRegion retroactively "resolve" a stale/unrelated reference.
 def HS2 (cfg : RuntimeConfig) : Prop :=
   ∀ rid, Reference.RId rid ∈ cfg.refs → rid ∈ cfg.heap.keys
 
