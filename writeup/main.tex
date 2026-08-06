@@ -1,0 +1,258 @@
+\documentclass[acmsmall,nonacm,screen]{acmart}
+
+\settopmatter{printacmref=false}
+\setcopyright{none}
+\renewcommand\footnotetextcopyrightpermission[1]{}
+
+\citestyle{acmauthoryear}
+
+\usepackage{mathpartir}   % \mathpar / \inferrule for inductive relation rules
+\usepackage{placeins}
+
+\newcommand{\romem}{$Rome^{M}$}
+\newcommand{\romam}{$Roma^{M}$}
+\newcommand{\reggiom}{$Reggio^{M}$}
+
+\begin{document}
+
+\title{Verona through Rome}
+
+\author{Hoang Nguyen}
+% \affiliation{%
+%   \institution{Imperial College London}
+%   \city{London}
+%   \country{United Kingdom}
+% }
+\email{hoang4j@gmail.com}
+
+\begin{abstract}
+\end{abstract}
+
+\maketitle
+
+\section{Introduction}
+
+We present \romam, a more complete, fully formalized version of \romem.
+
+\section{Model}
+
+The configuration and semantics remain unchanged from the report. They can be found in the appendix.
+
+\section{Invariants}
+\label{sec:invariants}
+We present the invariants again both informally and formally, as there have been invariants added:
+
+\begin{description}
+  \item[L1] Objects are globally unique.
+  \item[L2] Every frame in the stack contains an open region.
+  \item[H1] Every region contains its bridge object.
+  \item[H2] There is at most one reference to a region.
+  \item[H3] References from within a region to other objects remain within that region.
+  \item[S1] Regions on the stack are unique.
+  \item[S2] Every reference from a frame into another frame must travel to a frame no later than the origin frame.
+  \item[S3] Every reference from a frame into a region must be the region of a frame no later than the origin frame.
+  \item[HS1] Every reference to an object must be to an object that exists in the configuration.
+  \item[HS2] Every reference to a region must be to a region that exists in the configuration.
+\end{description}
+
+% --- Pattern 1: a set-builder / cardinality-style invariant over a config ---
+\begin{definition}[Name]
+\label{def:example-invariant}
+A configuration $\sigma$ satisfies \textnormal{P} if
+\[
+  \forall x.\quad
+  \bigl|\{\, y \mid y \in X(\sigma),\ y = x \,\}\bigr| \le 1.
+\]
+\end{definition}
+
+% --- Pattern 2: a universally-quantified implication invariant ---
+\begin{definition}[Name]
+\label{def:example-invariant-2}
+\[
+  \forall x \in X(\sigma).\ \exists y.\ P(x, y) \land Q(y).
+\]
+\end{definition}
+
+\section{Reachability}
+\label{sec:reachability}
+
+% --- Pattern 3: an inductive step relation, via mathpartir's inferrule ---
+\begin{definition}[Step relation]
+\label{def:example-step}
+\begin{mathpar}
+\inferrule
+  {P(\sigma, a) \\ Q(a, f, b)}
+  {\sigma \vdash a \xrightarrow{f} b}
+\end{mathpar}
+\end{definition}
+
+% --- Pattern 4: closure of a relation, defined via iff ---
+\begin{definition}[Reachable]
+\label{def:example-reachable}
+\[
+  \mathit{Reachable}(\sigma, i, b)
+  \iff
+  \exists a.\ \mathit{Root}(\sigma, i, a) \land \sigma \vdash a \xrightarrow{*} b.
+\]
+\end{definition}
+
+% --- Pattern 7: a two-branch step relation, one rule per case, with a side
+% condition gating the second branch (cf. an OId-step vs.\ an RId-step that
+% only fires when some guard holds). Two \inferrule's inside one \mathpar
+% render side by side; \\ inside the premises stacks them vertically. ---
+\begin{definition}[Two-branch step relation]
+\label{def:example-step-2branch}
+\begin{mathpar}
+\inferrule[Step-Object]
+  {P(\sigma, a) = c \\ c.f = b}
+  {\sigma \vdash a \xrightarrow{r} b}
+
+\inferrule[Step-Region]
+  {Q(\sigma, a) = c \\ \mathit{guard}(c) \\ b = \mathit{target}(c)}
+  {\sigma \vdash a \xrightarrow{r} b}
+\end{mathpar}
+\end{definition}
+
+% --- Pattern 8: an inductive relation presented as its own constructors
+% (base case(s) + closure case), rather than collapsed straight to the
+% \exists\,\mathrm{Root} \land \to^* form of Pattern 4. Prefer this when the
+% distinct roots/base cases are worth keeping visible; state the Pattern-4
+% form afterward as a derived remark/lemma if useful. ---
+\begin{definition}[Inductively-closed reachability]
+\label{def:example-inductive-reachable}
+\begin{mathpar}
+\inferrule[Base-A]
+  {x \in X(\sigma) \\ P(x) = a}
+  {\mathit{Reach}(\sigma, i, a)}
+
+\inferrule[Base-B]
+  {x \in X(\sigma) \\ Q(x) = a}
+  {\mathit{Reach}(\sigma, i, a)}
+
+\inferrule[Step]
+  {\sigma \vdash a \xrightarrow{f} b \\ \mathit{Reach}(\sigma, i, a)}
+  {\mathit{Reach}(\sigma, i, b)}
+\end{mathpar}
+\end{definition}
+
+% --- Pattern 5: a theorem statement, informal-prose style ---
+\begin{theorem}[Name]
+\label{thm:example}
+Statement.
+\end{theorem}
+
+% --- Pattern 6: a theorem with explicit hypotheses/conclusion via cases-style layout ---
+\begin{theorem}[Name]
+\label{thm:example-2}
+Let $\sigma$ be such that $P(\sigma)$. Then
+\[
+  Q(\sigma) \implies R(\sigma).
+\]
+\end{theorem}
+
+\section{Related Work}
+
+\section{Conclusion}
+
+\appendix
+\section{Configuration}
+{\setlength{\arraycolsep}{2pt}
+\[
+\begin{array}{rcl}
+  RegionId, ObjectId, Index & \subseteq & Int \\
+  VarName, FieldName & \subseteq & String \\
+  &&\\
+  RuntimeConfiguration & \triangleq & Heap \times Stack\\
+  &&\\
+  Heap & \triangleq & RegionId \rightharpoonup Region\\
+  Region & \triangleq & ObjectId\times ObjMap \times Status\\
+  Status & \triangleq & Open \ | \ Closed\\
+  &&\\
+  Stack & \triangleq & List \ Frame\\
+  Frame & \triangleq & RegionId \times VarName \times ObjMap \times VarMap \times Index\\
+  &&\\
+  ObjMap & \triangleq & ObjectId \rightharpoonup FieldMap\\
+  &&\\
+  Object & \triangleq & FieldMap\\
+  FieldMap & \triangleq & FieldName \rightharpoonup Reference\\
+  VarMap & \triangleq & VarName \rightharpoonup Reference\\
+  &&\\
+  Reference & \triangleq & \mathsf{RId}(RegionId) \ | \ \mathsf{OId}(ObjectId)
+\end{array}
+\]}
+
+\section{Operational Semantics}
+\begin{mathpar}
+  \inferrule* [lab=var-asgn-stack]
+    {F = (rid, bvar, omap, vmap, fid) \\ \texttt{x} \ne bvar \\ resolveV(\texttt{x}, \langle (S :: F), H \rangle) = \epsilon \\ resolveFA(\texttt{y.f}, \langle (S :: F), H \rangle) = \mathsf{OId}(oid)}
+    {\langle (S :: F), H \rangle \xrightarrow{\texttt{x := y.f}} \langle S :: (rid, bvar, omap, vmap[\texttt{x} \mapsto \mathsf{OID}(oid)], fid), H \rangle}
+  \\
+  \inferrule* [lab=var-asgn-bridge]
+    {F = (rid, \texttt{x}, \_, \_, \_) \\ resolveFA(\texttt{y.f}, \langle (S :: F), H \rangle) = \mathsf{OId}(oid) \\ \mathsf{OId}(oid).loc(\langle (S :: F), H \rangle) = \mathsf{Rgn}(rid) \\ H(rid) = (boid, omap, status)}
+    {\langle (S :: F), H \rangle \xrightarrow{\texttt{x := y.f}} \langle (S :: F), H[rid \mapsto (oid, omap, status)] \rangle}
+  \\
+\end{mathpar}
+\begin{mathpar}
+  \inferrule* [lab=field-asgn-stack]
+    {F = (rid, bvar, omap, vmap, fid) \\ resolveV(\texttt{x}, \langle (S :: F), H \rangle) = \mathsf{OId}(oid) \\ \mathsf{OId}(oid).loc(\langle (S :: F), H \rangle) = \mathsf{Stk}(fid) \\ resolveV(\texttt{y}, \langle (S :: F), H \rangle) = \mathsf{OId}(oid') \\ omap(oid) = obj}
+    {\langle (S :: F), H \rangle \xrightarrow{\texttt{x.f := y}} \langle (S :: (rid, bvar, omap[oid \mapsto obj[\texttt{f} \mapsto OId(oid')]], vmap, fid)), H \rangle}
+  \\
+  \inferrule* [lab=field-asgn-region]
+    {F = (rid, \_, \_, \_, \_) \\ resolveV(\texttt{x}, \langle (S :: F), H \rangle) = \mathsf{OId}(oid) \\ \mathsf{OId}(oid).loc(\langle (S :: F), H \rangle) = \mathsf{Rgn}(rid) \\ resolveV(\texttt{y}, \langle (S :: F), H \rangle) = \mathsf{OId}(oid') \\ \mathsf{OId}(oid').loc(\langle (S :: F), H \rangle) = \mathsf{Rgn}(rid) \\ H(rid) = (boid, omap, Open) \\ omap(oid) = obj }
+    {\langle (S :: F), H \rangle \xrightarrow{\texttt{x.f := y}} \langle (S :: F), H[rid \mapsto (boid, omap[oid \mapsto obj[\texttt{f} \mapsto \mathsf{OId}(oid')]], Open)] \rangle}
+  \\
+\end{mathpar}
+\begin{mathpar}
+  \inferrule* [lab=swap-stack]
+    {F = (rid, bvar, omap, vmap, fid) \\ \texttt{x} \ne bvar \\ vmap(\texttt{x}) = \texttt{x}ref \\ resolveV(\texttt{y}, \langle (S :: F), H \rangle) = \mathsf{OId}(\texttt{y}oid) \\ resolveFA(\texttt{y.f}, \langle (S :: F), H \rangle) = \texttt{yf}ref \\ \mathsf{OId}(\texttt{y}oid).loc(\langle (S :: F), H \rangle) = \mathsf{Stk}(fid) \\ omap(\texttt{y}oid) = obj \\ omap' = omap[\texttt{y}oid \mapsto obj[\texttt{f} \mapsto \texttt{x}ref]] \\ vmap' = vmap[\texttt{x} \mapsto \texttt{yf}ref] \\ F' = (rid, bvar, omap', vmap')}
+    {\langle (S :: F), H \rangle \xrightarrow{\texttt{x.f := y}} \langle (S :: F'), H \rangle}
+  \\
+  \inferrule* [lab=swap-region-object]
+    {F = (rid, bvar, fomap, vmap, fid) \\ \texttt{x} \ne bvar \\ vmap(\texttt{x}) = \mathsf{OId}(\texttt{x}oid) \\ resolveV(\texttt{y}, \langle (S :: F), H \rangle) = \mathsf{OId}(\texttt{y}oid) \\ resolveFA(\texttt{y.f}, \langle (S :: F), H \rangle) = \texttt{yf}ref \\ \{\mathsf{OId}(\texttt{x}oid), \mathsf{OId}(\texttt{y}oid)\}.loc(\langle (S :: F), H \rangle) = \mathsf{Rgn}(rid) \\ H(rid) = (boid, romap, Open) \\ romap(\texttt{y}oid) = obj \\ obj' = obj[\texttt{f} \mapsto \mathsf{OId}(\texttt{x}oid)] \\ R' = (boid, romap[\texttt{y}oid \mapsto obj'], Open) \\ F' = (rid, bvar, fomap, vmap[\texttt{x} \mapsto \texttt{yf}ref])}
+    {\langle (S :: F), H \rangle \xrightarrow{\texttt{x.f := y}} \langle (S :: F'), H[rid \mapsto R'] \rangle}
+  \\
+  \inferrule* [lab=swap-region-region]
+    {F = (rid, bvar, fomap, vmap, fid) \\ \texttt{x} \ne bvar \\ vmap(\texttt{x}) = \mathsf{RId}(\texttt{x}rid) \\ resolveV(\texttt{y}, \langle (S :: F), H \rangle) = \mathsf{OId}(\texttt{y}oid) \\ resolveFA(\texttt{y.f}, \langle (S :: F), H \rangle) = \texttt{yf}ref \\ \mathsf{OId}(\texttt{y}oid).loc(\langle (S :: F), H \rangle) = \mathsf{Rgn}(rid) \\ H(xrid) = (\_, \_, Closed) \\ H(rid) = (boid, romap, Open) \\ romap(\texttt{y}oid) = obj \\ obj' = obj[\texttt{f} \mapsto \mathsf{RId}(\texttt{x}rid)] \\ R' = (boid, romap[\texttt{y}oid \mapsto obj'], Open) \\ F' = (rid, bvar, fomap, vmap[\texttt{x} \mapsto \texttt{yf}ref])}
+    {\langle (S :: F), H \rangle \xrightarrow{\texttt{x.f := y}} \langle (S :: F'), H[rid \mapsto R'] \rangle}
+  \\
+  \inferrule* [lab=swap-region-bridge]
+    {F = (rid, bvar, fomap, vmap, fid) \\ \texttt{x} = bvar \\ resolveV(\texttt{y}, \langle (S :: F), H \rangle) = \mathsf{OId}(\texttt{y}oid) \\ resolveFA(\texttt{y.f}, \langle (S :: F), H \rangle) = \mathsf{OId}(\texttt{yf}oid) \\ \{\mathsf{OId}(\texttt{y}oid),\mathsf{OId}(\texttt{yf}oid)\}.loc(\langle (S :: F), H \rangle) = \mathsf{Rgn}(rid) \\ H(rid) = (boid, romap, Open) \\ romap(\texttt{y}oid) = obj \\ obj' = obj[\texttt{f} \mapsto \mathsf{OId}(boid)] \\ R' = (\texttt{yf}oid, romap[\texttt{y}oid \mapsto obj'], Open)}
+    {\langle (S :: F), H \rangle \xrightarrow{\texttt{x.f := y}} \langle (S :: F), H[rid \mapsto R'] \rangle}
+  \\
+\end{mathpar}
+\begin{mathpar}
+  \inferrule* [lab=enter]
+    {F = (rid, bvar, fomap, vmap, fid) \\ resolveFA(\texttt{x.f}, \langle S :: F, H \rangle) = \mathsf{RId}(rid') \\ H(rid') = (boid, romap, Closed) \\ F' = (rid', \texttt{a}, \emptyset, \emptyset, fid + 1)}
+    {\langle (S :: F), H \rangle \xrightarrow{\texttt{enter x.f a}} \langle (S :: F :: F'), H[rid' \mapsto (boid, romap, Open)] \rangle}
+  \\
+  \inferrule* [lab=exit]
+    {F = (rid, \_, \_, \_, \_) \\ H(rid) = (boid, omap, Open)}
+    {\langle (S :: F' :: F), H \rangle \xrightarrow{\texttt{exit}} \langle S :: F', H[rid \mapsto (boid, omap, Closed)] \rangle}
+  \\
+\end{mathpar}
+\begin{mathpar}
+  \inferrule* [lab=make-obj-stack]
+    {F = (rid, bvar, omap, vmap, fid) \\ \langle (S :: F), H \rangle.freshObjectId = oid}
+    {\langle (S :: F), H \rangle \xrightarrow{\texttt{makeObjStack x}} \langle S :: (rid, bvar, omap[oid \mapsto \emptyset], vmap[\texttt{x} \mapsto \mathsf{OId}(oid)], fid), H \rangle}
+  \\
+  \inferrule* [lab=make-obj-region]
+    {F = (rid, bvar, fomap, vmap, fid) \\ \langle (S :: F), H \rangle.freshObjectId = oid \\ H(rid) = (boid, romap, Open) \\ R = (boid, romap[oid \mapsto \emptyset], Open)}
+    {\langle (S :: F), H \rangle \xrightarrow{\texttt{makeObjRegion x}} \langle S :: (rid, bvar, fomap, vmap[\texttt{x} \mapsto \mathsf{OId}(oid)], fid), H[rid \mapsto R] \rangle}
+  \\
+  \inferrule* [lab=make-region]
+    {F = (rid, bvar, omap, vmap, fid) \\ \langle (S :: F), H \rangle.freshObjectId = oid' \\ oid'.toRegionId = rid' \\ R' = (oid', [oid' \mapsto \emptyset], Closed) \\ F' = (rid, bvar, omap, vmap[\texttt{x} \mapsto \mathsf{RId}(rid')], fid)}
+    {\langle (S :: F), H \rangle \xrightarrow{\texttt{makeRegion x}} \langle S :: F', H[rid \mapsto R'] \rangle}
+  \\
+\end{mathpar}
+\begin{mathpar}
+  \inferrule* [lab=merge]
+    {F = (rid, bvar, omap, vmap, fid) \\ vmap(\texttt{x}) = \mathsf{RId}(rid') \\ H(rid) = (boid, romap, Open) \\ H(rid') = (boid', romap', Closed) \\ F' = (rid, bvar, omap, vmap[\texttt{x} \mapsto boid'], fid) \\ R = (boid, romap \cup romap', Open)}
+    {\langle (S :: F), H \rangle \xrightarrow{\texttt{merge x}} \langle S :: F', H[rid' \mapsto \epsilon][rid \mapsto R] \rangle}
+\end{mathpar}
+
+\newpage
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{refs}
+
+\end{document}
