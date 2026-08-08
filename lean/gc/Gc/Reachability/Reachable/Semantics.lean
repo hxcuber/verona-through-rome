@@ -6,14 +6,7 @@ def ReachableStep (cfg : RuntimeConfig) : Reference → Reference → Prop
     ∃ region, cfg.heap.lookup rid = some region ∧
       region.status = Status.Closed ∧ b = Reference.OId region.bridgeObjectId
   | Reference.OId oid, b =>
-    ∃ obj, (do
-        let loc ← (Reference.OId oid).loc? cfg
-        match loc with
-        | Location.Rgn rid => (cfg.heap.lookup rid).bind (fun region => region.objMap.lookup oid)
-        | Location.Stk fid =>
-          (cfg.stackWithIndex.find? (fun frame => frame.index == fid)).bind
-            (fun frame => frame.objMap.lookup oid)) = some obj ∧
-      obj.refs.contains b
+    ∃ obj, (Reference.OId oid).objAt? cfg = some obj ∧ obj.refs.contains b
 
 theorem ReachableStep_rid_iff (cfg : RuntimeConfig) (rid : RegionId) (b : Reference) :
     ReachableStep cfg (Reference.RId rid) b ↔
@@ -23,11 +16,8 @@ theorem ReachableStep_rid_iff (cfg : RuntimeConfig) (rid : RegionId) (b : Refere
 
 theorem ReachableStep_oid_iff (cfg : RuntimeConfig) (oid : ObjectId) (b : Reference) :
     ReachableStep cfg (Reference.OId oid) b ↔
-      ∃ obj, (Reference.OId oid).objAt? cfg = some obj ∧ obj.refs.contains b := by
-  simp only [ReachableStep, Reference.objAt?]
-  cases (Reference.OId oid).loc? cfg with
-  | none => rfl
-  | some loc => cases loc <;> rfl
+      ∃ obj, (Reference.OId oid).objAt? cfg = some obj ∧ obj.refs.contains b :=
+  Iff.rfl
 
 inductive RegionReachable : RuntimeConfig → RegionId → Reference → Prop where
 | bridge : cfg.heap.lookup rid = some region →
