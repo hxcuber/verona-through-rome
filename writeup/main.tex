@@ -12,6 +12,8 @@
 \newcommand{\romem}{$Rome^{M}$}
 \newcommand{\romam}{$Roma^{M}$}
 \newcommand{\reggiom}{$Reggio^{M}$}
+\newcommand{\inN}{\!\in\!}
+\newcommand{\tick}{\checkmark}
 
 \begin{document}
 
@@ -32,123 +34,109 @@
 
 \section{Introduction}
 
-We present \romam, a more complete, fully formalized version of \romem.
+We present \romam, a more complete, fully formalized version of \romem \cite{nguyen_verona_2026}.
 
 \section{Model}
 
-The configuration and semantics remain unchanged from the report. They can be found in the appendix.
+The configuration remains unchanged from the report. We make one change to the semantics, specifically within \texttt{makeRegion}:
+
+\begin{mathpar}
+  \inferrule* [lab=make-region]
+    {F = (rid, bvar, omap, vmap, fid) \\ \langle (S :: F), H \rangle.freshObjectId = oid' \\ \mathbf{\langle (S :: F), H \rangle.freshRegionId = rid'} \\ R' = (oid', [oid' \mapsto \emptyset], Closed) \\ F' = (rid, bvar, omap, vmap[\texttt{x} \mapsto \mathsf{RId}(rid')], fid)}
+    {\langle (S :: F), H \rangle \xrightarrow{\texttt{makeRegion x}} \langle S :: F', H[rid \mapsto R'] \rangle}
+\end{mathpar}
+
+In the report, the \texttt{regionId} would coincide with the \texttt{objectId} of the bridge object, but here we've chosen to completely decouple them. The original reasoning behind this was to future-proof for deallocation, but in writing this we found out that the argument didn't hold, and it would've been fine to leave \texttt{makeRegion} as before. Luckily, this doesn't change much, it only means that we need to prove regions are unique separately from objects, as opposed to using a combined argument before.
 
 \section{Invariants}
 \label{sec:invariants}
-We present the invariants again both informally and formally, as there have been invariants added:
+We add two new invariants, presented here informally and formally.
 
-\begin{description}
-  \item[L1] Objects are globally unique.
-  \item[L2] Every frame in the stack contains an open region.
-  \item[H1] Every region contains its bridge object.
-  \item[H2] There is at most one reference to a region.
-  \item[H3] References from within a region to other objects remain within that region.
-  \item[S1] Regions on the stack are unique.
-  \item[S2] Every reference from a frame into another frame must travel to a frame no later than the origin frame.
-  \item[S3] Every reference from a frame into a region must be the region of a frame no later than the origin frame.
-  \item[HS1] Every reference to an object must be to an object that exists in the configuration.
-  \item[HS2] Every reference to a region must be to a region that exists in the configuration.
-\end{description}
-
-% --- Pattern 1: a set-builder / cardinality-style invariant over a config ---
-\begin{definition}[Name]
-\label{def:example-invariant}
-A configuration $\sigma$ satisfies \textnormal{P} if
-\[
-  \forall x.\quad
-  \bigl|\{\, y \mid y \in X(\sigma),\ y = x \,\}\bigr| \le 1.
-\]
+\begin{definition}[HS1]
+  Every reference to an object must be to an object that exists in the configuration.
+  \[\forall oid : [\mathsf{OId}(oid) \inN \langle S, H \rangle.refs \implies oid \inN \langle S, H \rangle.objectIds]\]
 \end{definition}
 
-% --- Pattern 2: a universally-quantified implication invariant ---
-\begin{definition}[Name]
-\label{def:example-invariant-2}
-\[
-  \forall x \in X(\sigma).\ \exists y.\ P(x, y) \land Q(y).
-\]
+\begin{definition}[HS2]
+  Every reference to a region must be to a region that exists in the configuration.
+  \[\forall rid : [\mathsf{RId}(rid) \inN \langle S, H \rangle.refs \implies rid \inN dom(H)]\]
 \end{definition}
+
+These came up in the process of proving \textit{S2} and \textit{S3} for \texttt{makeObjStack}, \texttt{makeObjRegion}, and \texttt{makeRegion}. This stems from the fact that our \texttt{freshObjectId} and \texttt{freshRegionId} functions only take into account the \texttt{Ids} used as keys when creating a new \texttt{Id}. Thus, without this invariant, it is technically possible\footnote{Although it isn't possible within the context of an operational semantics starting with the starting configuration, which is why we were able to prove it without altering the operational semantics.} for a configuration to contain a dangling reference to an \texttt{objectId} or \texttt{regionId} that does not exist within the configuration, but is then inserted via one of the three \texttt{make} operations.
 
 \section{Reachability}
 \label{sec:reachability}
 
-% --- Pattern 3: an inductive step relation, via mathpartir's inferrule ---
-\begin{definition}[Step relation]
-\label{def:example-step}
-\begin{mathpar}
-\inferrule
-  {P(\sigma, a) \\ Q(a, f, b)}
-  {\sigma \vdash a \xrightarrow{f} b}
-\end{mathpar}
+\begin{definition}[Stack-reachable]
+  An object or region is stack-reachable if it is frame-reachable from any frame in the stack.
+  \begin{mathpar}
+    \inferrule*
+      {\langle S, H \rangle \vdash FReachable(\_, a)}
+      {\langle S, H \rangle \vdash SReachable(a)}
+  \end{mathpar}
 \end{definition}
 
-% --- Pattern 4: closure of a relation, defined via iff ---
-\begin{definition}[Reachable]
-\label{def:example-reachable}
-\[
-  \mathit{Reachable}(\sigma, i, b)
-  \iff
-  \exists a.\ \mathit{Root}(\sigma, i, a) \land \sigma \vdash a \xrightarrow{*} b.
-\]
+\begin{definition}[Frame-reachable]
+  An object or region is frame-reachable if
+  \begin{mathpar}
+    \inferrule*[lab=var]
+      {F = (\_, \_, \_, vmap, fid) \\ vmap(\_) = a}
+      {\langle S :: F, H \rangle \vdash FReachable(fid, a)}
+
+    \inferrule*[lab=bridge]
+      {F = (rid, \_, \_, \_, fid) \\ H(rid) = (boid, \_, \_)}
+      {\langle S :: F, H \rangle \vdash FReachable(fid, \mathsf{OId}(boid))}
+
+    \inferrule*[lab=step]
+      {\langle S, H \rangle \vdash FReachable(fid, a) \\ \langle S, H \rangle \vdash a \to b}
+      {\langle S, H \rangle \vdash FReachable(fid, b)}
+  \end{mathpar}
 \end{definition}
 
-% --- Pattern 7: a two-branch step relation, one rule per case, with a side
-% condition gating the second branch (cf. an OId-step vs.\ an RId-step that
-% only fires when some guard holds). Two \inferrule's inside one \mathpar
-% render side by side; \\ inside the premises stacks them vertically. ---
-\begin{definition}[Two-branch step relation]
-\label{def:example-step-2branch}
-\begin{mathpar}
-\inferrule[Step-Object]
-  {P(\sigma, a) = c \\ c.f = b}
-  {\sigma \vdash a \xrightarrow{r} b}
+\begin{definition}[Region-reachable]
+  An object or region is region-reachable if
+  \begin{mathpar}
+    \inferrule*[lab=bridge]
+      {H(rid) = (boid, \_, \_)}
+      {\langle S, H \rangle \vdash RReachable(rid, \mathsf{OId}(boid))}
 
-\inferrule[Step-Region]
-  {Q(\sigma, a) = c \\ \mathit{guard}(c) \\ b = \mathit{target}(c)}
-  {\sigma \vdash a \xrightarrow{r} b}
-\end{mathpar}
+    \inferrule*[lab=step]
+      {\langle S, H \rangle \vdash RReachable(rid, a) \\ \langle S, H \rangle \vdash a \to b}
+      {\langle S, H \rangle \vdash RReachable(rid, b)}
+  \end{mathpar}
 \end{definition}
 
-% --- Pattern 8: an inductive relation presented as its own constructors
-% (base case(s) + closure case), rather than collapsed straight to the
-% \exists\,\mathrm{Root} \land \to^* form of Pattern 4. Prefer this when the
-% distinct roots/base cases are worth keeping visible; state the Pattern-4
-% form afterward as a derived remark/lemma if useful. ---
-\begin{definition}[Inductively-closed reachability]
-\label{def:example-inductive-reachable}
-\begin{mathpar}
-\inferrule[Base-A]
-  {x \in X(\sigma) \\ P(x) = a}
-  {\mathit{Reach}(\sigma, i, a)}
+\begin{definition}[Reachable-step]
+  \begin{mathpar}
+    \inferrule*[lab=obj-step]
+      {\mathsf{OId}(oid).objAt(\langle S, H \rangle) = obj \\ b \inN obj.refs }
+      {\langle S, H \rangle \vdash \mathsf{OId}(oid) \to b}
 
-\inferrule[Base-B]
-  {x \in X(\sigma) \\ Q(x) = a}
-  {\mathit{Reach}(\sigma, i, a)}
-
-\inferrule[Step]
-  {\sigma \vdash a \xrightarrow{f} b \\ \mathit{Reach}(\sigma, i, a)}
-  {\mathit{Reach}(\sigma, i, b)}
-\end{mathpar}
+    \inferrule*[lab=region-step]
+      {H(rid) = (boid, \_, Closed)}
+      {\langle S, H \rangle \vdash \mathsf{RId}(rid) \to \mathsf{OId}(boid)}
+  \end{mathpar}
 \end{definition}
 
-% --- Pattern 5: a theorem statement, informal-prose style ---
-\begin{theorem}[Name]
-\label{thm:example}
-Statement.
+\begin{theorem}
+  \[\langle S, H \rangle \vdash RReachable(rid, a) \iff \exists boid : [H(rid) = (boid, \_, \_) \wedge \mathsf{OId}(boid) \xrightarrow{*} a]\]
 \end{theorem}
 
-% --- Pattern 6: a theorem with explicit hypotheses/conclusion via cases-style layout ---
-\begin{theorem}[Name]
-\label{thm:example-2}
-Let $\sigma$ be such that $P(\sigma)$. Then
-\[
-  Q(\sigma) \implies R(\sigma).
-\]
+\begin{theorem}
+  \[\langle S, H \rangle \vdash FReachable(fid, a) \iff \exists start : [\langle S, H \rangle \vdash FRoot(fid, start) \wedge start \xrightarrow{*} a]\]
 \end{theorem}
+
+\begin{definition}[Frame-root]
+  \begin{mathpar}
+    \inferrule*[lab=var]
+      {F = (\_, \_, \_, vmap, fid) \\ vmap(\_) = a}
+      {\langle S :: F, H \rangle \vdash FRoot(fid, a)}
+
+    \inferrule*[lab=bridge]
+      {F = (rid, \_, \_, \_, fid) \\ H(rid) = (boid, \_, \_)}
+      {\langle S :: F, H \rangle \vdash FRoot(fid, \mathsf{OId}(boid))}
+  \end{mathpar}
+\end{definition}
 
 \section{Related Work}
 
@@ -240,7 +228,7 @@ Let $\sigma$ be such that $P(\sigma)$. Then
     {\langle (S :: F), H \rangle \xrightarrow{\texttt{makeObjRegion x}} \langle S :: (rid, bvar, fomap, vmap[\texttt{x} \mapsto \mathsf{OId}(oid)], fid), H[rid \mapsto R] \rangle}
   \\
   \inferrule* [lab=make-region]
-    {F = (rid, bvar, omap, vmap, fid) \\ \langle (S :: F), H \rangle.freshObjectId = oid' \\ oid'.toRegionId = rid' \\ R' = (oid', [oid' \mapsto \emptyset], Closed) \\ F' = (rid, bvar, omap, vmap[\texttt{x} \mapsto \mathsf{RId}(rid')], fid)}
+    {F = (rid, bvar, omap, vmap, fid) \\ \langle (S :: F), H \rangle.freshObjectId = oid' \\ \langle (S :: F), H \rangle.freshRegionId = rid' \\ R' = (oid', [oid' \mapsto \emptyset], Closed) \\ F' = (rid, bvar, omap, vmap[\texttt{x} \mapsto \mathsf{RId}(rid')], fid)}
     {\langle (S :: F), H \rangle \xrightarrow{\texttt{makeRegion x}} \langle S :: F', H[rid \mapsto R'] \rangle}
   \\
 \end{mathpar}
@@ -249,6 +237,99 @@ Let $\sigma$ be such that $P(\sigma)$. Then
     {F = (rid, bvar, omap, vmap, fid) \\ vmap(\texttt{x}) = \mathsf{RId}(rid') \\ H(rid) = (boid, romap, Open) \\ H(rid') = (boid', romap', Closed) \\ F' = (rid, bvar, omap, vmap[\texttt{x} \mapsto boid'], fid) \\ R = (boid, romap \cup romap', Open)}
     {\langle (S :: F), H \rangle \xrightarrow{\texttt{merge x}} \langle S :: F', H[rid' \mapsto \epsilon][rid \mapsto R] \rangle}
 \end{mathpar}
+
+% --- Pattern 1: a set-builder / cardinality-style invariant over a config ---
+\begin{definition}[Name]
+\label{def:example-invariant}
+A configuration $\sigma$ satisfies \textnormal{P} if
+\[
+  \forall x.\quad
+  \bigl|\{\, y \mid y \in X(\sigma),\ y = x \,\}\bigr| \le 1.
+\]
+\end{definition}
+
+% --- Pattern 2: a universally-quantified implication invariant ---
+\begin{definition}[Name]
+\label{def:example-invariant-2}
+\[
+  \forall x \in X(\sigma).\ \exists y.\ P(x, y) \land Q(y).
+\]
+\end{definition}
+
+% --- Pattern 3: an inductive step relation, via mathpartir's inferrule ---
+\begin{definition}[Step relation]
+\label{def:example-step}
+\begin{mathpar}
+\inferrule
+  {P(\sigma, a) \\ Q(a, f, b)}
+  {\sigma \vdash a \xrightarrow{f} b}
+\end{mathpar}
+\end{definition}
+
+% --- Pattern 4: closure of a relation, defined via iff ---
+\begin{definition}[Reachable]
+\label{def:example-reachable}
+\[
+  \mathit{Reachable}(\sigma, i, b)
+  \iff
+  \exists a.\ \mathit{Root}(\sigma, i, a) \land \sigma \vdash a \xrightarrow{*} b.
+\]
+\end{definition}
+
+% --- Pattern 7: a two-branch step relation, one rule per case, with a side
+% condition gating the second branch (cf. an OId-step vs.\ an RId-step that
+% only fires when some guard holds). Two \inferrule's inside one \mathpar
+% render side by side; \\ inside the premises stacks them vertically. ---
+\begin{definition}[Two-branch step relation]
+\label{def:example-step-2branch}
+\begin{mathpar}
+\inferrule[Step-Object]
+  {P(\sigma, a) = c \\ c.f = b}
+  {\sigma \vdash a \xrightarrow{r} b}
+
+\inferrule[Step-Region]
+  {Q(\sigma, a) = c \\ \mathit{guard}(c) \\ b = \mathit{target}(c)}
+  {\sigma \vdash a \xrightarrow{r} b}
+\end{mathpar}
+\end{definition}
+
+% --- Pattern 8: an inductive relation presented as its own constructors
+% (base case(s) + closure case), rather than collapsed straight to the
+% \exists\,\mathrm{Root} \land \to^* form of Pattern 4. Prefer this when the
+% distinct roots/base cases are worth keeping visible; state the Pattern-4
+% form afterward as a derived remark/lemma if useful. ---
+\begin{definition}[Inductively-closed reachability]
+\label{def:example-inductive-reachable}
+\begin{mathpar}
+\inferrule[Base-A]
+  {x \in X(\sigma) \\ P(x) = a}
+  {\mathit{Reach}(\sigma, i, a)}
+
+\inferrule[Base-B]
+  {x \in X(\sigma) \\ Q(x) = a}
+  {\mathit{Reach}(\sigma, i, a)}
+
+\inferrule[Step]
+  {\sigma \vdash a \xrightarrow{f} b \\ \mathit{Reach}(\sigma, i, a)}
+  {\mathit{Reach}(\sigma, i, b)}
+\end{mathpar}
+\end{definition}
+
+% --- Pattern 5: a theorem statement, informal-prose style ---
+\begin{theorem}[Name]
+\label{thm:example}
+Statement.
+\end{theorem}
+
+% --- Pattern 6: a theorem with explicit hypotheses/conclusion via cases-style layout ---
+\begin{theorem}[Name]
+\label{thm:example-2}
+Let $\sigma$ be such that $P(\sigma)$. Then
+\[
+  Q(\sigma) \implies R(\sigma).
+\]
+\end{theorem}
+
 
 \newpage
 
