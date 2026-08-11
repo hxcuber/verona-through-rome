@@ -1,6 +1,6 @@
 Verona through Rome
 ---
-My final year project from Imperial, 25-26.
+A continuation of my final year project from Imperial, 25-26.
 
 Major changes from the report
 ---
