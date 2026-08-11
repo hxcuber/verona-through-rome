@@ -1,23 +1,9 @@
 -- This module serves as the root of the `Gc` library.
 -- Import modules here that should be built as part of the library.
+-- Gc.Reachability.Referencable is deprecated (superseded by Gc.Reachability.Reachable) and deliberately
+-- not imported here; check it via qualified-name builds instead.
 import Gc.Model.Helpers
 import Gc.Model.Mutation.Mutation
-import Gc.Reachability.Referencable.Lemmas.Common
-import Gc.Reachability.Referencable.CR1
-import Gc.Reachability.Referencable.CR2
-import Gc.Reachability.Referencable.CR4
-import Gc.Reachability.Referencable.Path
-import Gc.Reachability.Referencable.Basic
-import Gc.Reachability.Referencable.CR3.Start
-import Gc.Reachability.Referencable.CR3.Enter
-import Gc.Reachability.Referencable.CR3.Exit
-import Gc.Reachability.Referencable.CR3.FieldAsgn
-import Gc.Reachability.Referencable.CR3.MakeObjRegion
-import Gc.Reachability.Referencable.CR3.MakeObjStack
-import Gc.Reachability.Referencable.CR3.MakeRegion
-import Gc.Reachability.Referencable.CR3.Merge
-import Gc.Reachability.Referencable.CR3.Swap
-import Gc.Reachability.Referencable.CR3.VarAsgn
 import Gc.Model.Preservation.Enter
 import Gc.Model.Preservation.Exit
 import Gc.Model.Preservation.FieldAsgn
@@ -31,6 +17,3 @@ import Gc.Model.Start
 import Gc.Model.Theorems
 import Gc.Model.Types
 import Gc.Model.Validity
-import Gc.Reachability.Referencable.Guarantees
-import Gc.Reachability.Referencable.Invariants
-import Gc.Reachability.Referencable.Semantics

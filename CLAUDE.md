@@ -24,15 +24,12 @@ All commands below assume `cd lean/gc`.
 - **Build/check a single file**: `lake build Gc.Model.Theorems` (dotted module path mirrors the file
   path, e.g. `Gc/Model/Preservation/Swap.lean` → `Gc.Model.Preservation.Swap`).
 - **`lake build` (bare, no target) succeeds end to end**, including `Gc`, `Main`, and the `gc`
-  executable, with zero `sorry`s anywhere under `Gc/`. Note: `Gc/Reachability/Reachable/` is not yet
-  imported from `Gc.lean`, so it is *not* covered by the bare build — check it via qualified-name
-  builds (e.g. `lake build Gc.Reachability.Reachable.Lemmas`) or the Lean LSP tools. Likewise
-  `Gc/Reachability/Referencable/CR3/All.lean` (`allPreserve_ValidReachableConfig`) and
-  `Gc/Reachability/Referencable/CR5/All.lean` (`cr5_step_all`) are not imported from `Gc.lean` either
-  — the bare build covers every individual `CR3/<Op>.lean`/`CR5/<Op>.lean` file (via `Gc.lean`'s own
-  explicit per-op imports) but not these two dispatcher aggregators themselves; check them via
-  qualified-name builds too. Prefer building the specific module(s) you're touching by qualified name
-  for faster iteration.
+  executable, with zero `sorry`s anywhere under `Gc/`. Note: `Gc/Reachability/Reachable/` and
+  `Gc/Reachability/Referencable/` (deprecated — see Architecture below) are not imported from
+  `Gc.lean`, so neither is covered by the bare build — check them via qualified-name builds (e.g.
+  `lake build Gc.Reachability.Reachable.Lemmas`, `lake build Gc.Reachability.Referencable.CR3.All`) or
+  the Lean LSP tools. Prefer building the specific module(s) you're touching by qualified name for
+  faster iteration.
 - Toolchain is pinned via `lean-toolchain` (`leanprover/lean4:v4.29.0-rc6`) and dependencies via
   `lake-manifest.json`; the main dependency is `mathlib`. First builds after a fresh clone can be slow
   because of mathlib — subsequent builds reuse `.lake/build`.
@@ -112,10 +109,17 @@ The proof development has three layers under `Gc/`.
 Each `<op>_valid` proof only needs `ValidConfig cfg`, i.e. it is a *single-config* invariant — no
 per-operation proof here reasons about reachability chains.
 
-### `Gc/Reachability/Referencable/` — reachability/liveness over `RefStep` (complete, zero `sorry`)
+### `Gc/Reachability/Referencable/` — DEPRECATED, superseded by `Gc/Reachability/Reachable/` below
 
-`RefStep` (defined in `Semantics.lean`) stops dead the moment a chain hits a region reference (`RId`) —
-it never crosses a region boundary. This is what report.pdf's own reachability notion formalizes.
+**Deprecated.** Kept on disk (still builds standalone, zero `sorry`, via qualified-name builds) but
+deliberately unhooked from `Gc.lean`'s bare build and no longer treated as the active reachability
+layer or cited as precedent for new work — do not extend it or point new proofs at it. `Reachable/`
+below is the current, wider-scope reachability layer and should be used instead. Left here (rather than
+deleted) purely as a record of completed work: `RefStep` stops dead the moment a chain hits a region
+reference (`RId`) — it never crosses a region boundary — which is what report.pdf's own reachability
+notion formalizes, and CR1–CR5 are proved over it in full. `Reachable/`'s `ReachableStep` covers strictly
+more (it also crosses into a Closed region's own bridge object), which is why it now supersedes this
+folder rather than the two staying co-equal.
 
 The folder is organized **property-first** (one top-level unit per headline claim, one file per
 operation inside it), mirroring `Gc/Reachability/Reachable/`'s own layout (see that section below) —
