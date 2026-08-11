@@ -66,9 +66,10 @@ These came up in the process of proving \textit{S2} and \textit{S3} for \texttt{
 
 \section{Reachability}
 \label{sec:reachability}
+We introduce the notion of reachability. It is the same term as in the original report, but the definition here covers a wider spectrum.
 
 \begin{definition}[Stack-reachable]
-  An object or region is stack-reachable if it is frame-reachable from any frame in the stack.
+  An object or region is stack-reachable if it is frame-reachable from some frame in the stack.
   \begin{mathpar}
     \inferrule*
       {\langle S, H \rangle \vdash FReachable(\_, a)}
@@ -77,7 +78,7 @@ These came up in the process of proving \textit{S2} and \textit{S3} for \texttt{
 \end{definition}
 
 \begin{definition}[Frame-reachable]
-  An object or region is frame-reachable if
+  An object or region is frame-reachable if there is a path from a frame to said object or region.
   \begin{mathpar}
     \inferrule*[lab=var]
       {F = (\_, \_, \_, vmap, fid) \\ vmap(\_) = a}
@@ -94,7 +95,7 @@ These came up in the process of proving \textit{S2} and \textit{S3} for \texttt{
 \end{definition}
 
 \begin{definition}[Region-reachable]
-  An object or region is region-reachable if
+  An object or region is region-reachable if there is a path from the bridge object to said object or region.
   \begin{mathpar}
     \inferrule*[lab=bridge]
       {H(rid) = (boid, \_, \_)}
@@ -107,6 +108,7 @@ These came up in the process of proving \textit{S2} and \textit{S3} for \texttt{
 \end{definition}
 
 \begin{definition}[Reachable-step]
+  A one-step reachable relation between objects and regions. An object or region is one-step reachable from another object if that object contains a reference to said object or region. An object is one-step reachable from a region if the region is closed and the object is the region's bridge object.
   \begin{mathpar}
     \inferrule*[lab=obj-step]
       {\mathsf{OId}(oid).objAt(\langle S, H \rangle) = obj \\ b \inN obj.refs }
@@ -119,14 +121,17 @@ These came up in the process of proving \textit{S2} and \textit{S3} for \texttt{
 \end{definition}
 
 \begin{theorem}
+  Region-reachability is the transitive closure of the reachable-step from the region's bridge object.
   \[\langle S, H \rangle \vdash RReachable(rid, a) \iff \exists boid : [H(rid) = (boid, \_, \_) \wedge \mathsf{OId}(boid) \xrightarrow{*} a]\]
 \end{theorem}
 
 \begin{theorem}
+  Frame-reachability is the transitive closure of the reachable-step from the frame.
   \[\langle S, H \rangle \vdash FReachable(fid, a) \iff \exists start : [\langle S, H \rangle \vdash FRoot(fid, start) \wedge start \xrightarrow{*} a]\]
 \end{theorem}
 
 \begin{definition}[Frame-root]
+  The root coming from a frame can be a reference stored by a variable or the bridge object of that frame's region.
   \begin{mathpar}
     \inferrule*[lab=var]
       {F = (\_, \_, \_, vmap, fid) \\ vmap(\_) = a}
