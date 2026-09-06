@@ -50,19 +50,80 @@ In the report, the \texttt{regionId} would coincide with the \texttt{objectId} o
 
 \section{Invariants}
 \label{sec:invariants}
-We add two new invariants, presented here informally and formally.
+
+\begin{definition}[L1]
+No two objects in the configuration share the same identifier.
+\[\langle S, H \rangle \vdash L1 \triangleq \langle S, H \rangle.objectIds \text{ is duplicate-free.}\]
+\end{definition}
+
+\begin{definition}[L2]
+Every frame on the stack refers to an open region.
+\[\langle S, H \rangle \vdash L2 \triangleq \forall frame \inN S : \exists region : [H(frame.regionId) = region \wedge region.status = Open]\]
+\end{definition}
+
+\begin{definition}[H1]
+A region always contains its own bridge object.
+\[\langle S, H \rangle \vdash H1 \triangleq \forall region \inN H.regions : [region.bridgeObjectId \inN dom(region.objMap)]\]
+\end{definition}
+
+\begin{definition}[H2]
+There is at most one reference to a region from anywhere in the configuration.
+\[\langle S, H \rangle \vdash H2 \triangleq \forall rid : [S.refs.count(\mathsf{RId}(rid)) + H.refs.count(\mathsf{RId}(rid)) \le 1]\]
+\end{definition}
+
+\begin{definition}[H3]
+A reference stored inside a region resolves back into that same region.
+\begin{align*}
+  \langle S, H \rangle \vdash H3 \triangleq{} & \forall rid, oid, region : [H(rid) = region \wedge \mathsf{OId}(oid) \inN region.refs \implies{} \\
+  & \mathsf{OId}(oid).loc(\langle S, H \rangle) = \mathsf{Rgn}(rid)]
+\end{align*}
+\end{definition}
+
+\begin{definition}[S1]
+No two frames on the stack share a region.
+\[\langle S, H \rangle \vdash S1 \triangleq \forall f_1, f_2 \inN S : [f_1.regionId = f_2.regionId \implies f_1 = f_2]\]
+\end{definition}
+
+\begin{definition}[S2]
+A reference from a frame to a temporary object resolves to that frame or an earlier one.
+\begin{align*}
+  \langle S, H \rangle \vdash S2 \triangleq{} & \forall frame \inN S, \mathsf{OId}(oid) \inN frame.refs, fid' :\ [\mathsf{OId}(oid).loc(\langle S, H \rangle) = \mathsf{Stk}(fid') \implies{} \\
+  & fid' \le frame.fid]
+\end{align*}
+\end{definition}
+
+\begin{definition}[S3]
+A reference from a frame to a region object resolves to that frame's region or the region of an earlier frame.
+\begin{align*}
+  \langle S, H \rangle \vdash S3 \triangleq{} & \forall frame \inN S, \mathsf{OId}(oid) \inN frame.refs, rid' :\ [\mathsf{OId}(oid).loc(\langle S, H \rangle) = \mathsf{Rgn}(rid') \implies{} \\
+  & \exists frame' \inN S : [frame'.regionId = rid' \wedge frame'.fid \le frame.fid]]
+\end{align*}
+\end{definition}
+
+We add two new invariants:
 
 \begin{definition}[HS1]
   Every reference to an object must be to an object that exists in the configuration.
-  \[\forall oid : [\mathsf{OId}(oid) \inN \langle S, H \rangle.refs \implies oid \inN \langle S, H \rangle.objectIds]\]
+  \[\langle S, H \rangle \vdash HS1 \triangleq \forall oid : [\mathsf{OId}(oid) \inN \langle S, H \rangle.refs \implies oid \inN \langle S, H \rangle.objectIds]\]
 \end{definition}
 
 \begin{definition}[HS2]
   Every reference to a region must be to a region that exists in the configuration.
-  \[\forall rid : [\mathsf{RId}(rid) \inN \langle S, H \rangle.refs \implies rid \inN dom(H)]\]
+  \[\langle S, H \rangle \vdash HS2 \triangleq \forall rid : [\mathsf{RId}(rid) \inN \langle S, H \rangle.refs \implies rid \inN dom(H)]\]
 \end{definition}
 
 These came up in the process of proving \textit{S2} and \textit{S3} for \texttt{makeObjStack}, \texttt{makeObjRegion}, and \texttt{makeRegion}. This stems from the fact that our \texttt{freshObjectId} and \texttt{freshRegionId} functions only take into account the \texttt{Ids} used as keys when creating a new \texttt{Id}. Thus, without this invariant, it is technically possible\footnote{Although it isn't possible within the context of an operational semantics starting with the starting configuration, which is why we were able to prove it without altering the operational semantics.} for a configuration to contain a dangling reference to an \texttt{objectId} or \texttt{regionId} that does not exist within the configuration, but is then inserted via one of the three \texttt{make} operations.
+
+\begin{definition}[ValidConfig]
+\label{def:validconfig}
+\begin{mathpar}
+  \inferrule* [lab=Valid]
+    {\langle S,H\rangle \vdash L1 \\ \langle S,H\rangle \vdash L2 \\ \langle S,H\rangle \vdash H1 \\ \langle S,H\rangle \vdash H2 \\ \langle S,H\rangle \vdash H3 \\ \langle S,H\rangle \vdash S1 \\ \langle S,H\rangle \vdash S2 \\ \langle S,H\rangle \vdash S3 \\ \langle S,H\rangle \vdash HS1 \\ \langle S,H\rangle \vdash HS2}
+    {\langle S,H\rangle \vdash \mathit{ValidConfig}}
+\end{mathpar}
+\end{definition}
+
+\texttt{RuntimeConfig.start} (one root region, one root frame) satisfies \textit{ValidConfig}, and every one of the nine mutation operations of \S\ref{sec:opsem} preserves it; consequently every reachable configuration of the operational semantics is a \textit{ValidConfig}.
 
 \section{Reachability}
 \label{sec:reachability}
@@ -143,6 +204,32 @@ We introduce the notion of reachability. It is the same term as in the original 
   \end{mathpar}
 \end{definition}
 
+\subsection{Suspended regions}
+\label{sec:suspended}
+
+\begin{definition}[FrameReachableAtLaterFrame]
+\label{def:fralf}
+A configuration satisfies \textit{FrameReachableAtLaterFrame} if, whenever a frame $F$ is earlier on the stack than a frame $F'$, any object located in $F$'s region that is frame-reachable from $F'$ is already frame-reachable from $F$ itself.
+\begin{align*}
+  \mathit{FRALF}(\langle S, H \rangle) \iff{} & \forall F, F' \inN S.\ F.fid < F'.fid \implies{} \\
+  & \forall oid.\ \mathsf{OId}(oid).loc(\langle S, H \rangle) = \mathsf{Rgn}(F.regionId) \implies{} \\
+  & \langle S, H \rangle \vdash FReachable(F'.fid, \mathsf{OId}(oid)) \implies \langle S, H \rangle \vdash FReachable(F.fid, \mathsf{OId}(oid))
+\end{align*}
+\end{definition}
+
+\begin{theorem}[FRALF is preserved]
+\label{thm:fralf-step}
+Let $cmd$ be any of the nine operations of \S\ref{sec:opsem}. If $\langle S, H \rangle$ is a \textit{ValidConfig} satisfying \textit{FRALF}, and $\langle S, H \rangle \xrightarrow{cmd} \langle S', H' \rangle$, then $\langle S', H' \rangle$ also satisfies \textit{FRALF}.
+\end{theorem}
+
+\begin{theorem}[Suspended-region stack-reachability is invariant]
+\label{thm:suspended-invariant}
+Let $cmd$ be any of the nine operations of \S\ref{sec:opsem}, and let $\langle S, H \rangle$ be a \textit{ValidConfig} satisfying \textit{FRALF} with $\langle S, H \rangle \xrightarrow{cmd} \langle S', H' \rangle$. For any suspended frame $F \inN S$ and any object $oid$ located in $F$'s region,
+\[
+  \langle S, H \rangle \vdash SReachable(\mathsf{OId}(oid)) \iff \langle S', H' \rangle \vdash SReachable(\mathsf{OId}(oid))
+\]
+\end{theorem}
+
 \section{Related Work}
 
 \section{Conclusion}
@@ -175,6 +262,7 @@ We introduce the notion of reachability. It is the same term as in the original 
 \]}
 
 \section{Operational Semantics}
+\label{sec:opsem}
 \begin{mathpar}
   \inferrule* [lab=var-asgn-stack]
     {F = (rid, bvar, omap, vmap, fid) \\ \texttt{x} \ne bvar \\ resolveV(\texttt{x}, \langle (S :: F), H \rangle) = \epsilon \\ resolveFA(\texttt{y.f}, \langle (S :: F), H \rangle) = \mathsf{OId}(oid)}
