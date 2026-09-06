@@ -28,15 +28,20 @@
 \maketitle
 
 \begin{abstract}
-This is a companion to \file{writeup/main.tex} (the formal report, which states every definition
-and theorem but proves none of them in prose) and to \file{lean/gc/README.md} (which records
-\emph{design} decisions, not proofs). This document walks the results that are actually
-\emph{proved} in \file{lean/gc/Gc/}: what each theorem says, the shape of its Lean proof, which
-invariants it genuinely needs, and — since these are finished mechanized proofs rather than paper
-sketches — the lemmas discovered along the way that turned out to be reusable, and the places
-where the argument has a real wrinkle a paper proof would gloss over. Where \file{main.tex} already
-states a definition or theorem precisely, we cite it by name instead of restating it, and spend the
-space on what \file{main.tex} does not have: the actual proof.
+The theorems below mostly say things that sound like they should just be true — ``merging two
+regions doesn't create a duplicate id'', ``a field write somewhere active can't disturb a suspended
+region'', ``once a region is closed, the only way in is through the front door''. Intuition gets you
+the headline for free. It does \emph{not} get you the proof: in every case below, intuition is
+either silently assuming a fact that has to be derived from the model's invariants first, or is
+flatly wrong until qualified in a way that isn't obvious until you try to break it. This document's
+job is to make that gap visible — what a proof actually had to rule out that intuition glosses
+over — for someone who trusts the model's design (\file{writeup/main.tex},
+\file{lean/gc/README.md}) but hasn't looked at how any of these results got proved.
+
+Format: each result gets \emph{the claim}, \emph{what your intuition already buys you},
+\emph{where the real work is}, and \emph{how the proof closes that gap} — written so each one can
+be read and retold on its own. A reference catalog of the reusable lemmas and known pitfalls
+follows at the end, for looking things up once you already know which proof you're asking about.
 
 Scope: \file{Gc/Model/} and \file{Gc/Reachability/Reachable/}. \file{Gc/Reachability/Referencable/}
 is deliberately excluded — it is deprecated and superseded by \file{Reachable/} (see
@@ -45,7 +50,7 @@ is deliberately excluded — it is deprecated and superseded by \file{Reachable/
 
 \tableofcontents
 
-\section{\file{Gc/Model}: the operational semantics and its invariants}
+\section{Preliminaries}
 
 \subsection{The model and its rules}
 
@@ -64,9 +69,9 @@ names.
 
 \file{main.tex}'s ``Invariants'' section defines all ten (\textit{L1}, \textit{L2}, \textit{H1},
 \textit{H2}, \textit{H3}, \textit{S1}, \textit{S2}, \textit{S3}, \textit{HS1}, \textit{HS2}) and
-bundles them into \textit{ValidConfig}. We do not restate
-the formulas; the table below is only a one-line reminder of what each one \emph{forbids}, since
-that is the fact every proof below actually reaches for.
+bundles them into \textit{ValidConfig}. We do not restate the formulas here; the table below is
+only a one-line reminder of what each one \emph{forbids}, since that is the fact every proof below
+actually reaches for.
 
 \begin{center}
 \begin{tabular}{@{}ll@{}}
@@ -115,8 +120,8 @@ by everything downstream, in both layers:
 
 One root region (Open, bridge object $0$) and one root frame executing in it. Each of the ten
 invariants reduces, by unfolding, to a fact about a one- or two-element list, closed by
-\texttt{decide}/\texttt{simp}/\texttt{List.nodup\_singleton}. No interesting content — this file
-exists purely to anchor the induction below.
+\texttt{decide}/\texttt{simp}/\texttt{List.nodup\_singleton}. No interesting content — this exists
+purely to anchor the induction below.
 
 \subsection{The preservation proof pattern}
 \label{sec:preservation-pattern}
@@ -133,19 +138,298 @@ Every proof from here on, in both layers, destructs a hypothesis $op\ cfg = \mat
 \op{<op>\_cases} exactly once, then argues with concrete named values for the rest.
 
 \file{Preservation/<Op>.lean} then proves ten lemmas $\op{<op>\_L1}, \dots, \op{<op>\_HS2}$ and
-combines them:
-\[
-  \op{<op>\_valid} : \mathit{ValidConfig}(cfg) \to op\ cfg = \mathsf{some}\ cfg' \to \mathit{ValidConfig}(cfg')
-\]
-\file{Preservation.lean} aggregates all nine into $\mathit{AllPreserve}(\mathit{ValidConfig})$ by
-case-splitting on the reified $Stmt$ type (\file{Mutation/Stmt.lean}) — the statement ``every one of
-the nine operations preserves \textit{ValidConfig}'' proved once, generically, rather than left as
-nine theorems a caller has to know to look up individually.
+combines them into $\op{<op>\_valid} : \mathit{ValidConfig}(cfg) \to op\ cfg = \mathsf{some}\ cfg'
+\to \mathit{ValidConfig}(cfg')$. \file{Preservation.lean} aggregates all nine into
+$\mathit{AllPreserve}(\mathit{ValidConfig})$ by case-splitting on the reified $Stmt$ type
+(\file{Mutation/Stmt.lean}) — the statement ``every one of the nine operations preserves
+\textit{ValidConfig}'' proved once, generically, rather than left as nine theorems a caller has to
+know to look up individually.
 
-\subsection{Per-operation notes}
+\section{How the proofs actually work}
+\label{sec:howtheywork}
 
-For each operation, the genuinely interesting invariant(s); the rest are short ``nothing relevant
-changed'' arguments.
+Five walkthroughs, chosen to cover both layers and every genuinely distinct proof technique in the
+codebase. \S\ref{wt:merge-valid} needs only \S\ref{sec:invariants} above.
+\S\ref{wt:confined}--\ref{wt:merge-portal} are about \file{Gc/Reachability/Reachable/}, so
+\S\ref{sec:reach-recap} first recaps just enough of that layer's definitions to make them
+self-contained (all stated in full in \file{main.tex}).
+
+\subsection{\op{merge} keeps the configuration valid}
+\label{wt:merge-valid}
+
+\paragraph{The claim.} After \op{merge x} folds a Closed region \op{rid'} into the current Open
+region \op{rid} (combining their \textit{objMap}s, deleting \op{rid'} from the heap, rebinding
+\texttt{x} to \op{rid'}'s old bridge object), the result is still a \textit{ValidConfig} — in
+particular still has no duplicate object ids (\textit{L1}), and every region's contents still
+resolve back into that same region (\textit{H3}).
+
+\paragraph{What your intuition already buys you.} ``We're just pouring one region's objects into
+another; nothing is created or destroyed, so of course ids stay unique, and anything that already
+pointed home still points home.'' This is directionally right, and it's the whole content of the
+theorem as far as a reader is concerned — but ``nothing is created or destroyed'' is a claim about
+the operation's \emph{semantics}, and the proof has to earn it from the operation's precondition,
+not assume it from the English description of \op{merge}.
+
+\paragraph{Where the real work is.}
+\begin{itemize}[nosep]
+  \item \textbf{Disjointness isn't given, it has to be derived.} Nothing in \op{merge}'s
+    \texttt{do}-notation says the two regions' object-id sets are disjoint. If they weren't, the
+    union could either silently identify two previously-different objects (breaking \textit{L1} the
+    \emph{other} way), or — since $AList.union$ is implemented via $kunion$/$kerase$, which erase
+    duplicate keys from one side — silently drop an object nobody asked to delete. Disjointness has
+    to be derived from the \emph{only} fact the precondition actually gives you: one region is Open,
+    the other Closed, and Open/Closed are mutually exclusive statuses, so \textit{L1} (no id in two
+    heap entries) rules out any shared id between them.
+  \item \textbf{\textit{H3} isn't a re-labelling, it's a fresh search.} An object that used to live
+    in the now-\emph{deleted} region \op{rid'} needs to be shown to resolve, post-merge, into
+    \op{rid}. But $.loc(\cdot)$ doesn't remember history — it performs a brand-new search over
+    whatever heap exists \emph{right now}. So the proof has to reconstruct, from nothing, that
+    searching the post-merge heap for this object's id lands on \op{rid} and nowhere else — which
+    again needs disjointness, now to rule out a second heap entry also matching.
+\end{itemize}
+
+\paragraph{How the proof closes the gap.}
+\begin{enumerate}[nosep]
+  \item \texttt{merge\_corollary\_rid\_ne\_regionId}: \op{rid} and \op{rid'} are provably distinct
+    heap entries, from Open $\ne$ Closed.
+  \item \texttt{merge\_corollary\_region\_unique} (an \textit{L1} corollary): no object id can
+    appear in two different heap entries' object maps — so the two regions-to-be-merged share no
+    id.
+  \item \texttt{merge\_corollary\_union\_append}: \emph{on disjoint keys}, $s_1 \cup s_2$'s
+    \texttt{.entries} is literally $s_1.entries \mathbin{+\!\!+} s_2.entries$ — this is what licenses
+    treating the merged region's contents as ``$region$'s own entries, then $region'$'s, nothing
+    else,'' rather than trusting $AList.union$'s general (lossy) behaviour.
+  \item \texttt{merge\_corollary\_heap\_entries\_perm}: the whole post-merge heap's entry list is a
+    \emph{permutation} of ``the merged pair, plus everything untouched'' — built by pulling
+    \op{rid} and \op{rid'} out of the original heap one at a time (two nested
+    \texttt{List.exists\_of\_kerase} extractions).
+  \item \textit{L1} then reduces to permutation-invariance: \texttt{List.count}/\texttt{Nodup}
+    don't care about reordering, so ``the merged heap's object-id list is a permutation of the
+    original'' is enough.
+  \item \textit{H3}: \texttt{merge\_corollary\_loc\_of\_mem} shows an affected object still resolves
+    into \op{rid} post-merge by showing (a) the stack side of $.loc(\cdot)$'s search is untouched
+    (\op{merge} only rewrites the current frame's \emph{varMap}, never its objMap), and (b) on the
+    heap side, the uniqueness from steps 2/4 pins down that \op{rid}'s merged entry is the
+    \emph{only} heap entry whose objMap could contain this id.
+\end{enumerate}
+
+\paragraph{The one-line version.} The hard part of \op{merge} was never the union itself — it was
+proving, from the operation's own precondition, that the two regions being combined could never
+have shared an id in the first place, and then re-deriving from scratch where every affected object
+resolves under the brand-new heap, because $.loc(\cdot)$ has no memory of where anything used to
+be.
+
+\subsection{Reachability, recapped}
+\label{sec:reach-recap}
+
+$a \to b$ ($\mathit{ReachableStep}$) is one hop of a reference chain; the only content beyond
+following an object's own stored references is: $\mathsf{RId}(rid) \to b$ is possible only when
+$H(rid)$ is \emph{Closed}, and forces $b = \mathsf{OId}(H(rid).bridgeObjectId)$ — a Closed region's
+$\mathsf{RId}$ has exactly one outgoing step, into its own bridge object; an \emph{Open} region's
+$\mathsf{RId}$ has none at all (\textit{L2}: if it could step it would have to be Closed,
+contradicting an on-stack frame owning it). This one asymmetry — a chain may step \emph{into} a
+suspended region through this single portal, but never out — is the entire reason this layer
+exists, and it is what makes \S\ref{wt:cr6} non-trivial.
+
+$\mathit{RegionReachable}(rid, \cdot)$/$\mathit{FrameReachable}(fid, \cdot)$ are the inductive
+closures of $\to$ from a region's bridge object / a frame's roots (a variable's value, or that
+frame's own region's bridge object — $\mathit{FrameRoot}$); $\mathit{StackReachable}$ is
+``$\mathit{FrameReachable}$ from \emph{some} on-stack frame.'' All of \file{main.tex}'s
+$\xrightarrow{*}$-reformulation theorems restate these as ``exists a root, and a
+\texttt{Relation.ReflTransGen}$(\to)$ chain from it'' — and it is this restated form, not the raw
+inductive definition, that every proof below actually inducts on. \texttt{ReflTransGen} comes with
+two mathlib induction principles: ordinary constructor induction (fixes the chain's \emph{first}
+element, grows the \emph{last} one step at a time — right for ``trace forward from a known root'')
+and \texttt{head\_induction\_on} (fixes the \emph{last} element, peels off the \emph{first} step —
+right for ``chase an escaping chain hop by hop from a known start''). Picking the wrong one doesn't
+produce a Lean error; it produces a stuck goal whose motive silently fails to generalize the
+variable the argument needs.
+
+\subsection{``You can't reach backward in time''}
+\label{wt:confined}
+
+\paragraph{The claim (\texttt{region\_container\_confined}, \texttt{stack\_container\_confined}).}
+If you can trace a reference chain, from some frame at index $fid$, back to an object sitting
+inside a particular (Open) region — or a particular stack frame — then whichever frame actually
+\emph{owns} that container has index no later than $fid$.
+
+\paragraph{What your intuition already buys you.} ``You can't reach an earlier/more-nested frame's
+stuff from a frame that comes later, unless something already linked the two'' sounds like it
+should be close to definitionally true from the stack discipline — after all, \textit{S2}/\textit{S3}
+already say exactly this.
+
+\paragraph{Where the real work is.} \textit{S2}/\textit{S3} are \emph{one-hop} facts: they bound a
+single step of a chain. The claim above is about a chain of arbitrary, a priori unknown length,
+handed to the proof only as an opaque \texttt{ReflTransGen} witness. Getting from ``true for one
+hop'' to ``true for the whole chain'' is not free — it needs an induction that walks the chain,
+re-establishing the bound at every hop, and it needs a genuine case split for the one moment a chain
+might \emph{cross} from inside the region onto the stack, which is a qualitatively different kind
+of hop from staying inside.
+
+\paragraph{How the proof closes the gap.}
+\begin{enumerate}[nosep]
+  \item Restate the $\mathit{FrameReachable}$ witness as its $\mathit{ReflTransGen}$ form
+    (\S\ref{sec:reach-recap}) — the custom inductive relation's own recursion runs the wrong
+    direction for this argument.
+  \item Generalize over the chain's end (the reachable object) and induct \emph{forward} from the
+    fixed start. At each step, either (a) the chain is still inside the region —
+    \texttt{predecessor\_of\_region\_object} (an \textit{H3}-driven fact: for an \emph{Open} region,
+    anything one hop away from an in-region object is itself in that same region or has escaped to
+    the stack, never a bare $\mathsf{RId}$ or a \emph{different} region) lets you recurse — or (b)
+    the chain has just escaped to the stack, at which point the one-hop bound
+    (\texttt{stack\_step\_region\_index\_le}, i.e.\ \textit{S3} restated at the single-hop level)
+    gives the numeric bound directly and the induction stops.
+  \item The two ways a chain can \emph{start} (a variable slot, or a frame's own bridge object) are
+    each closed off by one more application of \textit{S3} plus
+    \texttt{merge\_corollary\_regionId\_unique\_index} (turning ``same region'' into ``same index'').
+\end{enumerate}
+
+\paragraph{The one-line version.} This lemma is where ``you can't reach backward in time'' stops
+being an informal slogan and becomes an actual proof — and the reason it needed real work is that
+the chain is abstract and unboundedly long, so a one-hop fact has to be bootstrapped into an
+arbitrary-length one by induction, with a genuine case split at the exact moment a chain would cross
+from inside a region onto the stack.
+
+\subsection{What ``Closed'' really buys you}
+\label{wt:cr6}
+
+\paragraph{The claim (\textit{CR6}).} Once a region is Closed: if nothing outside it already holds
+its front door ($\mathsf{RId}$), \emph{nothing} inside it is stack-reachable at all; and if
+something does hold the front door, stack-reachability of anything inside is \emph{exactly}
+region-reachability from the bridge object.
+
+\paragraph{What your intuition already buys you.} ``Closed means sealed; you get in through the
+front door or not at all'' is more or less the entire informal meaning of ``Closed'', so this can
+feel like it should be nearly a restatement of the definition.
+
+\paragraph{Where the real work is.} $\mathit{ReachableStep}$'s definition only tells you the
+\emph{forward} direction: a Closed region's $\mathsf{RId}$ has exactly one successor. It says
+nothing about \emph{predecessors} — i.e.\ nothing directly rules out some other, unforeseen way of
+already being inside. The actual content of ``sealed'' is a \emph{negative} claim (there is no other
+way in), and proving a negative means enumerating and closing off every other conceivable entrance:
+another region's object secretly holding a pointer in (would need \textit{H3} to fail, since
+\textit{H3} says a region's own stored references always resolve back into that same region — so
+nothing external can hold a live pointer \emph{into} it), and a stack frame that's ``still''
+somehow executing there (would need \textit{L2} to fail — an on-stack frame can never own a Closed
+region in the first place).
+
+\paragraph{How the proof closes the gap.}
+\begin{enumerate}[nosep]
+  \item \texttt{predecessor\_of\_closed\_region\_object}: the Closed mirror of
+    \S\ref{wt:confined}'s backward-confinement lemma, but now the ``escaped to the stack'' branch is
+    \emph{impossible} (via \textit{L2}'s contrapositive, \texttt{closed\_region\_not\_owned}) rather
+    than a base case, and the $\mathsf{RId}$ branch — the predecessor is the region's own portal —
+    becomes \emph{available} rather than something to rule out.
+  \item \texttt{RegionReachable\_of\_FrameReachable\_closed} / \\
+    \texttt{FrameReachable\_rid\_of\_closed\_container}: a \emph{backward} induction over an
+    arbitrary chain, dispatching at every step on (1)'s two surviving cases — either still tracing
+    inside the region (recurse), or the chain has just used the one portal hop (stop; the remaining
+    tail of the chain, back to its root, is itself a witness that the region's own $\mathsf{RId}$
+    was already reachable).
+  \item \textit{CR6} assembles these directly: stack-reachability of anything inside a Closed region
+    factors uniquely through the portal.
+\end{enumerate}
+
+\paragraph{The one-line version.} The definition of Closed only tells you the one way in that's
+\emph{allowed}; \textit{CR6} is the proof that it's also the \emph{only} way in — and that negative
+claim needed two separate invariants (\textit{H3}, so no outside object can hold a pointer in;
+\textit{L2}, so no live stack frame can still be the owner) to rule out the two entrances a
+proof-by-definition-alone wouldn't have covered.
+
+\subsection{A field write in the active frame}
+\label{wt:fieldasgn}
+
+\paragraph{The claim ($\mathit{FRALF}$ preserved by \op{fieldAsgn}).} If an object living in an
+earlier (possibly suspended) frame's region was already visible from every later frame before a
+field write happening in the currently-active frame, it stays visible from that earlier frame
+afterward.
+
+\paragraph{What your intuition already buys you.} ``A suspended region's contents aren't touched by
+a field write happening somewhere else entirely'' is the natural first reaction, and it's
+\emph{almost} the whole truth — which is exactly what makes it dangerous: the natural reaction stops
+one level too early.
+
+\paragraph{Where the real work is — the one place intuition is flatly wrong if left unqualified.}
+The write \emph{does} create one brand-new edge in the reference graph ($obj.field := newValue$),
+and nothing about ``the write happens somewhere active'' rules out, \emph{syntactically}, that this
+new edge connects two things that weren't connected before, or shortcuts a longer existing detour.
+The claim isn't true because the new edge is irrelevant to the suspended frame's own chains by
+assumption — it's true, and has to be \emph{shown} true, because anything already visible from an
+earlier, strictly-suspended frame is (by \S\ref{wt:confined}) already confined to have a root no
+later than that suspended frame itself, which is strictly earlier than where the write happened —
+so the new edge, whatever it connects, is provably out of reach of any chain that could matter here.
+
+\paragraph{How the proof closes the gap.}
+\begin{enumerate}[nosep]
+  \item Let $oid_C$ be the mutated object's id. By \S\ref{wt:confined}'s lemma — now applied to
+    $oid_C$ itself rather than to the tracked object — anything that can reach $oid_C$ at all must
+    come from a frame index no earlier than the active frame's own index, $fid_{active}$.
+  \item Any chain confined strictly below $fid_{active}$ therefore never touches $oid_C$, so the
+    step relation is completely untouched along it, and it transports across the mutation for free.
+    (This covers every suspended frame's chain automatically, since a suspended frame's index is, by
+    hypothesis, strictly below the active one.)
+  \item The one case needing genuine work: a chain rooted \emph{exactly} at the active frame (which
+    is free to have used the new edge). Walk this chain forward hop by hop
+    (\texttt{Relation.ReflTransGen.head\_induction\_on}), asking at each hop ``was this the
+    newly-written one?'' If yes, the chain has jumped onto the field write's \emph{new} value,
+    which has its own, entirely independent root (\texttt{resolveV\_frameRoot}) — and the argument
+    restarts from there, landing back in the confined, already-handled case of step 2.
+\end{enumerate}
+
+\paragraph{The one-line version.} The field write's new edge really could matter in general — the
+proof doesn't get to assume it away, it has to \emph{show} that only one specific frame's own chain
+could ever route through it, and even that one case reduces back to an ordinary confined argument by
+tracing the new edge's endpoint to its own separate root.
+
+\subsection{Deleting a region reference}
+\label{wt:merge-portal}
+
+\paragraph{The claim ($\mathit{FRALF}$ preserved by \op{merge}).} Same headline property as
+\S\ref{wt:fieldasgn}, now for the one operation that deletes an entire region, \op{rid'}, along with
+the single live reference ($\mathsf{RId}(rid')$) that named it.
+
+\paragraph{What your intuition already buys you.} ``\op{merge} doesn't create any new objects, it
+just relabels which heap key some existing objects live under — so of course nothing about
+reachability from an earlier frame changes.''
+
+\paragraph{Where the real work is.} This undersells exactly one thing: a reference that used to
+exist — $\mathsf{RId}(rid')$, sitting in the merging frame's own variable \texttt{x} — is
+\emph{deleted outright} and replaced by a reference to \op{region'.bridgeObjectId}. Any reachability
+argument that (even implicitly) ever routed through the old reference needs to be re-derived through
+the new one — and ``nothing used it'' can't just be asserted, it has to be shown that nothing
+\emph{could} have used it except as a chain's very first step.
+
+\paragraph{How the proof closes the gap.}
+\begin{enumerate}[nosep]
+  \item \texttt{merge\_ridPrime\_not\_step\_target}: $\mathsf{RId}(rid')$ can never be the
+    \emph{target} of a step. If some reference stepped into it, \textit{H2} (at most one live
+    reference to any region) would already be violated, since \texttt{x}'s own occurrence is already
+    the one allowed one. A purely counting-based fact — no case analysis on chains needed.
+  \item Consequently $\mathsf{RId}(rid')$ can only ever be a chain's \emph{root}, never mid-chain, so
+    ``did this chain use the deleted reference'' reduces to one question about the chain's
+    \emph{start}, not a hop-by-hop trace.
+  \item \texttt{merge\_chain\_transport\_down}: any chain whose root avoids $\mathsf{RId}(rid')$
+    transports unconditionally between the two configurations.
+  \item The one remaining case — a chain rooted \emph{exactly} at $\mathsf{RId}(rid')$ — is handled
+    by \texttt{merge\_ridPrime\_reflTransGen\_iff}: since $\mathsf{RId}(rid')$'s only possible first
+    hop is, by definition, its own bridge object, such a chain is \emph{the same chain, one hop
+    shorter}, rooted at \op{region'.bridgeObjectId} instead — exactly the value \texttt{x} now holds
+    post-merge.
+\end{enumerate}
+
+\paragraph{The one-line version.} \op{merge} needs its own argument, distinct from an ordinary field
+write, because it \emph{deletes} a reference rather than editing one — and the proof exploits an
+existing invariant (\textit{H2}'s one-reference-per-region bound) to show the deleted reference
+could never have been anything but a chain's starting point, turning a potentially open-ended
+re-routing problem into a one-line substitution.
+
+\section{Reference: everything else}
+
+The rest of \file{Gc/Model}'s nine operations, the reusable lemma catalog, and known pitfalls — for
+looking things up once you already know which proof you're asking about, rather than for reading
+start to finish.
+
+\subsection{The other operations}
 
 \begin{description}
   \item[\op{varAsgn x yf}] Two branches on whether \texttt{x} is the frame's own bridge variable.
@@ -161,7 +445,7 @@ changed'' arguments.
     is permitted only while the writer's frame executes \emph{in} that exact region \emph{and} the
     new value resolves into the \emph{same} region. Drop either equality and \textit{H3}'s
     preservation becomes false — nothing else in the rule would stop the region from acquiring an
-    outward-pointing reference.
+    outward-pointing reference. (Its reachability-layer proof is \S\ref{wt:fieldasgn} above.)
   \item[\op{swap x yf}] Syntactically the busiest rule (two locations get new values
     simultaneously) but its invariant proofs are \op{fieldAsgn}'s field-write argument and
     \op{varAsgn}'s var-write argument run side by side — no new invariant-level content.
@@ -175,64 +459,86 @@ changed'' arguments.
     object, and stores an $\mathsf{RId}$ to it in the current frame. \textit{H2} for the new region
     id is again vacuous by freshness (\texttt{freshRegionId\_not\_mem}); starting \emph{Closed} is
     what keeps \textit{L2} trivially true — nobody is executing inside the new region yet.
-  \item[\op{merge x}] By far the busiest file ($\sim$1200 lines, \file{Preservation/Merge.lean}),
-    being the only operation that deletes a heap key and combines two $objMap$s into one. The
-    load-bearing fact, proved first and reused by all ten invariant proofs, is that the two regions
-    being merged have \emph{disjoint} object-id sets:
-    \begin{lemma}[disjointness of the merged regions]
-    If $H(rid) = region$, $H(rid') = region'$, $region.status = Open$, $region'.status = Closed$,
-    and $\langle S,H\rangle \vdash L1$, then $rid \ne rid'$ (Open/Closed are mutually exclusive) and
-    $dom(region.objMap) \cap dom(region'.objMap) = \emptyset$ (else \textit{L1} would be violated).
-    \end{lemma}
-    Disjointness turns the potentially lossy $AList.union$ (which can silently drop/reorder
-    colliding keys in general) into a plain, permutation-preserving append, and every subsequent
-    \textit{L1}/\textit{H2}-style counting argument goes through by permutation-invariance of
-    \texttt{List.count}/\texttt{Nodup}. A second recurring fact re-derives ``an id lives in at most
-    one heap entry'' for the \emph{post}-merge heap, by case-splitting on whether each of two
-    witnessing entries is the merged head or came from the untouched remainder (which embeds back
-    into the original heap via a \texttt{List.Perm} argument built from two nested
-    \texttt{List.exists\_of\_kerase} extractions). \op{merge} is also the one operation whose
-    \emph{reachability}-layer proof (\S\ref{sec:frameatlaterframe-merge}) needs a genuinely
-    different idea from the other eight, because it is the only operation that deletes a region and
-    a live $\mathsf{RId}$ reference along with it.
+  \item[\op{merge x}] See \S\ref{wt:merge-valid} (\textit{ValidConfig} preservation) and
+    \S\ref{wt:merge-portal} (the reachability-layer proof).
   \item[\op{enter xf bridgeVar} / \op{exit}] Push/pop a frame, flipping the
     entered/exited region's status. \textit{L2}/\textit{S1} are index bookkeeping; the freshly
     pushed frame starts with empty $objMap$/$varMap$, so \textit{S2}/\textit{S3}/\textit{HS1} need
     say nothing new about it — its only content is the just-flipped bridge object, already covered
-    by the region-side invariants.
+    by the region-side invariants. On the reachability side, both are ``additive'' operations
+    (\S\ref{sec:fralf-shapes}): the object graph's content doesn't change, only which frames/regions
+    are active, so the uniform safety-transport tool (\texttt{safe\_reflTransGen\_transport}) applies
+    directly rather than needing a per-hop induction.
 \end{description}
 
-\subsection{Reusable toolkit: \file{Preservation/Common.lean}}
+\subsection{$\mathit{FRALF}$ preservation: the three proof shapes, in one place}
+\label{sec:fralf-shapes}
 
-Five generic lemmas, factored out once the same fact was being reconstructed byte-for-byte in
-several files:
-\begin{itemize}[nosep]
-  \item \texttt{stackWithIndex\_frame\_transport\_down\_of\_shape\_eq} / \texttt{\_up\_of\_shape\_eq}
-    — if $cfg,cfg'$ agree up to some projection $\pi : Frame \to \alpha$ at every stack
+\S\ref{wt:fieldasgn} and \S\ref{wt:merge-portal} are two of the three shapes the nine
+per-operation $\mathit{FRALF}$-preservation proofs take; for completeness, all three:
+\begin{enumerate}[nosep]
+  \item \textbf{Additive / status-only} (\op{enter}, \op{exit}, \op{makeObjStack},
+    \op{makeObjRegion}, \op{makeRegion}, \op{varAsgn}) — no existing object's content changes, so
+    \texttt{safe\_reflTransGen\_transport} (\S\ref{sec:catalog}) moves any chain across the
+    mutation with no per-hop case analysis.
+  \item \textbf{Content-mutating} (\op{fieldAsgn}, \op{swap}) — \S\ref{wt:fieldasgn}'s escape
+    argument, keyed on an owner-index bound.
+  \item \textbf{Reference-deleting} (\op{merge}) — \S\ref{wt:merge-portal}'s ``can only be a
+    root'' argument, keyed on an \textit{H2} count bound.
+\end{enumerate}
+The corresponding $\mathit{StackReachable}$-invariant proofs (\file{StackReachableInvariant/}) use
+\emph{exactly} the same case analysis per operation, now proved as an $\iff$ rather than a one-way
+implication: ``was $oid$ reachable before'' and ``is it reachable after'' are genuinely symmetric
+questions once confined transport exists in both directions, but the two directions of the escape
+argument are \emph{not} mirror images of each other and must be proved independently — the
+newly-written edge exists in $cfg'$ but not $cfg$, so the escape case only genuinely arises in one
+of the two directions.
+
+\subsection{Reusable lemma catalog}
+\label{sec:catalog}
+
+\begin{description}
+  \item[\texttt{stackWithIndex\_frame\_transport\_down\_of\_shape\_eq} / \texttt{\_up\_of\_shape\_eq}]
+    If $cfg,cfg'$ agree up to some projection $\pi : Frame \to \alpha$ at every stack
     \emph{position}, $stackWithIndex$ membership transports between them, preserving $.index$ and
-    the projected value. Generic in $\pi$: a proof that only cares about $(regionId, bridgeVar)$ can
-    ignore $objMap$/$varMap$ changes entirely.
-  \item \texttt{stackWithIndex\_objMap\_get\_eq\_of\_last\_varMap\_update} — the common special case
-    ``only the last frame's $varMap$ changed'' $\Rightarrow$ $objMap$ is unaffected at every
-    position, indexed or not. Used by every pure var-write operation.
-  \item \texttt{merge\_corollary\_regionId\_unique\_index} — \textit{S1} restated at the
-    $FrameWithIndex$ level (two frames sharing a $regionId$ are the same frame). Despite the name
-    (kept from wherever it was first needed) this is used throughout \S\ref{sec:reachability-lemmas}
-    to convert ``same region'' facts into ``same index'' facts, which is what most confinement
-    arguments actually need.
-  \item \texttt{swap\_corollary\_stackWithIndex\_index\_inj} / \texttt{\_find\_eq} — two frames with
-    the same $.index$ are the \emph{same} element (since $.index$ is assigned by position, not
-    stored data). Arguably the single most-cited lemma in \file{Gc/Reachability/Reachable/} — see
-    \S\ref{sec:reusable}.
-\end{itemize}
+    the projected value.
+  \item[\texttt{stackWithIndex\_objMap\_get\_eq\_of\_last\_varMap\_update}] ``Only the last frame's
+    $varMap$ changed'' $\Rightarrow$ $objMap$ is unaffected at every position. Used by every pure
+    var-write operation.
+  \item[\texttt{merge\_corollary\_regionId\_unique\_index}] \textit{S1} restated at the
+    $FrameWithIndex$ level: two frames sharing a $regionId$ are the same frame. Used constantly to
+    convert ``same region'' facts into ``same index'' facts.
+  \item[\texttt{swap\_corollary\_stackWithIndex\_index\_inj} / \texttt{\_find\_eq}] Two frames with
+    the same $.index$ are the \emph{same} element ($.index$ is assigned by position, not stored
+    data). Arguably the single most-cited lemma in \file{Gc/Reachability/Reachable/} — needed
+    whenever a proof juggles several differently-named frame variables that are
+    provably-but-not-syntactically the same frame.
+  \item[\texttt{predecessor\_of\_region\_object} / \texttt{\_of\_closed\_region\_object}] Backward
+    confinement, one hop, Open/Closed — see \S\ref{wt:confined}/\S\ref{wt:cr6}.
+  \item[\texttt{SafeRef} / \texttt{predecessor\_safe} / \texttt{safe\_reflTransGen\_transport}] A
+    reference is ``safe'' for region $rid$ if it's in $rid$ or on the stack (never a bare
+    $\mathsf{RId}$). Safety propagates backward one hop; if the step relation agrees on every
+    $\mathsf{OId}$-sourced step between $cfg,cfg'$, any chain ending at a safe target transports
+    wholesale. This is the tool behind the ``additive'' proof shape (\S\ref{sec:fralf-shapes}).
+  \item[\texttt{stack\_container\_confined} / \texttt{region\_container\_confined}] The index-bound
+    lemma of \S\ref{wt:confined}.
+  \item[\texttt{RegionReachable\_of\_FrameReachable\_closed} / \\
+    \texttt{FrameReachable\_rid\_of\_closed\_container}] The Closed-region confinement engine behind
+    \textit{CR6} (\S\ref{wt:cr6}).
+  \item[The ``\textit{H2} forbids a reference from being a step target'' trick]
+    (\S\ref{wt:merge-portal}) generalizes beyond \op{merge}: any future operation that
+    \emph{deletes} a uniquely-referenced region reference can reuse the same shape (count-based
+    non-membership $\Rightarrow$ chain-position restriction $\Rightarrow$ transport reduces to a
+    root-only case split).
+\end{description}
 
-\subsection{Pitfalls specific to this layer}
+\subsection{Pitfalls}
 
 \begin{pitfall}[\texttt{AList.insert} reorders on an existing key]
 Inserting at an already-present key goes through $kinsert$/$kerase$ and can reorder $.entries$,
 unlike inserting at a genuinely fresh key. Any proof needing $.entries$-level equality after an
-$insert$ (not just $.lookup$-level) — \op{merge}'s region-combining argument above — has to go
-through an explicit \texttt{List.Perm} argument (\texttt{exists\_of\_kerase} +
+$insert$ (not just $.lookup$-level) — \op{merge}'s region-combining argument (\S\ref{wt:merge-valid}) —
+has to go through an explicit \texttt{List.Perm} argument (\texttt{exists\_of\_kerase} +
 \texttt{NodupKeys.eq\_of\_mk\_mem}), never assume ``insert = append.''
 \end{pitfall}
 
@@ -248,273 +554,14 @@ precondition, read its \op{<op>\_cases} lemma's statement, not the \texttt{do}-b
 the former is invisible until a downstream theorem quietly stops being provable.
 \end{pitfall}
 
-\section{\file{Gc/Reachability/Reachable}: the reachability layer}
-\label{sec:reachability}
-
-\subsection{What's already in \file{main.tex}}
-
-\file{main.tex}'s ``Reachability'' section already gives, in full, the definitions of
-$\mathit{ReachableStep}$ ($a \to b$), $\mathit{RegionReachable}$, $\mathit{FrameReachable}$,
-$\mathit{StackReachable}$, $\mathit{FrameRoot}$; the two ``is exactly the reflexive-transitive
-closure of $\to$'' theorems; and (its ``Suspended regions'' subsection) $\mathit{FRALF}$ together
-with its single-step preservation theorem and the headline suspended-region stack-reachability
-invariant. We do not restate any of these; we only fix the two facts about $\mathit{ReachableStep}$
-that everything below leans on, then move straight to how the theorems are actually proved.
-
-\begin{remark}[the one thing $\mathsf{RId}$ can do]
-$\mathsf{RId}(rid) \to b$ only when $H(rid).status = Closed$, in which case $b$ is forced to be
-$\mathsf{OId}(H(rid).bridgeObjectId)$ — a Closed region's $\mathsf{RId}$ has exactly one outgoing
-step, into its own bridge object; an \emph{Open} region's $\mathsf{RId}$ has none
-(\texttt{open\_rid\_no\_step}, from \textit{L2}: if a region's $\mathsf{RId}$ could step it would
-have to be Closed, contradicting an on-stack frame owning it). This one asymmetry — the ``portal''
-into a suspended region — is the entire reason this layer exists as a sibling to the deprecated
-$RefStep$ rather than a refinement of it, and it is what makes \S\ref{sec:cr6} non-trivial.
-\end{remark}
-
-\begin{remark}[why the $\xrightarrow{*}$-reformulation matters]
-$\mathit{RegionReachable}$/$\mathit{FrameReachable}$ are small inductive relations, but almost every
-nontrivial proof below inducts on their \texttt{Relation.ReflTransGen}-reformulation instead (the
-``is exactly the transitive closure'' theorems from \file{main.tex}), never on the raw inductive
-constructors. \texttt{ReflTransGen} comes with two mathlib induction principles: ordinary
-constructor induction (fixes the chain's \emph{first} element, grows the \emph{last} by one step at
-a time — the right shape for ``trace forward from a known root'') and
-\texttt{head\_induction\_on} (fixes the \emph{last} element, peels off the \emph{first} step — the
-right shape for ``chase an escaping chain hop by hop from a known start''). Both get used below,
-for different lemmas; picking the wrong one does not produce a type error, it produces a stuck goal
-whose motive silently doesn't generalize the variable the argument actually needs to induct on.
-\end{remark}
-
-\subsection{The confinement toolkit (\file{Lemmas/Common.lean})}
-\label{sec:reachability-lemmas}
-
-This file is the layer's real intellectual core. Every per-operation proof in
-\file{FrameReachableAtLaterFrame/} and \file{StackReachableInvariant/} cites several of these
-directly.
-
-\begin{lemma}[backward confinement, Open region]
-\label{lem:predecessor-open}
-\textup{(\texttt{predecessor\_of\_region\_object})} If $\mathsf{OId}(oid).loc(\cdot) = \mathsf{Rgn}(rid)$
-and $H(rid).status = Open$, then any $a$ with $a \to \mathsf{OId}(oid)$ is itself
-$\mathsf{OId}(oid')$ for some $oid'$ with $oid'.loc(\cdot) \in \{\mathsf{Rgn}(rid)\} \cup
-\{\mathsf{Stk}(fid) \mid fid\}$ — never a bare $\mathsf{RId}$, never an object of a
-\emph{different} region.
-\end{lemma}
-\begin{proof}[Proof idea]
-Case on $a$. If $a = \mathsf{RId}(rid')$: either $rid' = rid$, ruled out directly by
-\op{open\_rid\_no\_step} above, or $rid' \ne rid$, in which case the only possible step target is
-$rid'$'s own bridge object, whose location is $\mathsf{Rgn}(rid')$ by \textit{H3}, contradicting
-$\mathsf{Rgn}(rid)$. If $a = \mathsf{OId}(oid')$: \textit{H3} applied to whatever region $oid'$ turns
-out to live in forces its location to be $\mathsf{Rgn}(rid)$ too (region case), or it's already on
-the stack (stack case) — never a third region.
-\end{proof}
-
-\begin{lemma}[backward confinement, Closed region]
-\label{lem:predecessor-closed}
-\textup{(\texttt{predecessor\_of\_closed\_region\_object})} Same statement with $Closed$ in place
-of $Open$, except the ``on stack'' branch becomes \emph{impossible} instead (\textit{L2}'s
-contrapositive: an on-stack frame can never own a Closed region — \texttt{closed\_region\_not\_owned}),
-and the $\mathsf{RId}$ branch becomes the desired \emph{portal hop} instead of a contradiction: $a =
-\mathsf{RId}(rid)$ with $oid = H(rid).bridgeObjectId$ is now an admissible predecessor.
-\end{lemma}
-
-\begin{lemma}[safety and its transport]
-\label{lem:saferef}
-Define $\mathit{SafeRef}_{rid}(ref)$ for $ref = \mathsf{OId}(oid)$ as $oid.loc(\cdot) = \mathsf{Rgn}(rid)$
-or $oid.loc(\cdot) = \mathsf{Stk}(fid)$ for some $fid$ (never true for a bare $\mathsf{RId}$). Then:
-\begin{enumerate}[nosep]
-  \item (\texttt{predecessor\_safe}) safety propagates \emph{backward} across one step, by
-    Lemma~\ref{lem:predecessor-open};
-  \item (\texttt{safe\_reflTransGen\_transport}) if $\to_{cfg}$ and $\to_{cfg'}$ agree on every
-    $\mathsf{OId}$-sourced step, any $cfg$-chain ending at a \textit{SafeRef} target transports
-    wholesale to a $cfg'$-chain.
-\end{enumerate}
-\end{lemma}
-This pair is exactly the tool used for every operation whose mutation changes no existing object's
-\emph{content} — see the ``additive'' case in \S\ref{sec:fralf-technique}.
-
-\begin{lemma}[index confinement]
-\label{lem:index-confinement}
-\textup{(\texttt{stack\_container\_confined}, \texttt{region\_container\_confined})} If
-$\mathsf{OId}(oid_C)$ is stack-resident at index $fid_C$ (resp. resides in an \emph{Open} region
-owned by frame index $fid_C$), then anything $\mathit{FrameReachable}(fid, \mathsf{OId}(oid_C))$
-has $fid \ge fid_C$.
-\end{lemma}
-\begin{proof}[Proof idea]
-Structural induction on the $\mathit{FrameReachable}$-witness's \texttt{ReflTransGen} chain,
-generalized over the chain's \emph{end} (ordinary induction, not \texttt{head\_induction\_on} — the
-claim is about the chain's \emph{root}, which the inductive step naturally exposes). Each step
-either stays inside the confined container (index unchanged, recurse) or escapes onto the stack,
-at which point the one-hop bound $S2/S3$-at-the-\texttt{ReachableStep}-level lemmas
-(\texttt{stack\_step\_index\_le}, \texttt{stack\_step\_region\_index\_le}) fire directly.
-\end{proof}
-This is the mechanized form of ``you can't reach backward in time'', and it is what every
-per-operation proof in both \S\ref{sec:fralf-technique} and~\S\ref{sec:stackreachable} calls to
-turn ``was the mutated container already visible from here'' into a plain numeric comparison.
-
-\begin{lemma}[Closed-region confinement — the engine behind \S\ref{sec:cr6}]
-\label{lem:closed-confinement}
-\textup{(\texttt{RegionReachable\_of\_FrameReachable\_closed},
-\texttt{FrameReachable\_rid\_of\_closed\_container})} If $H(rid).status = Closed$ and
-$oid.loc(\cdot) = \mathsf{Rgn}(rid)$, then \emph{any} $\mathit{FrameReachable}(fid,\mathsf{OId}(oid))$
-witness is, in fact, $\mathit{RegionReachable}(rid, \mathsf{OId}(oid))$, \emph{and} it forces
-$\mathit{FrameReachable}(fid, \mathsf{RId}(rid))$ too — reaching anything inside a Closed region is
-never possible except by first reaching the region's own portal.
-\end{lemma}
-\begin{proof}[Proof idea]
-Backward induction over the chain, dispatching at each step on
-Lemma~\ref{lem:predecessor-closed}'s two cases: either continue tracing inside the region, or hit
-the portal hop and stop.
-\end{proof}
-
-\subsection{The \textit{CR6} theorems}
-\label{sec:cr6}
-
-Not stated in \file{main.tex}; proved directly from Lemma~\ref{lem:closed-confinement}, no new
-technique.
-
-\begin{theorem}[\textit{CR6}]
-Let $H(rid).status = Closed$ and $oid.loc(\cdot) = \mathsf{Rgn}(rid)$.
-\begin{enumerate}[nosep]
-  \item If $\langle S,H\rangle \vdash SReachable(\mathsf{RId}(rid))$, then
-    $SReachable(\mathsf{OId}(oid)) \iff RReachable(rid, \mathsf{OId}(oid))$.
-  \item If $\langle S,H\rangle \not\vdash SReachable(\mathsf{RId}(rid))$, then
-    $\langle S,H\rangle \not\vdash SReachable(\mathsf{OId}(oid))$ for \emph{every} such $oid$.
-\end{enumerate}
-\end{theorem}
-Part 1's forward direction doesn't even need the $\mathsf{RId}$-reachability hypothesis
-(closedness alone forces the single-portal argument); the hypothesis is needed only to glue the
-portal hop onto an already-stack-rooted chain in the reverse direction. Part 2 is (1)'s
-contrapositive, given its own name because it is the practically useful reading: an unreachable
-Closed region's contents are \emph{all} unreachable, full stop.
-
-\subsection{Proving $\mathit{FRALF}$ preservation: three proof shapes}
-\label{sec:fralf-technique}
-
-$\mathit{FRALF}$ (defined in \file{main.tex}, see above) is proved to hold vacuously
-at $RuntimeConfig.start$ (a single frame makes $F.fid < F'.fid$ unsatisfiable), then
-single-step-preserved by all nine operations. The nine proofs split into three genuinely different
-argument shapes.
-
-\paragraph{1. Additive / status-only operations — \op{Enter}, \op{Exit}, \op{makeObjStack},
-\op{makeObjRegion}, \op{makeRegion}, \op{varAsgn}.} No existing object's \emph{content} changes.
-The workhorse is Lemma~\ref{lem:saferef}(2): show the tracked object is $\mathit{SafeRef}$, show the
-step relation agrees on every $\mathsf{OId}$-sourced step (trivial when nothing's content changed),
-and the whole chain transports for free — no per-hop case analysis. \op{Enter}'s proof is the most
-involved member of this group only because pushing a frame means the ``later frame'' in the
-$\mathit{FRALF}$ statement might now instead \emph{be} the freshly pushed one, whose only possible
-root is the entered region's own bridge object; a short safety argument shows that can't equal the
-tracked object in the (different) suspended region.
-
-\paragraph{2. Content-mutating operations — \op{fieldAsgn}, \op{swap}.} These genuinely rewrite one
-existing reference slot (call the mutated object's id $oid_C$), so the step relation changes at
-exactly that one point and Lemma~\ref{lem:saferef}'s uniform transport no longer applies. The proof
-instead:
-\begin{enumerate}[nosep]
-  \item shows $oid_C$'s \emph{owner} index is a hard lower bound on anything that can reach it
-    (Lemma~\ref{lem:index-confinement}, now applied to the mutated object rather than the tracked
-    one) — call this bound $fid_{active}$;
-  \item for any chain confined strictly below $fid_{active}$, the step relation is untouched, so it
-    transports for free;
-  \item for the one remaining case — a chain rooted exactly at the mutating frame, which
-    \emph{might} use the new edge — walks the chain forward via \texttt{head\_induction\_on},
-    splitting at each hop on whether it is the newly-written one. If it is, the chain escapes onto
-    the field's \emph{new} value, which has its own independent root
-    (\texttt{resolveV\_frameRoot}/\texttt{resolveFA\_frameReach}), and the argument reduces back to
-    case 2.
-\end{enumerate}
-This is exactly \file{CLAUDE.md}'s ``owner-index bound turns `could this new edge matter' into a
-decidable dichotomy, resolved by chasing the new value's own independent root'', traced through
-concretely.
-
-\paragraph{3. \op{merge} — its own shape.}
-\label{sec:frameatlaterframe-merge}
-\op{merge} is the only operation that \emph{deletes} a live $\mathsf{RId}(rid')$ reference along
-with the region it names. The key trick:
-
-\begin{lemma}[an about-to-be-deleted region reference is never a step \emph{target}]
-\textup{(\texttt{merge\_ridPrime\_not\_step\_target})} If $\mathsf{RId}(rid')$ occurs live in
-$\langle S,H\rangle$ (as it must, to be merged), no reference steps \emph{into} it: any putative
-predecessor would push \textit{H2}'s count for $rid'$ to $2$, contradiction.
-\end{lemma}
-
-Consequently $\mathsf{RId}(rid')$ can only ever be a chain's \emph{root}, never mid-chain, so
-``does this chain use the deleted reference'' is answered by inspecting the root alone, never by a
-hop-by-hop induction. This gives a chain-avoidance transport
-(\texttt{merge\_chain\_transport\_down}: any $\mathsf{RId}(rid')$-avoiding chain transports
-unconditionally $cfg' \to cfg$) plus one genuine escape case, handled by
-
-\begin{lemma}
-\textup{(\texttt{merge\_ridPrime\_reflTransGen\_iff})} A $\mathsf{RId}(rid')$-rooted chain to any
-target $\ne \mathsf{RId}(rid')$ is the same chain, one hop shorter, rooted at
-$H(rid').bridgeObjectId$ instead — since $\mathsf{RId}(rid')$'s only possible first hop is that
-fixed bridge object.
-\end{lemma}
-
-\subsection{The suspended-region stack-reachability invariant}
-\label{sec:stackreachable}
-
-The headline theorem (stated in \file{main.tex}, see above) is stated as an $\iff$, not a one-way
-implication, and takes $\mathit{FRALF}$ as
-an \emph{explicit hypothesis} rather than folding it into a \textit{ValidConfig}-style bundled
-invariant — this keeps its own proof independent of whether $\mathit{FRALF}$ has separately been
-shown inductive, at the cost of every caller needing to supply it.
-
-Each per-operation proof in \file{StackReachableInvariant/} uses \emph{exactly} the same case
-analysis as its \S\ref{sec:fralf-technique} sibling — compare, e.g., the two \op{fieldAsgn} files:
-same lemmas, same split on whether the frame in question is the active one, same escape argument —
-because ``was $oid$ reachable before'' and ``is it reachable after'' are genuinely symmetric
-questions once confined transport exists in both directions. The forward direction of the $\iff$ is
-close to a direct instance of $\mathit{FRALF}$-style transport; the \emph{backward} direction is
-where the escape-chain argument (\S\ref{sec:fralf-technique}, cases 2/3) actually earns its keep,
-since going from $cfg'$ back to $cfg$ is where a chain might have used the newly-written edge.
-
-\begin{pitfall}[an $\iff$ needs both halves proved independently]
-It is tempting to think the $cfg' \to cfg$ direction of the escape argument is just the $cfg \to
-cfg'$ direction ``with the arguments flipped''. It is not: the newly-written edge exists in $cfg'$
-but not $cfg$, so the escape case genuinely only arises in one of the two directions and has to be
-proved on its own terms there.
-\end{pitfall}
-
-\subsection{What's deliberately not done here}
-No analogue of a \op{Guarantees.lean}-style top-level GC-safety theorem sits on top of
-$\mathit{StackReachableInvariant}$ yet. Everything above is a \emph{single-step} fact; composing it
-over an arbitrary-length trace — the literal \file{main.tex}/report.pdf claim, which talks about
-invariance for as long as a region stays suspended, not just across one operation — is not
-currently being pursued.
-
-\section{Lemmas load-bearing across both layers}
-\label{sec:reusable}
-
-\begin{itemize}[nosep]
-  \item \texttt{swap\_corollary\_stackWithIndex\_index\_inj} — ``same index $\Rightarrow$ same
-    element'' for $stackWithIndex$. Trivial to state, indispensable once a proof juggles three or
-    four differently-named frame variables that are provably-but-not-syntactically the same frame
-    (a recurring situation throughout \S\ref{sec:fralf-technique}'s per-operation files).
-  \item Lemma~\ref{lem:index-confinement} — turns \emph{every} ``can this later/mutated thing be
-    reached from there'' question into a numeric comparison, which is what makes the case splits in
-    \S\ref{sec:fralf-technique} decidable rather than requiring genuine reachability search.
-  \item The ``\textit{H2} forbids a reference from being a step target'' trick
-    (\S\ref{sec:frameatlaterframe-merge}) generalizes beyond \op{merge}: any future operation that
-    \emph{deletes} a uniquely-referenced region reference can reuse the same shape (count-based
-    non-membership $\Rightarrow$ chain-position restriction $\Rightarrow$ transport reduces to a
-    root-only case split).
-  \item The $\xrightarrow{*}$-reformulation theorems (\file{main.tex} \S 5) exist purely so nothing
-    downstream ever inducts on the custom inductive relations directly.
-\end{itemize}
-
-\section{Pitfalls specific to reachability-confinement arguments}
-
-(Complements, does not repeat, \file{CLAUDE.md}'s general ``Proof-engineering gotchas'' list — these
-are specific to the confinement style of Part~\ref{sec:reachability}.)
-
 \begin{pitfall}[Open-only tools misapplied to a Closed region]
-Lemma~\ref{lem:index-confinement} (region variant) takes $status = Open$ as a hypothesis, because
-its proof leans on Lemma~\ref{lem:predecessor-open}, which is stated only for the Open case (an
-object inside a \emph{Closed} region has no stack-escape branch to bound in the first place). For a
-Closed region the right tool is Lemma~\ref{lem:closed-confinement}/\S\ref{sec:cr6} instead. Reaching
-for the Open-only lemma on a Closed region fails to apply outright rather than silently giving a
-wrong bound — but it is an easy mismatch when adapting an existing per-operation proof to a new
-operation.
+\S\ref{wt:confined}'s index-confinement lemma (region variant) takes $status = Open$ as a
+hypothesis, because its proof leans on \texttt{predecessor\_of\_region\_object}, which is stated
+only for the Open case (an object inside a \emph{Closed} region has no stack-escape branch to bound
+in the first place). For a Closed region the right tool is \S\ref{wt:cr6}'s confinement lemmas
+instead. Reaching for the Open-only lemma on a Closed region fails to apply outright rather than
+silently giving a wrong bound — but it is an easy mismatch when adapting an existing per-operation
+proof to a new operation.
 \end{pitfall}
 
 \begin{pitfall}[$\mathit{loc}(\cdot)$ is treated as opaque]
@@ -524,5 +571,26 @@ the three \texttt{\_iff\_in\_*} restatement lemmas of \S\ref{sec:invariants}. Ev
 treats $.loc(\cdot)$ as an opaque function characterized by those iffs, never by unfolding its
 definition again.
 \end{pitfall}
+
+\begin{pitfall}[picking the wrong \texttt{ReflTransGen} induction principle]
+Ordinary constructor induction fixes the chain's start and grows its end; \texttt{head\_induction\_on}
+fixes the end and peels off the start. Using the one that doesn't match what the argument actually
+needs to generalize doesn't error — it produces a stuck goal several tactics later. See
+\S\ref{sec:reach-recap}.
+\end{pitfall}
+
+\begin{pitfall}[an $\iff$ needs both halves proved independently]
+It is tempting to think the $cfg' \to cfg$ direction of an escape argument is just the $cfg \to
+cfg'$ direction ``with the arguments flipped''. It is not: the newly-written edge exists in $cfg'$
+but not $cfg$, so the escape case genuinely only arises in one of the two directions and has to be
+proved on its own terms there. See \S\ref{sec:fralf-shapes}.
+\end{pitfall}
+
+\subsection{What's deliberately not done here}
+No analogue of a \op{Guarantees.lean}-style top-level GC-safety theorem sits on top of
+$\mathit{StackReachableInvariant}$ yet. Everything in \S\ref{sec:howtheywork} is a
+\emph{single-step} fact; composing it over an arbitrary-length trace — the literal
+\file{main.tex}/report.pdf claim, which talks about invariance for as long as a region stays
+suspended, not just across one operation — is not currently being pursued.
 
 \end{document}
