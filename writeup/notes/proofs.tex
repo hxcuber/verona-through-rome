@@ -2,25 +2,18 @@
 
 \usepackage[margin=1in]{geometry}
 \usepackage{amsmath,amssymb,amsthm}
-\usepackage{mathpartir}
 \usepackage{underscore}   % lets identifier_names appear in \texttt{} without escaping
 \usepackage{hyperref}
 \usepackage{enumitem}
 \usepackage{booktabs}
+\usepackage{longtable}
 
 \newcommand{\inN}{\!\in\!}
 \newcommand{\file}[1]{\texttt{#1}}
 \newcommand{\op}[1]{\texttt{#1}}
+\newcommand{\thm}[1]{\textbf{\texttt{#1}}}
 
-\theoremstyle{definition}
-\newtheorem{definition}{Definition}[section]
-\newtheorem{lemma}[definition]{Lemma}
-\newtheorem{theorem}[definition]{Theorem}
-\newtheorem{corollary}[definition]{Corollary}
-\newtheorem{remark}[definition]{Remark}
-\newtheorem{pitfall}[definition]{Pitfall}
-
-\title{Proof notes: what each result actually says and why it's true}
+\title{Proof catalog: every theorem, how it's proved, and the lemmas it leans on}
 \author{Hoang Nguyen}
 \date{}
 
@@ -28,38 +21,23 @@
 \maketitle
 
 \begin{abstract}
-Most theorems below sound obviously true: merging regions can't duplicate an id, a field write
-somewhere active can't disturb a suspended region, a closed region only opens through its front
-door. Intuition gives the headline, not the proof: each either hides an assumption that needs
-deriving from the model's invariants, or is wrong until qualified in a way you'd only notice by
-trying to break it. This is for someone who trusts the model (\file{writeup/main.tex},
-\file{lean/gc/README.md}) but hasn't seen how these results actually got proved.
-
-Each result: the claim, what intuition covers, where the real work is, how the proof gets there. A
-lemma catalog and known pitfalls follow at the end, for lookup once you know which proof you want.
-
-Scope: \file{Gc/Model/} and \file{Gc/Reachability/Reachable/}. \file{Gc/Reachability/Referencable/}
-is excluded (deprecated, superseded by \file{Reachable/}; see \file{CLAUDE.md}).
+Every named theorem proved in \file{Gc/Model/} and \file{Gc/Reachability/Reachable/}, listed with
+a one-line statement, a rough sketch of the proof, and the key supporting lemmas it actually calls.
+\file{Gc/Reachability/Referencable/} is excluded (deprecated, superseded by \file{Reachable/}; see
+\file{CLAUDE.md}). Definitions and formal statements already given in full in
+\file{writeup/main.tex} are cited by name, not restated.
 \end{abstract}
 
 \tableofcontents
 
-\section{Preliminaries}
+\section{Notation}
 
-\subsection{The model}
-
-Configuration $\langle S, H\rangle$ (stack, heap) and the nine operations' rules: full definitions
-in \file{writeup/main.tex}'s ``Model''/``Operational Semantics''.\footnote{Compiles standalone, so
-section names are given in prose, not as cross-file \texttt{\textbackslash ref}s.} Notation:
-$\mathsf{RId}(rid)$/$\mathsf{OId}(oid)$ for references, $a.loc(\langle S,H\rangle)$ for where a
-reference resolves ($\mathsf{Stk}(fid)$, $\mathsf{Rgn}(rid)$, undefined), $a.objAt(\langle
-S,H\rangle)$ for the object an $\mathsf{OId}$ names.
-
-\subsection{The ten invariants of \textit{ValidConfig}}
-\label{sec:invariants}
-
-\file{main.tex} defines all ten and bundles them into \textit{ValidConfig}. Not restated here, just
-what each forbids:
+$\langle S, H\rangle$: stack of frames, heap of regions. $\mathsf{RId}(rid)$/$\mathsf{OId}(oid)$:
+references. $a.loc(\langle S,H\rangle)$: where a reference resolves ($\mathsf{Stk}(fid)$,
+$\mathsf{Rgn}(rid)$, or undefined). $a.objAt(\langle S,H\rangle)$: the object an $\mathsf{OId}$
+names. The ten invariants \textit{L1}, \textit{L2}, \textit{H1}, \textit{H2}, \textit{H3},
+\textit{S1}, \textit{S2}, \textit{S3}, \textit{HS1}, \textit{HS2} making up \textit{ValidConfig}
+are defined in \file{main.tex}; one-line reminders:
 
 \begin{center}
 \begin{tabular}{@{}ll@{}}
@@ -80,359 +58,454 @@ Invariant & What it rules out \\
 \end{tabular}
 \end{center}
 
-\begin{remark}
-\textit{HS1}/\textit{HS2} don't follow from the rest: \textit{H2}/\textit{H3}/\textit{S2}/\textit{S3}
-all presuppose a reference that already resolves somewhere, none says anything about one that
-resolves to nothing. Without them a stale reference could sit inert and later collide, uncaught,
-with a freshly allocated id. (Surfaced while proving \textit{S2}/\textit{S3} for the three
-\op{make*} operations, whose \op{freshObjectId}/\op{freshRegionId} only look at ids used as keys.)
-\end{remark}
+\section{\file{Gc/Model}: \textit{ValidConfig} preservation}
 
-Four corollaries (\file{Validity.lean}), cited constantly in both layers:
-\begin{itemize}[nosep]
-  \item \texttt{oid\_in\_stack\_implies\_not\_in\_heap} / \texttt{oid\_in\_heap\_implies\_not\_in\_stack}:
-    from \textit{L1}, an id found by one search isn't found by the other.
-  \item \texttt{oid\_loc\_rgn\_iff\_in\_heap}, \texttt{oid\_loc\_stk\_iff\_in\_stack},
-    \texttt{rid\_loc\_rgn\_iff\_in\_heap}: rewrite $\mathsf{OId}(oid).loc(\langle S,H\rangle) =
-    \mathsf{Rgn}(rid)$ into $\exists\, region.\ H(rid) = region \wedge oid \inN region.objMap$.
-    Every later file reasons about where an id lives via one of these, not the raw definition.
-\end{itemize}
+Each \op{<op>\_valid} theorem has the shape $\mathit{ValidConfig}(cfg) \to op\ cfg =
+\mathsf{some}\ cfg' \to \mathit{ValidConfig}(cfg')$, proved by destructing the operation via its
+\op{<op>\_cases} lemma and discharging the ten invariants one at a time. Below, each invariant is
+marked either trivial (with the one-line reason) or given its key lemma.
 
-\subsection{$RuntimeConfig.start$ satisfies \textit{ValidConfig}}
+\subsection{\thm{RuntimeConfig.start\_valid}}
+Base case: one root region (Open, bridge $0$), one root frame. All ten invariants reduce to facts
+about a one- or two-element list, closed by \texttt{decide}/\texttt{simp}.
 
-One root region (Open, bridge object $0$), one root frame. Each invariant unfolds to a fact about a
-one- or two-element list, closed by \texttt{decide}/\texttt{simp}/\texttt{List.nodup\_singleton}.
-Exists only to anchor the induction below.
-
-\subsection{The preservation proof pattern}
-\label{sec:preservation-pattern}
-
-Each \file{Gc/Model/Mutation/<Op>.lean} defines the operation as an $Option\ RuntimeConfig$
-\texttt{do}-block, each bind a failable precondition matching \file{main.tex}'s rule, paired with
-an \op{<op>\_cases} lemma unpacking a success into an explicit disjunction, one disjunct per rule
-variant. This is the operation's real specification: a missing disjunct or wrong side condition
-wouldn't error here (the case lemma just replays the \texttt{do}-block), only later, as an
-unprovable or vacuous theorem downstream. Every proof below destructs
-$op\ cfg = \mathsf{some}\ cfg'$ via \op{<op>\_cases} once, then argues from the values it produces.
-
-\file{Preservation/<Op>.lean} proves ten lemmas $\op{<op>\_L1}, \dots, \op{<op>\_HS2}$, combined
-into $\op{<op>\_valid} : \mathit{ValidConfig}(cfg) \to op\ cfg = \mathsf{some}\ cfg' \to
-\mathit{ValidConfig}(cfg')$. \file{Preservation.lean} aggregates all nine, case-split on the
-reified $Stmt$ type, into one $\mathit{AllPreserve}(\mathit{ValidConfig})$.
-
-\section{How the proofs actually work}
-\label{sec:howtheywork}
-
-Five walkthroughs, covering both layers and every distinct technique. \S\ref{wt:merge-valid} needs
-only \S\ref{sec:invariants}. \S\ref{wt:confined}--\ref{wt:merge-portal} need
-\S\ref{sec:reach-recap}'s recap of \file{Gc/Reachability/Reachable/} (full definitions in
-\file{main.tex}).
-
-\subsection{\op{merge} keeps the configuration valid}
-\label{wt:merge-valid}
-
-\textbf{Claim.} \op{merge x} folds a Closed region \op{rid'} into the current Open region \op{rid}
-(combines their \textit{objMap}s, deletes \op{rid'}, rebinds \texttt{x} to \op{rid'}'s old bridge
-object). Result is still a \textit{ValidConfig}: no duplicate ids (\textit{L1}), contents still
-resolve into their own region (\textit{H3}).
-
-\textbf{Intuition.} Pouring one region's objects into another creates and destroys nothing, so ids
-stay unique and everything still points home. Right story, but ``nothing created or destroyed'' is
-a semantic claim the proof must earn from \op{merge}'s precondition, not its description.
-
-\textbf{The two gaps.}
-\begin{itemize}[nosep]
-  \item \emph{Disjointness isn't given.} Nothing says the two regions' object-id sets are
-    disjoint. If not, the union could identify two different objects (breaking \textit{L1} the
-    other way) or, since $AList.union$ erases duplicate keys from one side, silently drop an
-    object. The precondition only gives Open/Closed; since those are mutually exclusive and
-    \textit{L1} forbids an id in two heap entries, that alone forces disjointness.
-  \item \emph{\textit{H3} needs a fresh search.} An object from the deleted \op{rid'} must resolve
-    into \op{rid} post-merge, but $.loc(\cdot)$ has no memory: it searches whatever heap exists
-    now. The proof reconstructs, via disjointness again, that this search lands on \op{rid} alone.
-\end{itemize}
-
-\textbf{The argument.}
-\begin{enumerate}[nosep]
-  \item \texttt{merge\_corollary\_rid\_ne\_regionId}: \op{rid}, \op{rid'} distinct, since Open
-    $\ne$ Closed.
-  \item \texttt{merge\_corollary\_region\_unique} (\textit{L1}): no id in two heap entries, so the
-    regions share none.
-  \item \texttt{merge\_corollary\_union\_append}: on disjoint keys, $s_1 \cup s_2$'s entries are
-    just $s_1.entries \mathbin{+\!\!+} s_2.entries$, not $AList.union$'s general, lossier form.
-  \item \texttt{merge\_corollary\_heap\_entries\_perm}: post-merge heap entries are a permutation
-    of the merged pair plus everything untouched (two nested \texttt{List.exists\_of\_kerase}
-    extractions).
-  \item \textit{L1} then follows from permutation-invariance of \texttt{List.count}/\texttt{Nodup}.
-  \item \textit{H3}: \texttt{merge\_corollary\_loc\_of\_mem}, since the stack side of
-    $.loc(\cdot)$'s search is untouched (\op{merge} only rewrites the current frame's varMap) and
-    the heap side's uniqueness pins \op{rid}'s merged entry as the only match.
-\end{enumerate}
-
-The hard part was never the union: it was showing the two regions could never have shared an id,
-then rebuilding where every affected object resolves under the new heap.
-
-\subsection{Reachability, recapped}
-\label{sec:reach-recap}
-
-$a \to b$ ($\mathit{ReachableStep}$): one hop. Beyond following an object's stored references,
-$\mathsf{RId}(rid) \to b$ needs $H(rid)$ Closed and forces $b = \mathsf{OId}(H(rid).bridgeObjectId)$.
-A Closed region's $\mathsf{RId}$ has exactly one outgoing step; an Open region's has none
-(\textit{L2}: a step forces Closed, contradicting an on-stack owner). A chain steps into a
-suspended region through this one door, never out, which is why this layer exists and why
-\S\ref{wt:cr6} is non-trivial.
-
-$\mathit{RegionReachable}(rid, \cdot)$/$\mathit{FrameReachable}(fid, \cdot)$: inductive closures of
-$\to$ from a region's bridge object, or a frame's roots ($\mathit{FrameRoot}$: a variable's value,
-or its region's bridge object). $\mathit{StackReachable}$: $\mathit{FrameReachable}$ from some
-on-stack frame. \file{main.tex} restates all as ``a root, plus a
-\texttt{Relation.ReflTransGen}$(\to)$ chain,'' the form every proof below inducts on.
-\texttt{ReflTransGen} has two induction principles: constructor induction (fixes the first element,
-grows the last; traces forward from a known root) and \texttt{head\_induction\_on} (fixes the last,
-peels off the first; chases an escaping chain from a known start). The wrong one doesn't error, it
-leaves a stuck goal.
-
-\subsection{Reaching backward in time}
-\label{wt:confined}
-
-\textbf{Claim (\texttt{region\_container\_confined}, \texttt{stack\_container\_confined}).} A
-reference chain from frame $fid$ back to an object inside an Open region (or stack frame) implies
-that container's owner has index $\le fid$.
-
-\textbf{Intuition.} You can't reach an earlier frame's stuff from a later one unless something
-already linked the two, close to \textit{S2}/\textit{S3} already.
-
-\textbf{What's missing.} \textit{S2}/\textit{S3} bound one hop. The claim is about a chain of
-unknown length, an opaque \texttt{ReflTransGen} witness. Going from one hop to the whole chain
-needs induction re-establishing the bound at every hop, with a case split at the moment a chain
-crosses from region to stack.
-
-\textbf{The argument.}
-\begin{enumerate}[nosep]
-  \item Restate as $\mathit{ReflTransGen}$ (\S\ref{sec:reach-recap}); the inductive relation's own
-    recursion runs the wrong way.
-  \item Induct forward from the fixed start, generalized over the chain's end. Inside the region,
-    \texttt{predecessor\_of\_region\_object} (\textit{H3}: one hop from an in-region object stays
-    in-region or escapes to stack, never a bare $\mathsf{RId}$ or another region) lets you recurse.
-    On the stack, the one-hop bound (\texttt{stack\_step\_region\_index\_le}, \textit{S3} at
-    single-hop level) closes it directly.
-  \item The two ways a chain starts (a variable slot, a frame's bridge object) close via
-    \textit{S3} plus \texttt{merge\_corollary\_regionId\_unique\_index} (same region $\Rightarrow$
-    same index).
-\end{enumerate}
-
-Here ``can't reach backward in time'' stops being a slogan: the chain is unboundedly long, so a
-one-hop fact needs bootstrapping into an arbitrary-length one, with a real case split at the
-region/stack boundary.
-
-\subsection{What ``Closed'' really buys you}
-\label{wt:cr6}
-
-\textbf{Claim (\textit{CR6}).} Once Closed: if nothing outside holds the region's $\mathsf{RId}$,
-nothing inside is stack-reachable; if something does, stack-reachability inside equals
-region-reachability from the bridge object.
-
-\textbf{Intuition.} Closed means sealed, front door or nothing, close to the definition already.
-
-\textbf{Why it isn't just the definition.} $\mathit{ReachableStep}$ only gives the forward
-direction (one successor). It says nothing about predecessors, so nothing rules out some other way
-in already. ``Sealed'' is a negative claim, and proving a negative means closing every other
-entrance: another region's object holding a pointer in (ruled out by \textit{H3}: a region's stored
-references resolve back into it, so nothing external holds a live pointer in), and a stack frame
-still executing there (ruled out by \textit{L2}: an on-stack frame can't own a Closed region).
-
-\textbf{The argument.}
-\begin{enumerate}[nosep]
-  \item \texttt{predecessor\_of\_closed\_region\_object}: \S\ref{wt:confined}'s lemma, Closed
-    version. ``Escaped to stack'' is now impossible (\textit{L2}'s contrapositive,
-    \texttt{closed\_region\_not\_owned}); the $\mathsf{RId}$ branch (the portal) becomes available
-    instead of ruled out.
-  \item \texttt{RegionReachable\_of\_FrameReachable\_closed} / \\
-    \texttt{FrameReachable\_rid\_of\_closed\_container}: backward induction, dispatching on (1)'s
-    two cases, still inside (recurse) or portal just used (stop; the tail already witnesses the
-    $\mathsf{RId}$ was reachable).
-  \item \textit{CR6}: stack-reachability inside a Closed region factors uniquely through the
-    portal.
-\end{enumerate}
-
-The definition of Closed gives the one allowed way in; \textit{CR6} proves it's the only way in,
-needing \textit{H3} and \textit{L2} to cover the two entrances the definition alone leaves open.
-
-\subsection{A field write in the active frame}
-\label{wt:fieldasgn}
-
-\textbf{Claim ($\mathit{FRALF}$ preserved by \op{fieldAsgn}).} An object in an earlier (possibly
-suspended) frame's region, already visible from every later frame, stays visible after a field
-write in the active frame.
-
-\textbf{Intuition.} A suspended region's contents aren't touched by a write elsewhere, almost the
-whole truth, which is exactly the danger: it stops one level too early.
-
-\textbf{Where it needs correcting.} The write creates one new edge, and nothing about ``active''
-rules out that edge connecting two things not connected before. The claim holds because anything
-visible from a strictly-suspended frame is, by \S\ref{wt:confined}, already confined to a root no
-later than that frame, strictly before the write. So the new edge is provably out of reach of any
-chain that matters here.
-
-\textbf{The argument.}
-\begin{enumerate}[nosep]
-  \item Let $oid_C$ be the mutated object's id. By \S\ref{wt:confined} applied to $oid_C$, anything
-    reaching it comes from index $\ge fid_{active}$, the active frame's own.
-  \item Any chain confined below $fid_{active}$ never touches $oid_C$ and transports untouched,
-    covering every suspended frame automatically.
-  \item The remaining case: a chain rooted at the active frame. Walk it forward
-    (\texttt{Relation.ReflTransGen.head\_induction\_on}), checking each hop against the new one. A
-    match jumps onto the write's new value, which has its own root (\texttt{resolveV\_frameRoot});
-    the argument restarts there, back in step 2's case.
-\end{enumerate}
-
-The new edge really could matter; the proof shows only one frame's chain could route through it,
-and even that reduces to an ordinary confined argument once traced to its own root.
-
-\subsection{Deleting a region reference}
-\label{wt:merge-portal}
-
-\textbf{Claim ($\mathit{FRALF}$ preserved by \op{merge}).} Same property, for the operation that
-deletes region \op{rid'} and the reference $\mathsf{RId}(rid')$ naming it.
-
-\textbf{Intuition.} \op{merge} relabels a heap key, creates nothing, so reachability from an
-earlier frame shouldn't change.
-
-\textbf{What that leaves out.} $\mathsf{RId}(rid')$, in the merging frame's variable \texttt{x}, is
-deleted and replaced by \op{region'.bridgeObjectId}. Any argument routed through the old reference
-needs re-deriving through the new one; ``nothing used it'' has to be shown, not asserted.
-
-\textbf{The argument.}
-\begin{enumerate}[nosep]
-  \item \texttt{merge\_ridPrime\_not\_step\_target}: $\mathsf{RId}(rid')$ can't be a step's target,
-    or \textit{H2}'s one-reference bound breaks (\texttt{x}'s occurrence is already the allowed
-    one). Pure counting, no chain analysis.
-  \item So it's only ever a chain's root: ``used the deleted reference'' is a question about the
-    start, not a hop-by-hop trace.
-  \item \texttt{merge\_chain\_transport\_down}: any chain rooted elsewhere transports
-    unconditionally.
-  \item The remaining case, rooted at $\mathsf{RId}(rid')$: \texttt{merge\_ridPrime\_reflTransGen\_iff}
-    shows its only first hop is its own bridge object, so the chain is the same, one hop shorter,
-    rooted at \op{region'.bridgeObjectId}, exactly \texttt{x}'s new value.
-\end{enumerate}
-
-\op{merge} needs its own argument because it deletes rather than edits a reference:
-\textit{H2}'s bound shows the deleted reference could only be a chain's start, turning an
-open-ended re-routing problem into a substitution.
-
-\section{Reference: everything else}
-
-The remaining operations, lemma catalog, and pitfalls, for lookup.
-
-\subsection{The other operations}
-
-\begin{description}
-  \item[\op{varAsgn x yf}] Bridge var: reassigns the region's bridge object; \textit{H1} holds
-    since the rule's own side condition ($yfRef.loc(\cdot) = \mathsf{Rgn}(rid)$, $rid =
-    frame.regionId$) forces the new bridge into the same, unchanged $objMap$. Otherwise: plain
-    local write gated by $resolveV(\texttt{x}, \cdot) = \epsilon$, keeping $resolveV$ unambiguous.
-  \item[\op{fieldAsgn xf y}] The stack/region rule split shows why \textit{H3} needs
-    $status = Open$: a region write needs the writer's frame in that region and the new value
-    resolving there too. Drop either and \textit{H3} fails. Reachability proof: \S\ref{wt:fieldasgn}.
-  \item[\op{swap x yf}] Busiest rule syntactically, but its invariant proofs are just
-    \op{fieldAsgn}'s and \op{varAsgn}'s run side by side.
-  \item[\op{makeObjStack x} / \op{makeObjRegion x}] Fresh empty object at
-    $\langle S,H\rangle.freshObjectId$. \textit{L1}: \texttt{freshObjectId\_not\_mem}.
-    \textit{H2}/\textit{HS1}: vacuous. \op{makeObjRegion} needs $status = Open$.
-  \item[\op{makeRegion x}] New Closed region, fresh bridge object. \textit{H2} vacuous by
-    freshness; Closed keeps \textit{L2} trivial.
-  \item[\op{merge x}] \S\ref{wt:merge-valid}, \S\ref{wt:merge-portal}.
-  \item[\op{enter xf bridgeVar} / \op{exit}] Push/pop, flip status. \textit{L2}/\textit{S1}: index
-    bookkeeping. Pushed frame is empty, so \textit{S2}/\textit{S3}/\textit{HS1} add nothing.
-    Reachability: ``additive'' (\S\ref{sec:fralf-shapes}), \texttt{safe\_reflTransGen\_transport}
-    applies directly.
+\subsection{\thm{enter\_valid} (\op{enter xf bridgeVar})}
+Pushes a new, empty frame into region \op{rid'} (found via \op{resolveFA xf}, must be Closed),
+flips \op{rid'} to Open.
+\begin{description}[nosep]
+  \item[L1] trivial: no \textit{objMap} touched (new frame is empty; heap change is a status flip).
+  \item[L2] the new frame's region is Open by construction; other frames' lookups survive the
+    heap update at a different key.
+  \item[H1] trivial: the status flip doesn't touch \textit{bridgeObjectId}/\textit{objMap}.
+  \item[H2] trivial: no reference created, removed, or relocated.
+  \item[H3] \texttt{enter\_corollary\_2}: $.loc(\cdot)$ is unconditionally unaffected (only a
+    status scalar changes), so existing \textit{H3} witnesses transfer directly.
+  \item[S1] \texttt{enter\_corollary\_1} (region-uniqueness from \textit{L1}) plus \textit{L2}'s
+    contrapositive: a Closed region (what \op{enter} requires) can't already be owned by an
+    on-stack frame, so the new frame's region is distinct from every existing one.
+  \item[S2, S3] the new frame is empty (nothing to check for it); existing frames rely on
+    \texttt{enter\_corollary\_2}.
+  \item[HS1, HS2] trivial: nothing new enters \textit{refs}.
 \end{description}
 
-\subsection{$\mathit{FRALF}$ preservation: three shapes}
-\label{sec:fralf-shapes}
-
-\begin{enumerate}[nosep]
-  \item \textbf{Additive} (\op{enter}, \op{exit}, \op{makeObjStack}, \op{makeObjRegion},
-    \op{makeRegion}, \op{varAsgn}): content unchanged, \texttt{safe\_reflTransGen\_transport}
-    (\S\ref{sec:catalog}) moves any chain for free.
-  \item \textbf{Content-mutating} (\op{fieldAsgn}, \op{swap}): \S\ref{wt:fieldasgn}'s escape
-    argument, owner-index bound.
-  \item \textbf{Reference-deleting} (\op{merge}): \S\ref{wt:merge-portal}'s root-only argument,
-    \textit{H2} count bound.
-\end{enumerate}
-\file{StackReachableInvariant/} proves the same case analysis as an $\iff$. The two directions
-aren't mirror images: the new edge exists in $cfg'$ not $cfg$, so escape only arises going
-$cfg' \to cfg$.
-
-\subsection{Reusable lemma catalog}
-\label{sec:catalog}
-
-\begin{description}
-  \item[\texttt{stackWithIndex\_frame\_transport\_down/up\_of\_shape\_eq}] $cfg,cfg'$ agreeing up
-    to projection $\pi$ at every stack position transports $stackWithIndex$ membership, preserving
-    $.index$ and $\pi$.
-  \item[\texttt{stackWithIndex\_objMap\_get\_eq\_of\_last\_varMap\_update}] Last frame's $varMap$
-    changed $\Rightarrow$ $objMap$ unaffected everywhere.
-  \item[\texttt{merge\_corollary\_regionId\_unique\_index}] \textit{S1} at the $FrameWithIndex$
-    level: same region $\Rightarrow$ same frame $\Rightarrow$ same index.
-  \item[\texttt{swap\_corollary\_stackWithIndex\_index\_inj} / \texttt{\_find\_eq}] Same
-    $.index$ $\Rightarrow$ same element. The most-cited lemma in \file{Reachable/}: collapses
-    differently-named-but-identical frame variables.
-  \item[\texttt{predecessor\_of\_region\_object} / \texttt{\_of\_closed\_region\_object}] Backward
-    confinement, one hop; \S\ref{wt:confined}/\S\ref{wt:cr6}.
-  \item[\texttt{SafeRef} / \texttt{predecessor\_safe} / \texttt{safe\_reflTransGen\_transport}] Safe
-    for $rid$: in $rid$ or on stack, never a bare $\mathsf{RId}$. Propagates backward one hop;
-    matching step relations transport a safe-ending chain wholesale. Behind the ``additive'' shape.
-  \item[\texttt{stack\_container\_confined} / \texttt{region\_container\_confined}]
-    \S\ref{wt:confined}'s index bound.
-  \item[\texttt{RegionReachable\_of\_FrameReachable\_closed} / \\
-    \texttt{FrameReachable\_rid\_of\_closed\_container}] Closed-region confinement behind
-    \textit{CR6}.
-  \item[\textit{H2}-forbids-a-step-target trick] (\S\ref{wt:merge-portal}) generalizes: deleting
-    any uniquely-referenced region reference reduces transport to a root-only case split.
+\subsection{\thm{exit\_valid} (\op{exit})}
+Pops the last frame, flips its region back to Closed.
+\begin{description}[nosep]
+  \item[L1] trivial: the popped frame's ids are simply dropped, and by \textit{L1} on \op{cfg}
+    they were already disjoint from everything remaining.
+  \item[L2] surviving frames' regions are untouched by the status flip except needing
+    ``region $\ne$ the popped one,'' from \textit{S1}.
+  \item[H1] trivial: status flip only.
+  \item[H2] trivial: no reference touched.
+  \item[H3] the popped frame's contents vanish with it; survivors' locations are unaffected.
+  \item[S1, S2, S3] index bookkeeping over the shrunk stack (survivors keep their indices;
+    nothing points at the now-gone last slot). \emph{Naming note:} in \file{Preservation/Exit.lean}
+    these are proved by \texttt{exit\_S2}, \texttt{exit\_S3}, \texttt{exit\_S4} respectively (an
+    internal off-by-one in the file's own lemma names, not in the mathematics).
+  \item[HS1, HS2] the popped frame's refs disappear; nothing new appears.
 \end{description}
 
-\subsection{Pitfalls}
+\subsection{\thm{fieldAsgn\_valid} (\op{fieldAsgn xf y})}
+Overwrites one field of an object already resolved via \op{resolveV}, either on the stack (same
+frame) or inside the writer's own Open region (target must resolve into that same region too).
+\begin{description}[nosep]
+  \item[L1, L2, S1, H1] trivial: no id allocated, no frame/region/bridge changed, only a field
+    value inside an already-present object.
+  \item[H2] the new value is always an $\mathsf{OId}$ (this rule never stores an
+    $\mathsf{RId}$ in a field), so overwriting can only decrease-or-preserve the
+    $\mathsf{RId}$-count: \texttt{fieldAsgn\_corollary\_object\_insert\_count\_le} lifted through
+    \texttt{\_objMap\_insert\_bind\_refs\_count\_le}/\texttt{\_heap\_insert\_refs\_count\_le}.
+  \item[H3] the region branch's own side condition (new value resolves into the \emph{same}
+    region as the target) is exactly what \textit{H3} needs; formalized via
+    \texttt{fieldAsgn\_corollary\_region\_loc\_eq}/\texttt{\_region\_heap\_objectIds\_perm}.
+  \item[S2, S3] both \op{xf.root} and \op{y} were already resolvable (hence already
+    index-bounded) before the write; \texttt{fieldAsgn\_corollary\_resolveV\_loc\_ancestor} carries
+    that bound over to the newly-stored occurrence.
+  \item[HS1] \texttt{fieldAsgn\_corollary\_resolveV\_oid\_mem\_objectIds}: the written value was
+    already live, so already counted in \textit{objectIds}.
+  \item[HS2] trivial: no $\mathsf{RId}$ ever passes through this rule.
+\end{description}
 
-\begin{pitfall}[\texttt{AList.insert} reorders on an existing key]
-Via $kinsert$/$kerase$, unlike a fresh key. Entries-level equality after an insert
-(\S\ref{wt:merge-valid}) needs \texttt{List.Perm} (\texttt{exists\_of\_kerase} +
-\texttt{NodupKeys.eq\_of\_mk\_mem}), not ``insert = append.''
-\end{pitfall}
+\subsection{\thm{makeObjRegion\_valid} (\op{makeObjRegion x})}
+Allocates a fresh, empty object directly inside the writer's own Open region.
+\begin{description}[nosep]
+  \item[L1] \texttt{RuntimeConfig.freshObjectId\_not\_mem}: the fresh id can't already be present.
+  \item[L2, S1] trivial: no frame/region status or ownership changes.
+  \item[H1] trivial: the pre-existing bridge id is untouched by inserting a new key.
+  \item[H2] \texttt{makeObjRegion\_corollary\_heap\_refs\_perm}: the new object is empty (no
+    refs), so \textit{Heap.refs} is an exact permutation of before.
+  \item[H3] the fresh object trivially satisfies it (it's the region just written); other objects
+    rely on \texttt{makeObjRegion\_corollary\_loc\_eq} (needs
+    \texttt{makeObjRegion\_corollary\_region\_unique} to handle the heap-entry reorder from
+    inserting at an already-present region key).
+  \item[S2, S3] \texttt{makeObjRegion\_corollary\_loc\_fresh}: the fresh object always resolves
+    into the heap (never the stack), so \textit{S2} is vacuous for it and \textit{S3} is trivial
+    (owning frame is the current one).
+  \item[HS1] trivial: the fresh object is now in \textit{objectIds} by construction.
+  \item[HS2] trivial: no $\mathsf{RId}$ touched.
+\end{description}
 
-\begin{pitfall}[\textit{Status} has no \texttt{LawfulBEq}]
-\texttt{beq\_iff\_eq} doesn't fire. Open/Closed contradictions close by case-splitting
-$region.status$ and \texttt{decide}, not rewriting \texttt{==}.
-\end{pitfall}
+\subsection{\thm{makeObjStack\_valid} (\op{makeObjStack x})}
+Allocates a fresh, empty object directly on the current frame's own (stack-local) \textit{objMap};
+the heap is untouched entirely (\texttt{makeObjStack\_corollary\_1}).
+\begin{description}[nosep]
+  \item[L1] \texttt{freshObjectId\_not\_mem}, on the stack side.
+  \item[L2, H1, H2] trivial: heap untouched.
+  \item[H3] doesn't apply to the fresh object (it resolves to \textit{Stk}, not \textit{Rgn}); heap
+    side is untouched for everything else.
+  \item[S1] trivial.
+  \item[S2, S3] the fresh object resolves to the current (last) frame's own index, trivially
+    within bound; other objects are unaffected (insert at a fresh key).
+  \item[HS1, HS2] trivial.
+\end{description}
 
-\begin{pitfall}[the \op{<op>\_cases} lemma is the semantics]
-Read it, not the opaque \texttt{do}-block, when in doubt about a precondition. A mistake there
-stays invisible until a downstream theorem quietly stops being provable.
-\end{pitfall}
+\subsection{\thm{makeRegion\_valid} (\op{makeRegion x})}
+Allocates a fresh Closed region with its own fresh bridge object, storing $\mathsf{RId}$ to it in
+the current frame's variable \texttt{x}.
+\begin{description}[nosep]
+  \item[L1] \texttt{freshObjectId\_not\_mem} for the new bridge object.
+  \item[L2] trivial for existing frames (insert at a genuinely fresh heap key disturbs nothing);
+    nobody executes in the new region yet.
+  \item[H1] trivial by construction: the fresh region's only object is its own bridge.
+  \item[H2] the new $\mathsf{RId}$ is stored exactly once (in \texttt{x}), and a not-yet-existing
+    region id can't already have been referenced (old config's \textit{HS2} plus
+    \texttt{freshRegionId\_not\_mem}).
+  \item[H3] trivial for the fresh region; \texttt{makeRegion\_corollary\_loc\_eq} for everything
+    else (fresh-key insert, no reorder needed).
+  \item[S1] trivial: no existing frame's regionId changes, and the new region isn't any frame's.
+  \item[S2, S3] the fresh bridge object resolves into the heap (never the stack); its owning
+    frame is the one that just created it.
+  \item[HS1] trivial: fresh bridge object now in \textit{objectIds}.
+  \item[HS2] trivial: fresh region id now in \textit{heap.keys} by construction.
+\end{description}
 
-\begin{pitfall}[Open-only tools on a Closed region]
-\S\ref{wt:confined}'s region lemma needs $status = Open$ (leans on
-\texttt{predecessor\_of\_region\_object}, Open-only). For Closed, use \S\ref{wt:cr6}'s lemmas: the
-Open-only one just fails to apply, an easy mismatch when adapting to a new operation.
-\end{pitfall}
+\subsection{\thm{merge\_valid} (\op{merge x})}
+Folds a Closed region \op{rid'} into the current Open region \op{rid}: combines their
+\textit{objMap}s, deletes \op{rid'}, rebinds \texttt{x} to \op{rid'}'s old bridge object. The
+busiest file ($\sim$1200 lines), the only operation deleting a heap key.
+\begin{description}[nosep]
+  \item[The load-bearing fact] the two regions' object-id sets are disjoint:
+    \texttt{merge\_corollary\_rid\_ne\_regionId} (Open $\ne$ Closed) plus
+    \texttt{merge\_corollary\_region\_unique} (an \textit{L1} corollary: no id in two heap
+    entries). This alone rules out the union silently colliding or dropping an object, since
+    \texttt{AList.union} in general erases duplicate keys from one side.
+  \item[L1] \texttt{merge\_corollary\_union\_append} (disjoint keys $\Rightarrow$ union is a plain
+    append) plus \texttt{merge\_corollary\_heap\_entries\_perm} (the post-merge heap is a
+    permutation of the merged pair plus everything untouched, via two nested
+    \texttt{List.exists\_of\_kerase} extractions): \textit{L1} then follows from
+    permutation-invariance of \texttt{Nodup}.
+  \item[L2, S1] trivial: only the last frame's \textit{varMap} and the two regions' heap entries
+    change.
+  \item[H1] the merged region's bridge object (\op{rid}'s own, unchanged) is still present, since
+    the union only adds keys.
+  \item[H2] the deleted reference $\mathsf{RId}(rid')$ simply disappears from \textit{refs}; the new
+    $\mathsf{OId}$ written to \texttt{x} was already counted under \textit{H1} of \op{rid'}.
+  \item[H3] \texttt{merge\_corollary\_loc\_of\_mem}: an object from either original region still
+    resolves into the merged \op{rid}, since the stack side of $.loc(\cdot)$ is untouched (only
+    \texttt{x}'s \textit{varMap} entry changes) and the heap side's uniqueness (from \textit{L1}
+    above) pins \op{rid}'s merged entry as the only match.
+  \item[S2, S3] carried by the same \texttt{merge\_corollary\_loc\_of\_mem}/index-split machinery
+    as \textit{H3}; \texttt{merge\_corollary\_stackWithIndex\_split} handles the shared
+    ``last frame changed, rest didn't'' bookkeeping.
+  \item[HS1, HS2] follow from the permutation facts above: nothing created or destroyed, only
+    relocated.
+\end{description}
 
-\begin{pitfall}[$\mathit{loc}(\cdot)$ treated as opaque]
-Unfolded once, in \file{Validity.lean}, to prove \S\ref{sec:invariants}'s three
-\texttt{\_iff\_in\_*} lemmas; every later file treats it as opaque from then on.
-\end{pitfall}
+\subsection{\thm{varAsgn\_valid} (\op{varAsgn x yf})}
+Two branches: rebind the frame's own bridge variable to an already-in-region value (``bridge
+branch''), or bind a fresh local variable to a resolved value (``fresh-var branch'', requiring
+\op{resolveV x cfg = none}).
+\begin{description}[nosep]
+  \item[L1] trivial both branches: no object created; bridge branch permutes
+    \textit{heap.objectIds} via a reorder (insert at an existing key), not a content change
+    (\texttt{varAsgn\_corollary\_bridge\_heap\_objectIds\_perm}).
+  \item[L2, S1] trivial: no region status or frame regionId touched.
+  \item[H1] bridge branch: the new bridge id is already inside the region by the rule's own
+    side condition ($yfRef.loc(\cdot) = \mathsf{Rgn}(rid)$, $rid = frame.regionId$). Fresh-var:
+    trivial.
+  \item[H2] \texttt{varAsgn\_corollary\_bridge\_heap\_refs\_perm}: \textit{bridgeObjectId} isn't
+    read by \textit{Region.refs} at all, so the bridge branch's heap refs are literally
+    unchanged; fresh-var branch only relocates an existing reference into a new var slot.
+  \item[H3] \texttt{varAsgn\_corollary\_loc\_eq}: $.loc(\cdot)$ is unconditionally preserved in
+    both branches (literal equality for fresh-var; uniqueness-based,
+    \texttt{varAsgn\_corollary\_region\_unique}, for the bridge branch's heap reorder).
+  \item[S2, S3] fresh-var branch: \texttt{varAsgn\_corollary\_resolveV\_loc\_ancestor} /
+    \texttt{\_yfRef\_ancestor} show the copied value already had a valid owning ancestor frame on
+    the stack before the copy.
+  \item[HS1] fresh-var branch: \texttt{varAsgn\_corollary\_yfRef\_mem\_refs} (the copied value was
+    already live).
+  \item[HS2] trivial: no $\mathsf{RId}$ is ever created or moved by \op{varAsgn}.
+\end{description}
 
-\begin{pitfall}[wrong \texttt{ReflTransGen} induction principle]
-Constructor induction fixes the start, grows the end; \texttt{head\_induction\_on} fixes the end,
-peels the start. Wrong choice: a stuck goal, not an error. See \S\ref{sec:reach-recap}.
-\end{pitfall}
+\subsection{\thm{swap\_valid} (\op{swap x yf})}
+The busiest rule syntactically (four branches: stack, region-object, region-region,
+region-bridge), each exchanging two live reference slots at once. Largest file ($\sim$2250 lines).
+\begin{description}[nosep]
+  \item[L1, L2, S1] trivial: no allocation, only reassigning values at already-present keys.
+  \item[H1] the region-bridge branch rebinds \textit{bridgeObjectId}; same argument as
+    \op{varAsgn}'s bridge branch (new bridge already inside the region, by the rule's side
+    condition).
+  \item[H2] \texttt{swap\_corollary\_alist\_insert\_count\_eq} /
+    \texttt{\_objMap\_insert\_bind\_count\_eq} / \texttt{\_heap\_insert\_bind\_count\_eq}: since
+    \op{swap} is a genuine exchange (the two count-deltas from displacing one value and inserting
+    another cancel exactly), the overall $\mathsf{RId}$-count is provably unchanged, not merely
+    bounded.
+  \item[H3] the region-touching branches' own side conditions keep everything inside one Open
+    region; \texttt{swap\_corollary\_region\_loc\_eq}/\texttt{\_stack\_loc\_eq} carry pre-existing
+    objects' locations across.
+  \item[S2, S3] (the two largest proofs in the file) need both the displaced old value and the
+    newly-copied value to respect index bounds simultaneously;
+    \texttt{swap\_corollary\_stack\_field\_eq\_yfRef}/\texttt{\_region\_field\_eq\_yfRef} confirm
+    the overwritten field held exactly the value being displaced (a genuine exchange, not a blind
+    overwrite), and existing \textit{S2}/\textit{S3} facts about both slots' pre-mutation values
+    carry over.
+  \item[HS1, HS2] both displaced values were already live before the swap, so nothing new enters
+    \textit{refs}.
+\end{description}
 
-\begin{pitfall}[an $\iff$ needs both halves independently]
-$cfg' \to cfg$ isn't $cfg \to cfg'$ flipped: the new edge exists only in $cfg'$, so escape arises
-in one direction only. See \S\ref{sec:fralf-shapes}.
-\end{pitfall}
+\subsection{\thm{allPreserve\_ValidConfig}}
+Case-splits on the reified $Stmt$ type (\file{Mutation/Stmt.lean}) and dispatches to the nine
+theorems above. No independent content.
 
-\subsection{What's deliberately not done}
-No \op{Guarantees.lean}-style top-level GC-safety theorem yet. Everything above is single-step;
-composing over an arbitrary-length trace (the literal report.pdf claim) isn't currently pursued.
+\section{\file{Gc/Reachability/Reachable}: semantics and the confinement toolkit}
+
+\subsection{Semantics-level theorems (\file{Semantics.lean})}
+
+$\mathit{ReachableStep}$, $\mathit{RegionReachable}$, $\mathit{FrameReachable}$,
+$\mathit{StackReachable}$, $\mathit{FrameRoot}$ are defined in full in \file{main.tex}.
+
+\begin{description}[nosep]
+  \item[\thm{RegionReachable\_iff\_reflTransGen}] $\mathit{RegionReachable}(rid,ref) \iff \exists\,
+    region,\ H(rid){=}region \wedge \texttt{ReflTransGen}(\to)\,(\mathsf{OId}(region.bridgeObjectId))\,ref$.
+    Proof: the inductive \texttt{bridge}/\texttt{step} constructors correspond exactly to
+    \texttt{ReflTransGen}'s \texttt{refl}/\texttt{tail}; induction on either side transfers
+    directly.
+  \item[\thm{FrameReachable\_iff\_reflTransGen}] Same idea with two possible roots
+    ($\mathit{FrameRoot}$: a variable's value, or the frame's own bridge object) instead of one.
+  \item[\thm{RegionReachable\_implies\_FrameReachable}] If frame $F$ owns region $rid$,
+    $\mathit{RegionReachable}(rid,\cdot) \to \mathit{FrameReachable}(F.index,\cdot)$: induction on
+    the $\mathit{RegionReachable}$ witness, replacing the \texttt{bridge} base case with
+    $\mathit{FrameReachable}.\texttt{bridge}$.
+\end{description}
+
+\subsection{The confinement toolkit (\file{Lemmas/Common.lean})}
+
+\begin{description}[nosep]
+  \item[\thm{stack\_step\_index\_le}] \textit{S2} restated at the \texttt{ReachableStep} level: a
+    stack$\to$stack hop's target frame index is $\le$ the source's. \emph{Proof:} unfold
+    \texttt{objAt?} at the source, apply \textit{S2} directly to the resulting membership fact.
+  \item[\thm{successor\_of\_region\_object}] \textit{H3} forward, at the \texttt{ReachableStep}
+    level: stepping out of an object in region $rid$ lands back in $rid$. \emph{Proof:} unfold
+    \texttt{objAt?}, apply \textit{H3}.
+  \item[\thm{predecessor\_of\_region\_object}] Backward confinement, Open region: anything
+    stepping \emph{into} an in-region object is itself in that region or on the stack, never a bare
+    $\mathsf{RId}$ or a different region. \emph{Proof:} case on the predecessor; an $\mathsf{RId}$
+    source is ruled out by \texttt{open\_rid\_no\_step} (same region) or by \textit{H3} forcing the
+    other region's bridge object's own location to disagree; an $\mathsf{OId}$ source is
+    reclassified by \textit{H3} applied to whatever it currently resolves into.
+  \item[\thm{predecessor\_of\_closed\_region\_object}] Same statement, Closed region: the ``on
+    stack'' branch is now impossible (\texttt{closed\_region\_not\_owned}, \textit{L2}'s
+    contrapositive), and the $\mathsf{RId}$ branch (the portal) becomes an admissible predecessor
+    instead of a contradiction.
+  \item[\thm{predecessor\_of\_stack\_object}] Backward confinement, stack: anything stepping into a
+    stack-resident object is itself stack-resident (an $\mathsf{RId}$ or region-object predecessor
+    is ruled out via \textit{H3} forcing a \textit{Rgn} location, contradicting \textit{Stk}).
+  \item[\thm{SafeRef} / \thm{predecessor\_safe} / \thm{safe\_reflTransGen\_transport}]
+    $\mathit{SafeRef}_{rid}(ref)$: in $rid$ or on the stack, never a bare $\mathsf{RId}$. Safety
+    propagates backward one hop (combines the two predecessor lemmas above); if
+    \texttt{ReachableStep} agrees on every $\mathsf{OId}$-sourced step between $cfg,cfg'$, any
+    chain ending at a safe target transports wholesale (induction on the chain, applying
+    \texttt{predecessor\_safe} at each step).
+  \item[\thm{stack\_container\_confined}] Anything $\mathit{FrameReachable}$-reaching a
+    stack-resident object at index $fid_C$ is rooted from index $\ge fid_C$. \emph{Proof:} restate
+    as \texttt{ReflTransGen}, induct forward from the fixed root generalized over the chain's
+    (growing) end, applying \texttt{predecessor\_of\_stack\_object} and
+    \thm{stack\_step\_index\_le} at each hop; the two root shapes close via \textit{S2} directly.
+  \item[\thm{stack\_step\_region\_index\_le}] \textit{S3} restated at the \texttt{ReachableStep}
+    level (the region-side analogue of \texttt{stack\_step\_index\_le}).
+  \item[\thm{region\_container\_confined}] Anything reaching an object inside an \emph{Open}
+    region owned by frame $ownerFrame$ is rooted from index $\ge ownerFrame.index$. \emph{Proof:}
+    same shape as \texttt{stack\_container\_confined}, dispatching on
+    \texttt{predecessor\_of\_region\_object}'s two surviving cases (stay in-region, or escape to
+    stack via \texttt{stack\_step\_region\_index\_le} plus
+    \texttt{merge\_corollary\_regionId\_unique\_index} to convert ``same region'' into ``same
+    index'').
+  \item[\thm{FrameReachable\_extend}] Extends a $\mathit{FrameReachable}$ witness forward along any
+    further \texttt{ReflTransGen} chain (one line: \texttt{FrameReachable.step} repeatedly).
+  \item[\thm{RegionReachable\_of\_FrameReachable\_closed}] For a \emph{Closed} region: any
+    $\mathit{FrameReachable}$ witness to an in-region object is already a
+    $\mathit{RegionReachable}$ one. \emph{Proof:} backward induction over the chain, dispatching on
+    \texttt{predecessor\_of\_closed\_region\_object} (continue in-region, or stop at the portal
+    hop).
+  \item[\thm{FrameReachable\_rid\_of\_closed\_container}] Companion: reaching anything inside a
+    Closed region forces the region's own $\mathsf{RId}$ to already be $\mathit{FrameReachable}$
+    too. Same backward induction, different conclusion at the portal-hop case.
+\end{description}
+
+\subsection{\textit{CR6} (\file{CR6.lean})}
+
+\begin{description}[nosep]
+  \item[\thm{StackReachable\_iff\_RegionReachable\_of\_closed}] For $H(rid)$ Closed and $oid$
+    inside it: \emph{given} $\mathsf{RId}(rid)$ is already $\mathit{StackReachable}$,
+    $\mathit{StackReachable}(\mathsf{OId}(oid)) \iff \mathit{RegionReachable}(rid,\mathsf{OId}(oid))$.
+    \emph{Proof:} forward direction is
+    \thm{RegionReachable\_of\_FrameReachable\_closed} directly (doesn't even need the hypothesis);
+    backward direction glues the portal hop onto the already-reachable $\mathsf{RId}(rid)$ via
+    \thm{FrameReachable\_extend}.
+  \item[\thm{not\_StackReachable\_rid\_implies\_not\_StackReachable\_objects\_of\_closed}] If
+    $\mathsf{RId}(rid)$ is \emph{not} stack-reachable, nothing inside the Closed region is either.
+    \emph{Proof:} contrapositive of \thm{FrameReachable\_rid\_of\_closed\_container}.
+\end{description}
+
+\section{\textit{FrameReachableAtLaterFrame}}
+
+Statement (\file{main.tex}'s \textit{FRALF}): an object in an earlier frame's region, already
+frame-reachable from a later frame, is already frame-reachable from its own frame.
+\thm{FrameReachableAtLaterFrame\_step cmd} is its single-step-preservation form.
+
+\subsection{\thm{RuntimeConfig.start\_frameReachableAtLaterFrame}}
+Vacuous: a single frame makes $F.fid < F'.fid$ unsatisfiable.
+
+\subsection{The nine per-operation proofs}
+
+Five distinct shapes appear.
+
+\paragraph{(A) Additive, via whole-chain safety transport --- \op{enter}, \op{exit}.} Nothing is
+allocated and no existing content changes (only a status flip). Every chain ending at the tracked
+object is shown $\mathit{SafeRef}$ and transported wholesale.
+\begin{description}[nosep]
+  \item[\thm{frameReachableAtLaterFrame\_step\_enter}] Key lemmas: \texttt{enter\_oid\_step\_iff}
+    (step relation agrees on $\mathsf{OId}$-sourced steps), \texttt{safe\_reflTransGen\_transport},
+    \texttt{enter\_regionId\_ne}, \texttt{enter\_frame\_mem\_up/down}. The one wrinkle: if the
+    ``later frame'' turns out to be the freshly-pushed one, its only possible root is the entered
+    region's bridge object, and a safety argument shows that can't be the (different) tracked
+    object.
+  \item[\thm{frameReachableAtLaterFrame\_step\_exit}] Key lemmas:
+    \texttt{exit\_frame\_reachable\_transport}/\texttt{\_backward} (built from
+    \texttt{exit\_avoid\_popped\_step}, \texttt{exit\_oid\_step\_iff\_of\_ne\_popped}, and
+    \texttt{safe\_reflTransGen\_root\_safe}), \texttt{exit\_regionId\_ne}.
+\end{description}
+
+\paragraph{(B) Additive, fresh entity is a dead end --- \op{makeObjStack}, \op{makeObjRegion},
+\op{makeRegion}.} Something new is allocated, but any chain trying to route through it collapses
+to a contradiction (a fresh id has no stored refs and doesn't yet resolve anywhere).
+\begin{description}[nosep]
+  \item[\thm{frameReachableAtLaterFrame\_step\_makeObjStack}] Key lemmas:
+    \texttt{makeObjStack\_frame\_reachable\_iff} (pre-existing frames below the last index),
+    \texttt{freshObjectId\_loc\_ne\_rgn}, \texttt{freshObjectId\_objAt\_none} (the fresh id's chain
+    is a dead end: it doesn't resolve into the tracked region, and it has no outgoing step either).
+  \item[\thm{frameReachableAtLaterFrame\_step\_makeObjRegion}] Same shape; key lemmas
+    \texttt{makeObjRegion\_frame\_reachable\_iff}, \texttt{makeObjRegion\_regionId\_ne}, plus the
+    same two fresh-id dead-end facts.
+  \item[\thm{frameReachableAtLaterFrame\_step\_makeRegion}] Same shape, one level richer (a fresh
+    region \emph{and} its fresh bridge object): \texttt{makeRegion\_frame\_reachable\_iff},
+    \texttt{makeRegion\_reflTransGen\_transport\_down} (chains avoiding the fresh
+    $\mathsf{RId}$ transport freely), \texttt{makeRegion\_corollary\_loc\_fresh},
+    \texttt{freshRegionId\_no\_step}. A chain hitting the fresh $\mathsf{RId}$ can take at most one
+    more hop (into the equally-fresh, empty bridge object) before dying.
+\end{description}
+
+\paragraph{(C) Root-substitution --- \op{varAsgn}.} \texttt{varAsgn\_step\_eq} shows the
+\emph{entire} \texttt{ReachableStep} relation is literally unchanged (even the bridge-var branch:
+the touched region stays Open, so no $\mathsf{RId}$-step existed either side to disturb). Only a
+variable's \emph{bound value} changes, to something already independently reachable.
+\begin{description}[nosep]
+  \item[\thm{frameReachableAtLaterFrame\_step\_varAsgn}] Key lemmas: \texttt{varAsgn\_step\_eq},
+    \texttt{varAsgn\_frame\_reachable\_iff} (pre-existing frames), and, for the mutated frame's own
+    new root, \texttt{resolveFA\_frameReach} (the field value being copied already had an
+    independent \texttt{FrameReachable} witness) combined with \texttt{region\_container\_confined}
+    to bound where that witness's frame can sit relative to the tracked frame.
+\end{description}
+
+\paragraph{(D) Content-mutating, genuine escape induction --- \op{fieldAsgn}, \op{swap}.} The step
+relation changes at exactly the mutated container. See the detailed technique note below.
+\begin{description}[nosep]
+  \item[\thm{frameReachableAtLaterFrame\_step\_fieldAsgn}] Key lemmas:
+    \texttt{fieldAsgn\_step\_iff\_of\_ne} (step relation agrees off the mutated id $oid_C$),
+    \texttt{fieldAsgn\_frame\_root\_iff}, \texttt{region\_container\_confined}/
+    \texttt{stack\_container\_confined} (bounding $oid_C$'s own owner index), then a
+    \texttt{Relation.ReflTransGen.head\_induction\_on} walk checking each hop against
+    \texttt{fieldAsgn\_stack\_oidC\_step\_of\_ne\_oidY}/\texttt{\_region\_oidC\_step\_of\_ne\_oidY};
+    a match escapes onto the field's new value via \texttt{resolveV\_frameRoot}, and
+    \texttt{reflTransGen\_region\_open\_ne\_absurd} rules out the region-branch's new value ever
+    reaching a \emph{different} Open region.
+  \item[\thm{frameReachableAtLaterFrame\_step\_swap}] Same shape across all four branches; key
+    lemmas \texttt{swap\_frame\_reachable\_iff\_of\_lt} (suspended chains can't reach the mutated
+    container at all, by the owner-index bound, so no escape machinery is even needed for them),
+    \texttt{swap\_escape}/\texttt{swap\_root\_escape}/\texttt{swap\_root\_escape\_rid} (the shared
+    ``new value has its own independent root'' argument, reused across branches),
+    \texttt{swap\_stack\_yoid\_step\_of\_ne}/\texttt{\_region\_stack\_}/\texttt{\_bridge\_} (per-branch
+    step-agreement off the mutated id), \texttt{reflTransGen\_rid\_source\_open\_absurd}.
+\end{description}
+
+\paragraph{(E) Reference-deleting --- \op{merge}.} See the walkthrough note below; the key fact is
+that a live, about-to-be-deleted $\mathsf{RId}(rid')$ can never be a step \emph{target}.
+\begin{description}[nosep]
+  \item[\thm{frameReachableAtLaterFrame\_step\_merge}] Key lemmas:
+    \texttt{merge\_ridPrime\_not\_step\_target} (\textit{H2}-based: a predecessor would push the
+    count past 1), \texttt{merge\_chain\_transport\_down} (any $\mathsf{RId}(rid')$-avoiding chain
+    transports for free), \texttt{merge\_ridPrime\_reflTransGen\_iff} (a chain rooted at
+    $\mathsf{RId}(rid')$ is the same chain, one hop shorter, rooted at its bridge object instead),
+    \texttt{merge\_frame\_reachable\_iff}, \texttt{merge\_regionId\_ne\_ridPrime}.
+\end{description}
+
+\paragraph{Technique note (D).} The step relation changes at exactly one container, id $oid_C$.
+\texttt{region\_container\_confined}/\texttt{stack\_container\_confined} bound $oid_C$'s reachable
+set to frame indices $\ge$ the active (mutating) frame's own index, $fid_{active}$. Any chain
+confined strictly below $fid_{active}$ never touches $oid_C$ and transports untouched --- this
+covers every strictly-suspended frame automatically. The one remaining case is a chain rooted
+exactly at the active frame, walked forward hop by hop
+(\texttt{Relation.ReflTransGen.head\_induction\_on}): at the one hop that could be the newly-written
+edge, the chain escapes onto the field's new value, which has its own independent root
+(\texttt{resolveV\_frameRoot}), reducing the argument back to the already-handled confined case.
+
+\subsection{\thm{frameReachableAtLaterFrame\_step\_all}}
+Dispatcher, case-splitting on $Stmt$.
+
+\section{\textit{StackReachable\_invariant\_for\_suspended\_region\_objects}}
+
+Statement (\file{main.tex}): for a suspended frame $F$ and an object $oid$ in $F$'s region,
+$\mathit{StackReachable}(\mathsf{OId}(oid))$ is unchanged by any single operation, \emph{given}
+\textit{FRALF} holds beforehand. Proved as an $\iff$, not a one-way implication.
+
+Each \file{StackReachableInvariant/<Op>.lean} reuses \emph{exactly} the case analysis of its
+\S3-numbered \textit{FRALF} sibling above (same key lemmas per operation), applied in both
+directions: ``reachable before $\Rightarrow$ reachable after'' is close to a direct instance of the
+\textit{FRALF}-style transport; ``reachable after $\Rightarrow$ reachable before'' is where the
+escape argument (shapes D/E) is actually exercised, since the newly-written edge or the
+about-to-be-deleted reference exists on the $cfg' \to cfg$ side, not the other.
+
+\begin{description}[nosep]
+  \item[\thm{stackReachable\_invariant\_enter}] Both directions via
+    \texttt{safe\_reflTransGen\_transport} (called with the step-iff in each direction).
+  \item[\thm{stackReachable\_invariant\_exit}] Both directions via
+    \texttt{exit\_reflTransGen\_transport}/\texttt{\_backward}.
+  \item[\thm{stackReachable\_invariant\_makeObjStack} / \thm{makeObjRegion} / \thm{makeRegion}]
+    Both directions via the corresponding \op{<op>\_frame\_reachable\_iff}, with the fresh-id
+    dead-end lemmas closing the one new case per direction.
+  \item[\thm{stackReachable\_invariant\_varAsgn}] Both directions via \texttt{varAsgn\_step\_eq} +
+    \texttt{varAsgn\_frame\_reachable\_iff}; the root-substitution argument
+    (\texttt{resolveFA\_frameReach}) is needed in the forward direction here (a suspended-frame
+    witness reaching the pre-mutation root must still resolve after the var is rebound).
+  \item[\thm{stackReachable\_invariant\_fieldAsgn}] Forward direction: confined transport suffices
+    (the mutated id's owner-index bound already excludes it from any suspended-frame chain).
+    Backward direction: the full escape argument (shape D), since the new edge exists only in
+    $cfg'$.
+  \item[\thm{stackReachable\_invariant\_swap}] Same asymmetry as \op{fieldAsgn}, across all four
+    branches.
+  \item[\thm{stackReachable\_invariant\_merge}] Forward: confined transport via
+    \texttt{merge\_chain\_transport\_down}. Backward: the \texttt{merge\_ridPrime\_reflTransGen\_iff}
+    substitution, since the deleted reference's replacement only exists in $cfg'$.
+\end{description}
+
+\subsection{\thm{stackReachable\_invariant\_all}}
+Dispatcher, case-splitting on $Stmt$.
+
+\section{What's not proved yet}
+No \op{Guarantees.lean}-style top-level GC-safety theorem sits on top of
+\textit{StackReachable\_invariant\_for\_suspended\_region\_objects}. Every theorem in \S4--5 is a
+single-step fact; composing it over an arbitrary-length trace (the literal report.pdf claim, whose
+qualifier is invariance for as long as a region \emph{stays} suspended, not just across one
+operation) is not currently being pursued.
 
 \end{document}
