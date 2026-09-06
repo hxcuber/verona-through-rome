@@ -37,7 +37,11 @@ references. $a.loc(\langle S,H\rangle)$: where a reference resolves ($\mathsf{St
 $\mathsf{Rgn}(rid)$, or undefined). $a.objAt(\langle S,H\rangle)$: the object an $\mathsf{OId}$
 names. The ten invariants \textit{L1}, \textit{L2}, \textit{H1}, \textit{H2}, \textit{H3},
 \textit{S1}, \textit{S2}, \textit{S3}, \textit{HS1}, \textit{HS2} making up \textit{ValidConfig}
-are defined in \file{main.tex}; one-line reminders:
+are defined in \file{main.tex}; one-line reminders below. \textit{HS1}/\textit{HS2} are worth
+flagging: they don't follow from the other eight, since \textit{H2}/\textit{H3}/\textit{S2}/\textit{S3}
+all presuppose a reference that already resolves somewhere and say nothing about one that resolves
+to nothing, so without \textit{HS1}/\textit{HS2} a stale reference could sit inert and later
+collide, uncaught, with a freshly allocated id.
 
 \begin{center}
 \begin{tabular}{@{}ll@{}}
@@ -66,25 +70,38 @@ Each \op{<op>\_valid} theorem has the shape $\mathit{ValidConfig}(cfg) \to op\ c
 marked either trivial (with the one-line reason) or given its key lemma.
 
 \subsection{\thm{RuntimeConfig.start\_valid}}
-Base case: one root region (Open, bridge $0$), one root frame. All ten invariants reduce to facts
-about a one- or two-element list, closed by \texttt{decide}/\texttt{simp}.
+Base case: one root region (Open, bridge $0$), one root frame executing in it, with empty
+\textit{objMap}/\textit{varMap} everywhere. All ten invariants reduce, after unfolding
+$RuntimeConfig.start$'s definition, to a fact about a one- or two-element list --- e.g.\
+\textit{L1} is exactly \texttt{List.nodup\_singleton} on the singleton object-id list $[0]$, and
+\textit{S2}/\textit{S3} are vacuous since the one frame's \textit{refs} list is empty --- closed by
+\texttt{decide}/\texttt{simp}. No induction, no reused corollaries: this file only exists to anchor
+the induction that follows.
 
 \subsection{\thm{enter\_valid} (\op{enter xf bridgeVar})}
 Pushes a new, empty frame into region \op{rid'} (found via \op{resolveFA xf}, must be Closed),
 flips \op{rid'} to Open.
 \begin{description}[nosep]
   \item[L1] trivial: no \textit{objMap} touched (new frame is empty; heap change is a status flip).
-  \item[L2] the new frame's region is Open by construction; other frames' lookups survive the
-    heap update at a different key.
-  \item[H1] trivial: the status flip doesn't touch \textit{bridgeObjectId}/\textit{objMap}.
-  \item[H2] trivial: no reference created, removed, or relocated.
-  \item[H3] \texttt{enter\_corollary\_2}: $.loc(\cdot)$ is unconditionally unaffected (only a
-    status scalar changes), so existing \textit{H3} witnesses transfer directly.
+  \item[L2] the new frame's region is Open by construction (that's the whole point of
+    \op{enter}); other frames' \texttt{heap.lookup} calls survive the update via
+    \texttt{AList.lookup\_insert\_ne}, since the entered region key \op{rid'} is distinct from
+    every other on-stack frame's own region (by \textit{S1}, the new frame's own added at the very
+    end can't collide with anyone else's).
+  \item[H1] trivial: the status flip doesn't touch \textit{bridgeObjectId}/\textit{objMap}, so
+    whatever object was already the bridge stays the bridge.
+  \item[H2] trivial: no reference created, removed, or relocated; the bridge object was already
+    counted, and it stays the region's own bridge.
+  \item[H3] \texttt{enter\_corollary\_2}: $.loc(\cdot)$'s definition never reads
+    \textit{region.status}, only \textit{objMap} membership, so it's unconditionally unaffected by
+    a pure status flip and every existing \textit{H3} witness transfers as-is.
   \item[S1] \texttt{enter\_corollary\_1} (region-uniqueness from \textit{L1}) plus \textit{L2}'s
     contrapositive: a Closed region (what \op{enter} requires) can't already be owned by an
-    on-stack frame, so the new frame's region is distinct from every existing one.
-  \item[S2, S3] the new frame is empty (nothing to check for it); existing frames rely on
-    \texttt{enter\_corollary\_2}.
+    on-stack frame, so the new frame's region is distinct from every existing one, and appending it
+    at the end can't create a collision with itself either.
+  \item[S2, S3] the new frame is appended with empty \textit{objMap}/\textit{varMap}, so there is
+    nothing new to check for it; existing frames keep the same index and the same content, so
+    their own bounds are exactly the pre-mutation ones via \texttt{enter\_corollary\_2}.
   \item[HS1, HS2] trivial: nothing new enters \textit{refs}.
 \end{description}
 
@@ -93,15 +110,23 @@ Pops the last frame, flips its region back to Closed.
 \begin{description}[nosep]
   \item[L1] trivial: the popped frame's ids are simply dropped, and by \textit{L1} on \op{cfg}
     they were already disjoint from everything remaining.
-  \item[L2] surviving frames' regions are untouched by the status flip except needing
-    ``region $\ne$ the popped one,'' from \textit{S1}.
-  \item[H1] trivial: status flip only.
-  \item[H2] trivial: no reference touched.
-  \item[H3] the popped frame's contents vanish with it; survivors' locations are unaffected.
-  \item[S1, S2, S3] index bookkeeping over the shrunk stack (survivors keep their indices;
-    nothing points at the now-gone last slot): \texttt{exit\_S1}, \texttt{exit\_S2},
-    \texttt{exit\_S3}.
-  \item[HS1, HS2] the popped frame's refs disappear; nothing new appears.
+  \item[L2] surviving frames' own \texttt{heap.lookup} results are untouched by the status flip,
+    except each survivor needs its region to be $\ne$ the popped one so the flip doesn't
+    accidentally invalidate it too; that's exactly \textit{S1} (regionIds pairwise distinct across
+    the stack), applied via \texttt{exit\_regionId\_ne}.
+  \item[H1] trivial: status flip only, \textit{bridgeObjectId}/\textit{objMap} untouched.
+  \item[H2] trivial: no reference created, removed, or relocated by a status flip.
+  \item[H3] the popped frame's own contents vanish with it, and by \textit{L1} on the pre-mutation
+    config its object ids were already disjoint from every surviving frame's and every region's, so
+    nothing else could have depended on locating through them; survivors' own \textit{H3}
+    witnesses are otherwise untouched.
+  \item[S1, S2, S3] index bookkeeping over the shrunk stack: every surviving frame keeps the same
+    position it had before (the popped frame was the \emph{last} one, so nothing shifts), and
+    nothing in a survivor's \textit{refs} could have pointed at the now-gone last slot without
+    already violating \textit{S2}/\textit{S3} pre-mutation. Proved by \texttt{exit\_S1},
+    \texttt{exit\_S2}, \texttt{exit\_S3}.
+  \item[HS1, HS2] the popped frame's refs disappear along with it, shrinking \textit{cfg.refs};
+    nothing new is added, so both invariants persist on the smaller set.
 \end{description}
 
 \subsection{\thm{fieldAsgn\_valid} (\op{fieldAsgn xf y})}
@@ -110,16 +135,23 @@ frame) or inside the writer's own Open region (target must resolve into that sam
 \begin{description}[nosep]
   \item[L1, L2, S1, H1] trivial: no id allocated, no frame/region/bridge changed, only a field
     value inside an already-present object.
-  \item[H2] the new value is always an $\mathsf{OId}$ (this rule never stores an
-    $\mathsf{RId}$ in a field), so overwriting can only decrease-or-preserve the
-    $\mathsf{RId}$-count: \texttt{fieldAsgn\_corollary\_object\_insert\_count\_le} lifted through
+  \item[H2] the new value written into the field is always an $\mathsf{OId}$ (this rule never
+    stores an $\mathsf{RId}$), while the field \emph{might} have held an $\mathsf{RId}$ before the
+    overwrite, so the $\mathsf{RId}$-count can only go down or stay the same, never up:
+    \texttt{fieldAsgn\_corollary\_object\_insert\_count\_le} states this at the single-object
+    level, lifted to the whole config through
     \texttt{\_objMap\_insert\_bind\_refs\_count\_le}/\texttt{\_heap\_insert\_refs\_count\_le}.
-  \item[H3] the region branch's own side condition (new value resolves into the \emph{same}
-    region as the target) is exactly what \textit{H3} needs; formalized via
-    \texttt{fieldAsgn\_corollary\_region\_loc\_eq}/\texttt{\_region\_heap\_objectIds\_perm}.
-  \item[S2, S3] both \op{xf.root} and \op{y} were already resolvable (hence already
-    index-bounded) before the write; \texttt{fieldAsgn\_corollary\_resolveV\_loc\_ancestor} carries
-    that bound over to the newly-stored occurrence.
+  \item[H3] the STACK branch doesn't touch \textit{H3} at all (it's a heap-only invariant); the
+    REGION branch's own side condition (the new value must resolve into the \emph{same} region as
+    the write target) is exactly \textit{H3}'s content, formalized via
+    \texttt{fieldAsgn\_corollary\_region\_loc\_eq}/\texttt{\_region\_heap\_objectIds\_perm}, which
+    also re-derive that every \emph{other} object's location survives the heap-entry reorder
+    caused by inserting at the (already-present) region key.
+  \item[S2, S3] both \op{xf.root} (the container being written into) and \op{y} (the new value)
+    were already successfully resolved via \op{resolveV} \emph{before} the mutation, so they were
+    already index-bounded by \textit{S2}/\textit{S3} on the old config;
+    \texttt{fieldAsgn\_corollary\_resolveV\_loc\_ancestor} carries that pre-existing bound over to
+    the newly-stored occurrence, so nothing new needs to be independently justified.
   \item[HS1] \texttt{fieldAsgn\_corollary\_resolveV\_oid\_mem\_objectIds}: the written value was
     already live, so already counted in \textit{objectIds}.
   \item[HS2] trivial: no $\mathsf{RId}$ ever passes through this rule.
@@ -133,13 +165,18 @@ Allocates a fresh, empty object directly inside the writer's own Open region.
   \item[H1] trivial: the pre-existing bridge id is untouched by inserting a new key.
   \item[H2] \texttt{makeObjRegion\_corollary\_heap\_refs\_perm}: the new object is empty (no
     refs), so \textit{Heap.refs} is an exact permutation of before.
-  \item[H3] the fresh object trivially satisfies it (it's the region just written); other objects
-    rely on \texttt{makeObjRegion\_corollary\_loc\_eq} (needs
-    \texttt{makeObjRegion\_corollary\_region\_unique} to handle the heap-entry reorder from
-    inserting at an already-present region key).
+  \item[H3] the fresh object trivially satisfies it: it's inserted directly into the writer's own
+    region's \textit{objMap}, so it resolves right back into that same region by construction.
+    Every \emph{other}, pre-existing object's location needs
+    \texttt{makeObjRegion\_corollary\_loc\_eq}, since inserting at the (already-present) region key
+    reorders the heap's \texttt{.entries} list even though it doesn't change any key set --- that
+    reorder is why \texttt{makeObjRegion\_corollary\_region\_unique} (an \textit{L1} corollary: an
+    id lives in at most one region) is needed, to show the reordered search still lands on the
+    same region as before.
   \item[S2, S3] \texttt{makeObjRegion\_corollary\_loc\_fresh}: the fresh object always resolves
-    into the heap (never the stack), so \textit{S2} is vacuous for it and \textit{S3} is trivial
-    (owning frame is the current one).
+    into the heap, never onto the stack (its \textit{Frame.objMap} is untouched, only the
+    region's), so \textit{S2} (a stack-only invariant) is vacuously satisfied for it, and
+    \textit{S3} is trivial since its owning frame is exactly the frame that just created it.
   \item[HS1] trivial: the fresh object is now in \textit{objectIds} by construction.
   \item[HS2] trivial: no $\mathsf{RId}$ touched.
 \end{description}
@@ -153,9 +190,13 @@ the heap is untouched entirely (\texttt{makeObjStack\_corollary\_1}).
   \item[H3] doesn't apply to the fresh object (it resolves to \textit{Stk}, not \textit{Rgn}); heap
     side is untouched for everything else.
   \item[S1] trivial.
-  \item[S2, S3] the fresh object resolves to the current (last) frame's own index, trivially
-    within bound; other objects are unaffected (insert at a fresh key).
-  \item[HS1, HS2] trivial.
+  \item[S2, S3] the fresh object is inserted directly into the current (last) frame's own
+    \textit{objMap}, so it resolves to that frame's own index, trivially $\le$ itself; every other
+    object's location is unaffected since the insert happens at a fresh key (no reorder at all,
+    unlike \op{makeObjRegion}'s heap-side insert at an existing key).
+  \item[HS1, HS2] trivial: the fresh object is empty, and nothing points at it yet except the one
+    new var binding, which \textit{HS1} is about the fresh id itself being in \textit{objectIds}
+    (true by construction), not about anything pointing at it.
 \end{description}
 
 \subsection{\thm{makeRegion\_valid} (\op{makeRegion x})}
@@ -166,9 +207,12 @@ the current frame's variable \texttt{x}.
   \item[L2] trivial for existing frames (insert at a genuinely fresh heap key disturbs nothing);
     nobody executes in the new region yet.
   \item[H1] trivial by construction: the fresh region's only object is its own bridge.
-  \item[H2] the new $\mathsf{RId}$ is stored exactly once (in \texttt{x}), and a not-yet-existing
-    region id can't already have been referenced (old config's \textit{HS2} plus
-    \texttt{freshRegionId\_not\_mem}).
+  \item[H2] the new $\mathsf{RId}(\mathit{freshRegionId})$ is stored exactly once, in
+    \texttt{x}; it starts at count $0$ because a not-yet-existing region id can't already have been
+    referenced (\textit{HS2} on the old config says every stored $\mathsf{RId}$ already resolves
+    into \textit{heap.keys}, and \texttt{freshRegionId\_not\_mem} says the fresh id isn't in
+    \textit{heap.keys} yet), so adding the one new occurrence brings the count to exactly $1$, not
+    over the bound.
   \item[H3] trivial for the fresh region; \texttt{makeRegion\_corollary\_loc\_eq} for everything
     else (fresh-key insert, no reorder needed).
   \item[S1] trivial: no existing frame's regionId changes, and the new region isn't any frame's.
@@ -195,17 +239,26 @@ busiest file ($\sim$1200 lines), the only operation deleting a heap key.
     permutation-invariance of \texttt{Nodup}.
   \item[L2, S1] trivial: only the last frame's \textit{varMap} and the two regions' heap entries
     change.
-  \item[H1] the merged region's bridge object (\op{rid}'s own, unchanged) is still present, since
-    the union only adds keys.
-  \item[H2] the deleted reference $\mathsf{RId}(rid')$ simply disappears from \textit{refs}; the new
-    $\mathsf{OId}$ written to \texttt{x} was already counted under \textit{H1} of \op{rid'}.
-  \item[H3] \texttt{merge\_corollary\_loc\_of\_mem}: an object from either original region still
-    resolves into the merged \op{rid}, since the stack side of $.loc(\cdot)$ is untouched (only
-    \texttt{x}'s \textit{varMap} entry changes) and the heap side's uniqueness (from \textit{L1}
-    above) pins \op{rid}'s merged entry as the only match.
+  \item[H1] \op{rid}'s own bridge object (unchanged by the merge) is still present, since the
+    union only ever adds keys from \op{rid'}'s side, never removes any of \op{rid}'s; \op{rid'}'s
+    own bridge object is simply absorbed as an ordinary object into the merged \textit{objMap}
+    (its status as ``the'' bridge dies with the deleted region key, which is fine, since \textit{H1}
+    is only ever asked about heap entries that still exist).
+  \item[H2] the deleted reference $\mathsf{RId}(rid')$ simply disappears from \textit{refs}
+    entirely (both the region key and \texttt{x}'s old value are gone), so its count drops to $0$;
+    the new $\mathsf{OId}(region'.bridgeObjectId)$ written to \texttt{x} was already counted once
+    under \textit{H1} of \op{rid'} pre-merge, and merging doesn't add a second occurrence.
+  \item[H3] \texttt{merge\_corollary\_loc\_of\_mem}: an object that used to live in \emph{either}
+    original region still resolves into the merged \op{rid} afterward, since the stack side of
+    $.loc(\cdot)$'s search is untouched (only \texttt{x}'s \textit{varMap} entry changes, never any
+    frame's \textit{objMap}) and the heap side's uniqueness (from the disjointness fact above)
+    pins \op{rid}'s merged entry down as the only heap entry whose \textit{objMap} could contain
+    that id.
   \item[S2, S3] carried by the same \texttt{merge\_corollary\_loc\_of\_mem}/index-split machinery
-    as \textit{H3}; \texttt{merge\_corollary\_stackWithIndex\_split} handles the shared
-    ``last frame changed, rest didn't'' bookkeeping.
+    as \textit{H3}: every object's location resolves to the same place (or the merged \op{rid}) as
+    before, so the index bound it already satisfied under the old config still applies unchanged;
+    \texttt{merge\_corollary\_stackWithIndex\_split} handles the shared ``last frame changed, rest
+    didn't'' bookkeeping that both invariants' proofs need.
   \item[HS1, HS2] follow from the permutation facts above: nothing created or destroyed, only
     relocated.
 \end{description}
@@ -228,9 +281,13 @@ branch''), or bind a fresh local variable to a resolved value (``fresh-var branc
   \item[H3] \texttt{varAsgn\_corollary\_loc\_eq}: $.loc(\cdot)$ is unconditionally preserved in
     both branches (literal equality for fresh-var; uniqueness-based,
     \texttt{varAsgn\_corollary\_region\_unique}, for the bridge branch's heap reorder).
-  \item[S2, S3] fresh-var branch: \texttt{varAsgn\_corollary\_resolveV\_loc\_ancestor} /
-    \texttt{\_yfRef\_ancestor} show the copied value already had a valid owning ancestor frame on
-    the stack before the copy.
+  \item[S2, S3] bridge branch: trivial, since \textit{S2}/\textit{S3} are about
+    \textit{varMap}/\textit{objMap} contents, and only the scalar \textit{bridgeObjectId} changes.
+    Fresh-var branch: \texttt{varAsgn\_corollary\_resolveV\_loc\_ancestor} /
+    \texttt{\_yfRef\_ancestor} show the value being copied into the new var slot already had a
+    valid owning ancestor frame on the stack \emph{before} the copy (it was already reachable via
+    \op{resolveV}/\op{resolveFA}), so writing it into one more var slot doesn't need a fresh
+    justification.
   \item[HS1] fresh-var branch: \texttt{varAsgn\_corollary\_yfRef\_mem\_refs} (the copied value was
     already live).
   \item[HS2] trivial: no $\mathsf{RId}$ is ever created or moved by \op{varAsgn}.
@@ -245,10 +302,12 @@ region-bridge), each exchanging two live reference slots at once. Largest file (
     \op{varAsgn}'s bridge branch (new bridge already inside the region, by the rule's side
     condition).
   \item[H2] \texttt{swap\_corollary\_alist\_insert\_count\_eq} /
-    \texttt{\_objMap\_insert\_bind\_count\_eq} / \texttt{\_heap\_insert\_bind\_count\_eq}: since
-    \op{swap} is a genuine exchange (the two count-deltas from displacing one value and inserting
-    another cancel exactly), the overall $\mathsf{RId}$-count is provably unchanged, not merely
-    bounded.
+    \texttt{\_objMap\_insert\_bind\_count\_eq} / \texttt{\_heap\_insert\_bind\_count\_eq}: replacing
+    the value at an already-present key changes a target reference's count by exactly
+    $[\mathit{new}{=}t] - [\mathit{old}{=}t]$ (stated additively to dodge \texttt{Nat} subtraction);
+    applying this once for each of the two slots being swapped, the two correction terms cancel
+    exactly, so \op{swap} is provably an \emph{exchange} of live values rather than a plain
+    overwrite, and the overall $\mathsf{RId}$-count comes out unchanged, not merely bounded.
   \item[H3] the region-touching branches' own side conditions keep everything inside one Open
     region; \texttt{swap\_corollary\_region\_loc\_eq}/\texttt{\_stack\_loc\_eq} carry pre-existing
     objects' locations across.
@@ -281,10 +340,15 @@ $\mathit{StackReachable}$, $\mathit{FrameRoot}$ are defined in full in \file{mai
     directly.
   \item[\thm{FrameReachable\_iff\_reflTransGen}] Same idea with two possible roots
     ($\mathit{FrameRoot}$: a variable's value, or the frame's own bridge object) instead of one.
-  \item[\thm{RegionReachable\_implies\_FrameReachable}] If frame $F$ owns region $rid$,
-    $\mathit{RegionReachable}(rid,\cdot) \to \mathit{FrameReachable}(F.index,\cdot)$: induction on
-    the $\mathit{RegionReachable}$ witness, replacing the \texttt{bridge} base case with
-    $\mathit{FrameReachable}.\texttt{bridge}$.
+  \item[\thm{RegionReachable\_implies\_FrameReachable}] If frame $F$ owns region $rid$ (i.e.\
+    $F.regionId = rid$), $\mathit{RegionReachable}(rid,\cdot) \to \mathit{FrameReachable}(F.index,\cdot)$:
+    everything reachable from a region's own bridge object is, a fortiori, reachable from any
+    frame currently executing in that region. Proof: induction on the $\mathit{RegionReachable}$
+    witness, replacing its \texttt{bridge} base case (root at the region's bridge object) with
+    $\mathit{FrameReachable}.\texttt{bridge}$ (root at the \emph{frame}'s own region's bridge
+    object, which is the same object since $F$ owns $rid$) and carrying every \texttt{step}
+    constructor across unchanged. Not currently used elsewhere in the development, but stated as a
+    general connecting fact between the two reachability notions.
 \end{description}
 
 \subsection{The confinement toolkit (\file{Lemmas/Common.lean})}
@@ -294,8 +358,12 @@ $\mathit{StackReachable}$, $\mathit{FrameRoot}$ are defined in full in \file{mai
     stack$\to$stack hop's target frame index is $\le$ the source's. \emph{Proof:} unfold
     \texttt{objAt?} at the source, apply \textit{S2} directly to the resulting membership fact.
   \item[\thm{successor\_of\_region\_object}] \textit{H3} forward, at the \texttt{ReachableStep}
-    level: stepping out of an object in region $rid$ lands back in $rid$. \emph{Proof:} unfold
-    \texttt{objAt?}, apply \textit{H3}.
+    level: if $oid_A$ is located in region $rid$ and $oid_A \to oid_C$, then $oid_C$ is located in
+    $rid$ too. \emph{Proof:} unfold \texttt{objAt?} to get $oid_C \in$ some object's \textit{refs}
+    inside $rid$'s \textit{objMap}, lift that into $rid$'s own \textit{Region.refs}
+    (\texttt{mem\_region\_refs\_of\_mem\_objMap}), then apply \textit{H3} directly. Used by
+    \op{exit}'s \texttt{exit\_avoid\_popped\_step} (\S4) to show a chain confined to the popped
+    frame's own region can't accidentally have stepped onto the popped frame's slot.
   \item[\thm{predecessor\_of\_region\_object}] Backward confinement, Open region: anything
     stepping \emph{into} an in-region object is itself in that region or on the stack, never a bare
     $\mathsf{RId}$ or a different region. \emph{Proof:} case on the predecessor; an $\mathsf{RId}$
@@ -329,8 +397,11 @@ $\mathit{StackReachable}$, $\mathit{FrameRoot}$ are defined in full in \file{mai
     stack via \texttt{stack\_step\_region\_index\_le} plus
     \texttt{merge\_corollary\_regionId\_unique\_index} to convert ``same region'' into ``same
     index'').
-  \item[\thm{FrameReachable\_extend}] Extends a $\mathit{FrameReachable}$ witness forward along any
-    further \texttt{ReflTransGen} chain (one line: \texttt{FrameReachable.step} repeatedly).
+  \item[\thm{FrameReachable\_extend}] If $\mathit{FrameReachable}(fid,x)$ and $x \xrightarrow{*} y$,
+    then $\mathit{FrameReachable}(fid,y)$: reachability is closed under continuing a chain further.
+    \emph{Proof:} induction on the \texttt{ReflTransGen} witness for $x \xrightarrow{*} y$, applying
+    the $\mathit{FrameReachable}.\texttt{step}$ constructor once per extra hop. Used by \textit{CR6}
+    to glue a portal hop onto an already-established stack-rooted chain.
   \item[\thm{RegionReachable\_of\_FrameReachable\_closed}] For a \emph{Closed} region: any
     $\mathit{FrameReachable}$ witness to an in-region object is already a
     $\mathit{RegionReachable}$ one. \emph{Proof:} backward induction over the chain, dispatching on
@@ -502,9 +573,12 @@ Dispatcher, case-splitting on $Stmt$.
 
 \section{What's not proved yet}
 No \op{Guarantees.lean}-style top-level GC-safety theorem sits on top of
-\textit{StackReachable\_invariant\_for\_suspended\_region\_objects}. Every theorem in \S4--5 is a
-single-step fact; composing it over an arbitrary-length trace (the literal report.pdf claim, whose
-qualifier is invariance for as long as a region \emph{stays} suspended, not just across one
-operation) is not currently being pursued.
+\textit{StackReachable\_invariant\_for\_suspended\_region\_objects} yet --- nothing in this
+codebase currently concludes ``therefore the collector never frees something still reachable.''
+Every theorem in \S4--5 is also a \emph{single-step} fact, quantified over one operation at a time;
+composing it over an arbitrary-length trace of operations (the literal report.pdf claim, whose own
+qualifier is invariance for as long as a region \emph{stays} suspended, not just across the one
+operation that happens to run while it's suspended) would need an induction over trace length on
+top of what's here, and is not currently being pursued.
 
 \end{document}
