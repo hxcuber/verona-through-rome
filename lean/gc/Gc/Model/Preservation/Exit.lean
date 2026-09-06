@@ -927,7 +927,7 @@ theorem exit_L2 : ValidConfig cfg →
   · rw [if_neg stack_length] at h
     contradiction
 
-theorem exit_S2 : ValidConfig cfg →
+theorem exit_S1 : ValidConfig cfg →
   exit cfg = some cfg' →
   S1 cfg' := by
   intro vcfg h
@@ -983,7 +983,7 @@ theorem exit_S2 : ValidConfig cfg →
   · rw [if_neg stack_length] at h
     contradiction
 
-theorem exit_S3 : ValidConfig cfg →
+theorem exit_S2 : ValidConfig cfg →
   exit cfg = some cfg' →
   S2 cfg' := by
   intro vcfg h
@@ -1036,7 +1036,7 @@ theorem exit_S3 : ValidConfig cfg →
   · rw [if_neg stack_length] at h
     contradiction
 
-theorem exit_S4 : ValidConfig cfg →
+theorem exit_S3 : ValidConfig cfg →
   exit cfg = some cfg' →
   S3 cfg' := by
   intro vcfg h
@@ -1366,9 +1366,9 @@ theorem exit_valid : ValidConfig cfg → exit cfg = some cfg' → ValidConfig cf
     h1 := exit_H1 vcfg h,
     h2 := exit_H2 vcfg h,
     h3 := exit_H3 vcfg h,
-    s1 := exit_S2 vcfg h,
-    s2 := exit_S3 vcfg h,
-    s3 := exit_S4 vcfg h,
+    s1 := exit_S1 vcfg h,
+    s2 := exit_S2 vcfg h,
+    s3 := exit_S3 vcfg h,
     hs1 := exit_HS1 vcfg h,
     hs2 := exit_HS2 vcfg h
   }

@@ -99,9 +99,8 @@ Pops the last frame, flips its region back to Closed.
   \item[H2] trivial: no reference touched.
   \item[H3] the popped frame's contents vanish with it; survivors' locations are unaffected.
   \item[S1, S2, S3] index bookkeeping over the shrunk stack (survivors keep their indices;
-    nothing points at the now-gone last slot). \emph{Naming note:} in \file{Preservation/Exit.lean}
-    these are proved by \texttt{exit\_S2}, \texttt{exit\_S3}, \texttt{exit\_S4} respectively (an
-    internal off-by-one in the file's own lemma names, not in the mathematics).
+    nothing points at the now-gone last slot): \texttt{exit\_S1}, \texttt{exit\_S2},
+    \texttt{exit\_S3}.
   \item[HS1, HS2] the popped frame's refs disappear; nothing new appears.
 \end{description}
 
