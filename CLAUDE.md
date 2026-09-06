@@ -282,15 +282,17 @@ what they unfold.
   becomes the desired portal hop instead of an impossibility, and the stack-escape branch becomes
   impossible (via S3+L2: a Closed region can never be owned by an on-stack frame) instead of allowed;
   `RegionReachable_of_FrameReachable_closed`/`FrameReachable_rid_of_closed_container` — the two halves
-  of `CR6.lean`'s confinement argument below, each a backward induction over the reachability chain
-  dispatching on `predecessor_of_closed_region_object`; `FrameReachable_extend` — a small generic lemma
+  of `StackReachableIffRegionReachableOfClosed.lean`'s confinement argument below, each a backward
+  induction over the reachability chain dispatching on `predecessor_of_closed_region_object`;
+  `FrameReachable_extend` — a small generic lemma
   extending a `FrameReachable` witness forward along any further `ReachableStep` chain), and
   `Lemmas/<Op>.lean` (one per `Stmt` constructor) holds
   the `loc?`/`objAt?`/`ReachableStep` agreement facts and frame-membership/frame-reachability transports
   (`<op>_frame_reachable_iff`) each op's proof needs. `Lemmas.lean` itself is now just a 10-line
   aggregator importing all of `Lemmas/*.lean`, mirroring `Mutation.lean`/`Preservation.lean`'s own
   aggregator shape.
-- `CR6.lean` — the single-config reachability corollary (report.pdf CR6), mirroring `Referencable/`'s
+- `StackReachableIffRegionReachableOfClosed.lean` — the single-config reachability corollary
+  (report.pdf CR6), mirroring `Referencable/`'s
   `CR1.lean`/`CR2.lean`/`CR4.lean` pattern: a proof drawing on `Lemmas`-level machinery can't live in
   `Semantics.lean` without an import cycle (`Lemmas/Common.lean` imports `Semantics.lean`), so it gets
   its own file instead. Two theorems:
