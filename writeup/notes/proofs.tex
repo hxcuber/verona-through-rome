@@ -436,98 +436,165 @@ frame-reachable from a later frame, is already frame-reachable from its own fram
 \subsection{\thm{RuntimeConfig.start\_frameReachableAtLaterFrame}}
 Vacuous: a single frame makes $F.fid < F'.fid$ unsatisfiable.
 
-\subsection{The nine per-operation proofs}
+Five distinct shapes recur across the nine per-operation proofs, referenced by letter below:
+(A) \emph{additive, via whole-chain safety transport} --- nothing is allocated and no existing
+content changes, so the whole chain ending at the tracked object is shown $\mathit{SafeRef}$ and
+moved across wholesale; (B) \emph{additive, fresh entity is a dead end} --- something new is
+allocated, but any chain trying to route through it collapses to a contradiction; (C)
+\emph{root-substitution} --- the step relation is literally unchanged, only a variable's bound
+value changes, to something already independently reachable; (D) \emph{content-mutating, genuine
+escape induction} --- the step relation changes at exactly the mutated container, needing a
+hop-by-hop walk; (E) \emph{reference-deleting} --- a live reference is deleted outright, and an
+invariant-based count bound shows it could only ever have been a chain's root.
 
-Five distinct shapes appear.
-
-\paragraph{(A) Additive, via whole-chain safety transport --- \op{enter}, \op{exit}.} Nothing is
-allocated and no existing content changes (only a status flip). Every chain ending at the tracked
-object is shown $\mathit{SafeRef}$ and transported wholesale.
+\subsection{\thm{frameReachableAtLaterFrame\_step\_enter} (\op{enter xf bridgeVar}) --- shape A}
 \begin{description}[nosep]
-  \item[\thm{frameReachableAtLaterFrame\_step\_enter}] Key lemmas: \texttt{enter\_oid\_step\_iff}
-    (step relation agrees on $\mathsf{OId}$-sourced steps), \texttt{safe\_reflTransGen\_transport},
-    \texttt{enter\_regionId\_ne}, \texttt{enter\_frame\_mem\_up/down}. The one wrinkle: if the
-    ``later frame'' turns out to be the freshly-pushed one, its only possible root is the entered
-    region's bridge object, and a safety argument shows that can't be the (different) tracked
-    object.
-  \item[\thm{frameReachableAtLaterFrame\_step\_exit}] Key lemmas:
-    \texttt{exit\_frame\_reachable\_transport}/\texttt{\_backward} (built from
-    \texttt{exit\_avoid\_popped\_step}, \texttt{exit\_oid\_step\_iff\_of\_ne\_popped}, and
-    \texttt{safe\_reflTransGen\_root\_safe}), \texttt{exit\_regionId\_ne}.
+  \item[Step relation] \texttt{enter\_oid\_step\_iff}: \texttt{ReachableStep} agrees on every
+    $\mathsf{OId}$-sourced step, since \op{enter} never touches any \textit{objMap}.
+  \item[Distinctness] \texttt{enter\_regionId\_ne}: the entered region \op{rid'} differs from the
+    tracked frame's own region (a Closed region can't already be owned, by \textit{L2}'s
+    contrapositive), so \op{rid'}'s status flip doesn't disturb the tracked frame's own
+    \texttt{heap.lookup}.
+  \item[Transport] \texttt{safe\_reflTransGen\_transport}, run in either direction, once the
+    tracked object is shown $\mathit{SafeRef}$ for the tracked frame's region.
+  \item[Frame bookkeeping] \texttt{enter\_frame\_mem\_up}/\texttt{\_down} relate
+    \textit{stackWithIndex} membership between $cfg$/$cfg'$ for every pre-existing frame.
+  \item[The one wrinkle] if the ``later frame'' in the \textit{FRALF} statement turns out to be the
+    freshly-pushed one, its only possible root is the entered region's own bridge object;
+    \texttt{safe\_reflTransGen\_root\_safe} shows that root would itself have to be safe for the
+    tracked (different) region, which is false, closing the case by contradiction.
 \end{description}
 
-\paragraph{(B) Additive, fresh entity is a dead end --- \op{makeObjStack}, \op{makeObjRegion},
-\op{makeRegion}.} Something new is allocated, but any chain trying to route through it collapses
-to a contradiction (a fresh id has no stored refs and doesn't yet resolve anywhere).
+\subsection{\thm{frameReachableAtLaterFrame\_step\_exit} (\op{exit}) --- shape A}
 \begin{description}[nosep]
-  \item[\thm{frameReachableAtLaterFrame\_step\_makeObjStack}] Key lemmas:
-    \texttt{makeObjStack\_frame\_reachable\_iff} (pre-existing frames below the last index),
-    \texttt{freshObjectId\_loc\_ne\_rgn}, \texttt{freshObjectId\_objAt\_none} (the fresh id's chain
-    is a dead end: it doesn't resolve into the tracked region, and it has no outgoing step either).
-  \item[\thm{frameReachableAtLaterFrame\_step\_makeObjRegion}] Same shape; key lemmas
-    \texttt{makeObjRegion\_frame\_reachable\_iff}, \texttt{makeObjRegion\_regionId\_ne}, plus the
-    same two fresh-id dead-end facts.
-  \item[\thm{frameReachableAtLaterFrame\_step\_makeRegion}] Same shape, one level richer (a fresh
-    region \emph{and} its fresh bridge object): \texttt{makeRegion\_frame\_reachable\_iff},
-    \texttt{makeRegion\_reflTransGen\_transport\_down} (chains avoiding the fresh
-    $\mathsf{RId}$ transport freely), \texttt{makeRegion\_corollary\_loc\_fresh},
-    \texttt{freshRegionId\_no\_step}. A chain hitting the fresh $\mathsf{RId}$ can take at most one
-    more hop (into the equally-fresh, empty bridge object) before dying.
+  \item[Step relation, restricted] \texttt{exit\_oid\_step\_iff\_of\_ne\_popped}:
+    \texttt{ReachableStep} agrees for any oid not resolving to the just-popped frame's slot.
+  \item[Avoiding the popped slot] \texttt{exit\_avoid\_popped\_step}: a chain that avoids the
+    popped slot at one step still avoids it at the next, since a region hop stays in-region
+    (\texttt{successor\_of\_region\_object}) and a stack hop only decreases index (\textit{S2}),
+    neither of which can land on the now-gone last slot.
+  \item[Distinctness] \texttt{exit\_regionId\_ne}: any surviving frame has a different regionId
+    from the popped one (\textit{S1}), so its own lookups are untouched by the status flip.
+  \item[Transport, both ways] \texttt{exit\_reflTransGen\_transport}/\texttt{\_backward}, built
+    from the two facts above plus \texttt{safe\_reflTransGen\_root\_safe} (the chain's own root is
+    itself safe and non-popped).
+  \item[Frame bookkeeping] \texttt{exit\_frame\_mem\_up}/\texttt{\_down} and
+    \texttt{exit\_frame\_reachable\_transport}/\texttt{\_backward} relate surviving frames'
+    membership and reachability across the pop.
 \end{description}
 
-\paragraph{(C) Root-substitution --- \op{varAsgn}.} \texttt{varAsgn\_step\_eq} shows the
-\emph{entire} \texttt{ReachableStep} relation is literally unchanged (even the bridge-var branch:
-the touched region stays Open, so no $\mathsf{RId}$-step existed either side to disturb). Only a
-variable's \emph{bound value} changes, to something already independently reachable.
+\subsection{\thm{frameReachableAtLaterFrame\_step\_makeObjStack} (\op{makeObjStack x}) --- shape B}
 \begin{description}[nosep]
-  \item[\thm{frameReachableAtLaterFrame\_step\_varAsgn}] Key lemmas: \texttt{varAsgn\_step\_eq},
-    \texttt{varAsgn\_frame\_reachable\_iff} (pre-existing frames), and, for the mutated frame's own
-    new root, \texttt{resolveFA\_frameReach} (the field value being copied already had an
-    independent \texttt{FrameReachable} witness) combined with \texttt{region\_container\_confined}
-    to bound where that witness's frame can sit relative to the tracked frame.
+  \item[Frame cases] \texttt{makeObjStack\_frame\_cases}: every \textit{stackWithIndex} member of
+    $cfg'$ is either an unchanged pre-existing frame or the modified last frame.
+  \item[Untouched case] \texttt{makeObjStack\_frame\_reachable\_iff}: below the last index,
+    content is literally unchanged, so \textit{FrameReachable} transports for free.
+  \item[The dead end] \texttt{freshObjectId\_loc\_ne\_rgn}/\texttt{freshObjectId\_objAt\_none}: the
+    fresh id doesn't resolve into the tracked region and has no outgoing step (it's empty), so any
+    chain that reaches it dies there immediately and can't be smuggled into the tracked chain.
+  \item[Bookkeeping] \texttt{stackWithIndex\_getLast\_mem} identifies the last frame as a genuine
+    \textit{stackWithIndex} member at its own index.
 \end{description}
 
-\paragraph{(D) Content-mutating, genuine escape induction --- \op{fieldAsgn}, \op{swap}.} The step
-relation changes at exactly the mutated container. See the detailed technique note below.
+\subsection{\thm{frameReachableAtLaterFrame\_step\_makeObjRegion} (\op{makeObjRegion x}) --- shape B}
 \begin{description}[nosep]
-  \item[\thm{frameReachableAtLaterFrame\_step\_fieldAsgn}] Key lemmas:
-    \texttt{fieldAsgn\_step\_iff\_of\_ne} (step relation agrees off the mutated id $oid_C$),
-    \texttt{fieldAsgn\_frame\_root\_iff}, \texttt{region\_container\_confined}/
-    \texttt{stack\_container\_confined} (bounding $oid_C$'s own owner index), then a
-    \texttt{Relation.ReflTransGen.head\_induction\_on} walk checking each hop against
+  \item[Frame cases] \texttt{makeObjRegion\_frame\_cases}, the same shape as \op{makeObjStack}'s.
+  \item[Untouched case] \texttt{makeObjRegion\_frame\_reachable\_iff}, needing
+    \texttt{makeObjRegion\_regionId\_ne} (\textit{S1}-based) to transport a \textit{FrameRoot}'s
+    bridge-object heap lookup across the region-key reorder --- the one wrinkle \op{makeObjStack}
+    doesn't have, since here the \emph{heap}, not just the stack, changes.
+  \item[Loc agreement] \texttt{makeObjRegion\_corollary\_loc\_eq}: every id other than the fresh
+    one resolves to the same place before and after.
+  \item[The dead end] the same \texttt{freshObjectId\_loc\_ne\_rgn}/\texttt{\_objAt\_none} facts as
+    \op{makeObjStack}.
+\end{description}
+
+\subsection{\thm{frameReachableAtLaterFrame\_step\_makeRegion} (\op{makeRegion x}) --- shape B}
+\begin{description}[nosep]
+  \item[Frame cases] \texttt{makeRegion\_frame\_cases}.
+  \item[Untouched case] \texttt{makeRegion\_frame\_reachable\_iff} --- simpler than
+    \op{makeObjRegion}'s, since the heap change here is an insert at a genuinely \emph{fresh} key,
+    needing no \textit{S1} uniqueness argument to survive a reorder.
+  \item[Chain-avoidance transport] \texttt{makeRegion\_reflTransGen\_transport\_up}/\texttt{\_down}:
+    any chain whose root avoids the fresh $\mathsf{RId}$ transports unconditionally in \emph{either}
+    direction, since \texttt{makeRegion\_freshRid\_not\_target} shows that reference can never be a
+    step's target.
+  \item[The dead end, one hop deeper] a chain that does hit the fresh $\mathsf{RId}$ can take at
+    most one further hop, into the equally-fresh, empty bridge object
+    (\texttt{freshRegionId\_no\_step}, \texttt{makeRegion\_corollary\_loc\_fresh}), before dying the
+    same way \op{makeObjStack}'s fresh object does.
+\end{description}
+
+\subsection{\thm{frameReachableAtLaterFrame\_step\_varAsgn} (\op{varAsgn x yf}) --- shape C}
+\begin{description}[nosep]
+  \item[Step relation, unconditionally] \texttt{varAsgn\_step\_eq}: \texttt{ReachableStep} is a
+    literal function equality between $cfg$/$cfg'$ --- even the bridge-var branch changes nothing
+    here, since the touched region stays Open and so had no $\mathsf{RId}$-step to disturb either
+    side.
+  \item[Untouched frames] \texttt{varAsgn\_frame\_reachable\_iff}, for any frame other than the one
+    being mutated.
+  \item[The new root] for the mutated frame's own new var binding, \texttt{resolveFA\_frameReach}
+    shows the value now bound already had an independent \textit{FrameReachable} witness
+    \emph{before} the assignment (it was already resolvable).
+  \item[Bounding that witness] \texttt{region\_container\_confined} compares that independent
+    witness's owning frame's index against the tracked frame's: either they coincide (frame-index
+    equality closes the case directly) or the witness frame is strictly later, and \textit{FRALF}
+    itself, as the induction hypothesis, applies.
+\end{description}
+
+\subsection{\thm{frameReachableAtLaterFrame\_step\_fieldAsgn} (\op{fieldAsgn xf y}) --- shape D}
+\begin{description}[nosep]
+  \item[Step relation off the mutated id] \texttt{fieldAsgn\_step\_iff\_of\_ne}: agrees for any
+    source other than the mutated container's id, $oid_C$.
+  \item[Roots untouched] \texttt{fieldAsgn\_frame\_root\_iff}: \op{fieldAsgn} only ever edits an
+    \textit{objMap}, never a \textit{varMap}/\textit{bridgeVar}, so \textit{FrameRoot} agrees
+    unconditionally.
+  \item[Owner-index bound] \texttt{region\_container\_confined}/\texttt{stack\_container\_confined}
+    bound anything reaching $oid_C$ to a frame index $\ge$ the active (mutating) frame's own,
+    $fid_{active}$.
+  \item[Confined transport] \texttt{fieldAsgn\_confined\_transport}: a chain confined strictly
+    below $fid_{active}$ transports unconditionally, hop by hop, covering every strictly-suspended
+    frame automatically.
+  \item[The escape hop] a chain rooted at the active frame is walked forward
+    (\texttt{Relation.ReflTransGen.head\_induction\_on}), checked at each hop against
     \texttt{fieldAsgn\_stack\_oidC\_step\_of\_ne\_oidY}/\texttt{\_region\_oidC\_step\_of\_ne\_oidY};
-    a match escapes onto the field's new value via \texttt{resolveV\_frameRoot}, and
-    \texttt{reflTransGen\_region\_open\_ne\_absurd} rules out the region-branch's new value ever
-    reaching a \emph{different} Open region.
-  \item[\thm{frameReachableAtLaterFrame\_step\_swap}] Same shape across all four branches; key
-    lemmas \texttt{swap\_frame\_reachable\_iff\_of\_lt} (suspended chains can't reach the mutated
-    container at all, by the owner-index bound, so no escape machinery is even needed for them),
-    \texttt{swap\_escape}/\texttt{swap\_root\_escape}/\texttt{swap\_root\_escape\_rid} (the shared
-    ``new value has its own independent root'' argument, reused across branches),
-    \texttt{swap\_stack\_yoid\_step\_of\_ne}/\texttt{\_region\_stack\_}/\texttt{\_bridge\_} (per-branch
-    step-agreement off the mutated id), \texttt{reflTransGen\_rid\_source\_open\_absurd}.
+    a match escapes onto the field's new value via \texttt{resolveV\_frameRoot}, reducing the
+    argument back to the confined case above.
+  \item[Ruling out cross-region escape] \texttt{reflTransGen\_region\_open\_ne\_absurd}: the
+    region branch's new value can never route into a \emph{different} Open region than the one it
+    was already confined to.
 \end{description}
 
-\paragraph{(E) Reference-deleting --- \op{merge}.} See the walkthrough note below; the key fact is
-that a live, about-to-be-deleted $\mathsf{RId}(rid')$ can never be a step \emph{target}.
+\subsection{\thm{frameReachableAtLaterFrame\_step\_swap} (\op{swap x yf}) --- shape D}
 \begin{description}[nosep]
-  \item[\thm{frameReachableAtLaterFrame\_step\_merge}] Key lemmas:
-    \texttt{merge\_ridPrime\_not\_step\_target} (\textit{H2}-based: a predecessor would push the
-    count past 1), \texttt{merge\_chain\_transport\_down} (any $\mathsf{RId}(rid')$-avoiding chain
-    transports for free), \texttt{merge\_ridPrime\_reflTransGen\_iff} (a chain rooted at
-    $\mathsf{RId}(rid')$ is the same chain, one hop shorter, rooted at its bridge object instead),
-    \texttt{merge\_frame\_reachable\_iff}, \texttt{merge\_regionId\_ne\_ridPrime}.
+  \item[No escape needed for suspended chains] \texttt{swap\_frame\_reachable\_iff\_of\_lt}: by the
+    same owner-index bound as \op{fieldAsgn}, a suspended frame's chain can't reach the mutated
+    container at all across any of the four branches, so it transports for free without ever
+    invoking the escape machinery below.
+  \item[The shared escape argument] \texttt{swap\_escape}/\texttt{swap\_root\_escape}/
+    \texttt{swap\_root\_escape\_rid}: the same ``the new value has its own independent root'' idea
+    as \op{fieldAsgn}'s, reused across all four branches; the last variant additionally rules out
+    an escape sourced at a bare $\mathsf{RId}$, via \texttt{reflTransGen\_rid\_source\_open\_absurd}.
+  \item[Step agreement off the mutated id, per branch]
+    \texttt{swap\_stack\_yoid\_step\_of\_ne}/\texttt{\_region\_stack\_yoid\_step\_of\_ne}/
+    \texttt{\_bridge\_yoid\_step\_of\_ne}, mirroring \texttt{fieldAsgn\_step\_iff\_of\_ne} for each
+    of the branch's mutated-container shapes.
 \end{description}
 
-\paragraph{Technique note (D).} The step relation changes at exactly one container, id $oid_C$.
-\texttt{region\_container\_confined}/\texttt{stack\_container\_confined} bound $oid_C$'s reachable
-set to frame indices $\ge$ the active (mutating) frame's own index, $fid_{active}$. Any chain
-confined strictly below $fid_{active}$ never touches $oid_C$ and transports untouched --- this
-covers every strictly-suspended frame automatically. The one remaining case is a chain rooted
-exactly at the active frame, walked forward hop by hop
-(\texttt{Relation.ReflTransGen.head\_induction\_on}): at the one hop that could be the newly-written
-edge, the chain escapes onto the field's new value, which has its own independent root
-(\texttt{resolveV\_frameRoot}), reducing the argument back to the already-handled confined case.
+\subsection{\thm{frameReachableAtLaterFrame\_step\_merge} (\op{merge x}) --- shape E}
+\begin{description}[nosep]
+  \item[Never a step target] \texttt{merge\_ridPrime\_not\_step\_target}: a predecessor of
+    $\mathsf{RId}(rid')$ would push \textit{H2}'s count for $rid'$ past $1$, since \texttt{x}'s own
+    occurrence already accounts for the one allowed reference.
+  \item[Confined transport] \texttt{merge\_chain\_transport\_down}: any chain whose root avoids
+    $\mathsf{RId}(rid')$ transports unconditionally between the two configurations.
+  \item[Root substitution] \texttt{merge\_ridPrime\_reflTransGen\_iff}: a chain rooted at
+    $\mathsf{RId}(rid')$ is exactly the same chain, one hop shorter, rooted at its own bridge
+    object instead --- the value \texttt{x} now holds post-merge.
+  \item[Frame bookkeeping] \texttt{merge\_frame\_reachable\_iff}, and
+    \texttt{merge\_regionId\_ne\_ridPrime} (no on-stack frame can own the about-to-be-deleted
+    region, by \textit{L2}).
+\end{description}
 
 \subsection{\thm{frameReachableAtLaterFrame\_step\_all}}
 Dispatcher, case-splitting on $Stmt$.
@@ -539,33 +606,78 @@ $\mathit{StackReachable}(\mathsf{OId}(oid))$ is unchanged by any single operatio
 \textit{FRALF} holds beforehand. Proved as an $\iff$, not a one-way implication.
 
 Each \file{StackReachableInvariant/<Op>.lean} reuses \emph{exactly} the case analysis of its
-\S3-numbered \textit{FRALF} sibling above (same key lemmas per operation), applied in both
-directions: ``reachable before $\Rightarrow$ reachable after'' is close to a direct instance of the
-\textit{FRALF}-style transport; ``reachable after $\Rightarrow$ reachable before'' is where the
-escape argument (shapes D/E) is actually exercised, since the newly-written edge or the
-about-to-be-deleted reference exists on the $cfg' \to cfg$ side, not the other.
+\S4 \textit{FRALF} sibling (same key lemmas per operation, same shape letter), applied in both
+directions of the $\iff$: ``reachable before $\Rightarrow$ reachable after'' is close to a direct
+instance of the \textit{FRALF}-style transport; ``reachable after $\Rightarrow$ reachable before''
+is where the escape argument (shapes D/E) is actually exercised, since the newly-written edge or
+the about-to-be-deleted reference exists on the $cfg' \to cfg$ side, not the other.
 
+\subsection{\thm{stackReachable\_invariant\_enter} (\op{enter xf bridgeVar})}
 \begin{description}[nosep]
-  \item[\thm{stackReachable\_invariant\_enter}] Both directions via
-    \texttt{safe\_reflTransGen\_transport} (called with the step-iff in each direction).
-  \item[\thm{stackReachable\_invariant\_exit}] Both directions via
-    \texttt{exit\_reflTransGen\_transport}/\texttt{\_backward}.
-  \item[\thm{stackReachable\_invariant\_makeObjStack} / \thm{makeObjRegion} / \thm{makeRegion}]
-    Both directions via the corresponding \op{<op>\_frame\_reachable\_iff}, with the fresh-id
-    dead-end lemmas closing the one new case per direction.
-  \item[\thm{stackReachable\_invariant\_varAsgn}] Both directions via \texttt{varAsgn\_step\_eq} +
-    \texttt{varAsgn\_frame\_reachable\_iff}; the root-substitution argument
-    (\texttt{resolveFA\_frameReach}) is needed in the forward direction here (a suspended-frame
-    witness reaching the pre-mutation root must still resolve after the var is rebound).
-  \item[\thm{stackReachable\_invariant\_fieldAsgn}] Forward direction: confined transport suffices
-    (the mutated id's owner-index bound already excludes it from any suspended-frame chain).
-    Backward direction: the full escape argument (shape D), since the new edge exists only in
-    $cfg'$.
-  \item[\thm{stackReachable\_invariant\_swap}] Same asymmetry as \op{fieldAsgn}, across all four
-    branches.
-  \item[\thm{stackReachable\_invariant\_merge}] Forward: confined transport via
-    \texttt{merge\_chain\_transport\_down}. Backward: the \texttt{merge\_ridPrime\_reflTransGen\_iff}
-    substitution, since the deleted reference's replacement only exists in $cfg'$.
+  \item[Forward] \texttt{safe\_reflTransGen\_transport} with the $cfg \to cfg'$ direction of
+    \texttt{enter\_oid\_step\_iff}.
+  \item[Backward] the same tool with the $cfg' \to cfg$ direction, plus the same
+    freshly-pushed-frame wrinkle as \S4's version: \texttt{safe\_reflTransGen\_root\_safe} rules
+    out the fresh frame's only possible root (the entered region's bridge object) being the
+    tracked object.
+\end{description}
+
+\subsection{\thm{stackReachable\_invariant\_exit} (\op{exit})}
+\begin{description}[nosep]
+  \item[Forward] \texttt{exit\_reflTransGen\_transport}.
+  \item[Backward] \texttt{exit\_reflTransGen\_transport\_backward}; ``not popped'' is derivable
+    locally at every step here, so no separate monotonicity argument is needed for this direction.
+\end{description}
+
+\subsection{\thm{stackReachable\_invariant\_makeObjStack} (\op{makeObjStack x})}
+\begin{description}[nosep]
+  \item[Forward, backward] both directions go through \texttt{makeObjStack\_frame\_reachable\_iff}
+    alone; the fresh-id dead-end facts (\texttt{freshObjectId\_loc\_ne\_rgn}/\texttt{\_objAt\_none})
+    close the one new case, whichever direction it arises in.
+\end{description}
+
+\subsection{\thm{stackReachable\_invariant\_makeObjRegion} (\op{makeObjRegion x})}
+\begin{description}[nosep]
+  \item[Forward, backward] \texttt{makeObjRegion\_frame\_reachable\_iff}, needing
+    \texttt{makeObjRegion\_regionId\_ne} in the same way as \S4's version to transport a
+    \textit{FrameRoot}'s bridge-object lookup across the heap reorder; the fresh-id dead-end facts
+    close the one new case per direction.
+\end{description}
+
+\subsection{\thm{stackReachable\_invariant\_makeRegion} (\op{makeRegion x})}
+\begin{description}[nosep]
+  \item[Forward, backward] \texttt{makeRegion\_frame\_reachable\_iff}, plus
+    \texttt{makeRegion\_reflTransGen\_transport\_up}/\texttt{\_down} for chains rooted away from
+    the fresh $\mathsf{RId}$; a chain hitting it dies one hop later, same as \S4.
+\end{description}
+
+\subsection{\thm{stackReachable\_invariant\_varAsgn} (\op{varAsgn x yf})}
+\begin{description}[nosep]
+  \item[Forward] needs the root-substitution argument: \texttt{resolveFA\_frameReach} shows a
+    suspended frame's witness reaching the pre-mutation value must still resolve to the tracked
+    object once the assignment's own var is rebound to it.
+  \item[Backward] \texttt{varAsgn\_step\_eq} + \texttt{varAsgn\_frame\_reachable\_iff} suffice on
+    their own here, since the root this direction needs (the value \emph{before} the rebind)
+    already existed pre-mutation and needs no separate justification.
+\end{description}
+
+\subsection{\thm{stackReachable\_invariant\_fieldAsgn} (\op{fieldAsgn xf y})}
+\begin{description}[nosep]
+  \item[Forward] confined transport alone suffices: the mutated id's owner-index bound already
+    excludes it from any suspended frame's chain, so the new edge is simply never relevant.
+  \item[Backward] the full escape argument of \S4's shape-D entry, since the new edge exists only
+    in $cfg'$, not $cfg$.
+\end{description}
+
+\subsection{\thm{stackReachable\_invariant\_swap} (\op{swap x yf})}
+Same forward/backward asymmetry as \op{fieldAsgn}, across all four branches, using the same
+per-branch step-agreement and escape lemmas as \S4's version.
+
+\subsection{\thm{stackReachable\_invariant\_merge} (\op{merge x})}
+\begin{description}[nosep]
+  \item[Forward] confined transport via \texttt{merge\_chain\_transport\_down}.
+  \item[Backward] the \texttt{merge\_ridPrime\_reflTransGen\_iff} substitution, since the deleted
+    reference's replacement value (\op{region'.bridgeObjectId}) only exists in $cfg'$.
 \end{description}
 
 \subsection{\thm{stackReachable\_invariant\_all}}
