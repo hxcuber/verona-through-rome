@@ -856,9 +856,9 @@ theorem swap_corollary_region_unique
   have hneq : (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ≠ ⟨rid2, region2⟩ := by
     intro heq
     exact hne (congrArg Sigma.fst heq)
+  haveI : Std.Symm (fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds) := ⟨fun _ _ hd => List.disjoint_symm hd⟩
   have disj := List.Pairwise.forall
     (R := fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds)
-    (fun _ _ hd => List.disjoint_symm hd)
     pairwise_disjoint mem1 mem2 hneq
   unfold Region.objectIds at disj
   exact disj in1 in2

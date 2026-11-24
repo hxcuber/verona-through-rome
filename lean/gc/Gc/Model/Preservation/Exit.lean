@@ -23,9 +23,9 @@ theorem heap_oid_unique_key :
   have hneq : (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ≠ ⟨rid2, region2⟩ := by
     intro heq
     exact hne (congrArg Sigma.fst heq)
+  haveI : Std.Symm (fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds) := ⟨fun _ _ hd => List.disjoint_symm hd⟩
   have disj := List.Pairwise.forall
     (R := fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds)
-    (fun _ _ hd => List.disjoint_symm hd)
     pairwise_disjoint mem1 mem2 hneq
   unfold Region.objectIds at disj
   exact disj in1 in2
@@ -692,7 +692,7 @@ theorem exit_L1 : ValidConfig cfg →
               dsimp
             exact List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys mem_a (AList.lookup_mem_entries heapLookup)
           subst a
-          rw [f, e, List.map_append, List.map_append, List.map_cons]
+          rw [f, e, List.map_cons, List.map_append, List.map_append, List.map_cons]
           dsimp
           exact List.perm_middle.symm
         obtain ⟨old_stack_objectIds_nodup, old_heap_objectIds_nodup, old_disjoint⟩ := List.nodup_append'.mp l1
@@ -785,8 +785,8 @@ theorem exit_H2 : ValidConfig cfg →
               dsimp
             exact List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys mem_a (AList.lookup_mem_entries heapLookup)
           subst a
-          rw [f, e, List.map_append, List.map_append, List.map_append, List.map_append, List.map_cons,]
-          dsimp
+          rw [f, e]
+          simp only [List.map_append, List.map_cons]
           exact List.perm_middle.symm
 
         -- permutation gives equality of counts for the predicate
@@ -917,7 +917,7 @@ theorem exit_L2 : ValidConfig cfg →
             rw [List.getLast?_eq_getLast_of_ne_nil old_stack_nonempty, Option.some_inj] at stackGetLast
             rw [stackGetLast] at helper
             rw [helper, List.map_append] at s1
-            dsimp at s1
+            simp only [List.map_cons, List.map_nil] at s1
             rw [List.nodup_append', List.disjoint_singleton] at s1
             rw [← heq] at s1
             exact s1.right.right
@@ -977,7 +977,7 @@ theorem exit_S1 : ValidConfig cfg →
         rw [List.getLast?_eq_getLast_of_ne_nil old_stack_nonempty, Option.some_inj] at stackGetLast
         rw [stackGetLast] at helper
         rw [helper, List.map_append] at s1
-        dsimp at s1
+        simp only [List.map_cons, List.map_nil] at s1
         rw [List.nodup_append', List.disjoint_singleton] at s1
         exact s1.left
   · rw [if_neg stack_length] at h
@@ -1177,8 +1177,8 @@ theorem exit_HS1 : ValidConfig cfg →
               dsimp
             exact List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys mem_a (AList.lookup_mem_entries heapLookup)
           subst a
-          rw [f, e, List.map_append, List.map_append, List.map_append, List.map_append, List.map_cons]
-          dsimp
+          rw [f, e]
+          simp only [List.map_append, List.map_cons]
           exact List.perm_middle.symm
         have hmem_cfg : Reference.OId oid ∈ cfg.refs := by
           unfold RuntimeConfig.refs at hmem ⊢
@@ -1203,7 +1203,7 @@ theorem exit_HS1 : ValidConfig cfg →
               dsimp
             exact List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys mem_a (AList.lookup_mem_entries heapLookup)
           subst a
-          rw [f, e, List.map_append, List.map_append, List.map_cons]
+          rw [f, e, List.map_cons, List.map_append, List.map_append, List.map_cons]
           dsimp
           exact List.perm_middle.symm
         by_contra hcontra
@@ -1336,8 +1336,8 @@ theorem exit_HS2 : ValidConfig cfg →
               dsimp
             exact List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys mem_a (AList.lookup_mem_entries heapLookup)
           subst a
-          rw [f, e, List.map_append, List.map_append, List.map_append, List.map_append, List.map_cons]
-          dsimp
+          rw [f, e]
+          simp only [List.map_append, List.map_cons]
           exact List.perm_middle.symm
         have hmem_cfg : Reference.RId rid' ∈ cfg.refs := by
           unfold RuntimeConfig.refs at hmem ⊢

@@ -261,9 +261,9 @@ theorem varAsgn_corollary_region_unique
   have hneq : (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ≠ ⟨rid2, region2⟩ := by
     intro heq
     exact hne (congrArg Sigma.fst heq)
+  haveI : Std.Symm (fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds) := ⟨fun _ _ hd => List.disjoint_symm hd⟩
   have disj := List.Pairwise.forall
     (R := fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds)
-    (fun _ _ hd => List.disjoint_symm hd)
     pairwise_disjoint mem1 mem2 hneq
   unfold Region.objectIds at disj
   exact disj in1 in2
@@ -752,7 +752,7 @@ theorem varAsgn_S2 : ValidConfig cfg →
       rw [List.kerase_of_notMem_keys fresh_not_in_frame, List.mem_append] at href
       rcases href with hobjmap | hvarmap
       · right; unfold Frame.refs; exact List.mem_append_left _ hobjmap
-      · rw [List.mem_cons] at hvarmap
+      · rw [List.map_cons, List.mem_cons] at hvarmap
         rcases hvarmap with heq | horig
         · left; exact heq
         · right; unfold Frame.refs; exact List.mem_append_right _ horig
@@ -832,7 +832,7 @@ theorem varAsgn_S3 : ValidConfig cfg →
       rw [List.kerase_of_notMem_keys fresh_not_in_frame, List.mem_append] at href
       rcases href with hobjmap | hvarmap
       · right; unfold Frame.refs; exact List.mem_append_left _ hobjmap
-      · rw [List.mem_cons] at hvarmap
+      · rw [List.map_cons, List.mem_cons] at hvarmap
         rcases hvarmap with heq | horig
         · left; exact heq
         · right; unfold Frame.refs; exact List.mem_append_right _ horig
@@ -938,7 +938,7 @@ theorem varAsgn_HS1 : ValidConfig cfg →
       rw [List.kerase_of_notMem_keys fresh_not_in_frame, List.mem_append] at href
       rcases href with hobjmap | hvarmap
       · right; unfold Frame.refs; exact List.mem_append_left _ hobjmap
-      · rw [List.mem_cons] at hvarmap
+      · rw [List.map_cons, List.mem_cons] at hvarmap
         rcases hvarmap with heq | horig
         · left; exact heq
         · right; unfold Frame.refs; exact List.mem_append_right _ horig
@@ -1014,7 +1014,7 @@ theorem varAsgn_HS2 : ValidConfig cfg →
       rw [List.kerase_of_notMem_keys fresh_not_in_frame, List.mem_append] at href
       rcases href with hobjmap | hvarmap
       · right; unfold Frame.refs; exact List.mem_append_left _ hobjmap
-      · rw [List.mem_cons] at hvarmap
+      · rw [List.map_cons, List.mem_cons] at hvarmap
         rcases hvarmap with heq | horig
         · left; exact heq
         · right; unfold Frame.refs; exact List.mem_append_right _ horig

@@ -41,7 +41,7 @@ theorem makeRegion_L1 : ValidConfig cfg →
       dsimp
       rw [List.kerase_of_notMem_keys (RuntimeConfig.freshRegionId_not_mem cfg)]
       unfold Region.objectIds
-      dsimp
+      rfl
     rw [stack_objectIds_eq, heap_objectIds_eq]
     have eq1 : cfg.stack.objectIds ++ (cfg.freshObjectId :: cfg.heap.objectIds) =
         cfg.stack.objectIds ++ ([cfg.freshObjectId] ++ cfg.heap.objectIds) := by
@@ -128,7 +128,7 @@ theorem makeRegion_H1 : ValidConfig cfg →
     rw [← h] at hregion
     unfold Heap.regions at hregion
     dsimp at hregion
-    rw [List.kerase_of_notMem_keys (RuntimeConfig.freshRegionId_not_mem cfg), List.mem_cons] at hregion
+    rw [List.kerase_of_notMem_keys (RuntimeConfig.freshRegionId_not_mem cfg), List.map_cons, List.mem_cons] at hregion
     rcases hregion with heq | hold
     · subst heq
       dsimp
@@ -192,7 +192,7 @@ theorem makeRegion_H2 : ValidConfig cfg →
       dsimp
       rw [List.count_append, List.count_append]
       apply Nat.add_le_add_left
-      rw [List.count_cons]
+      rw [List.map_cons, List.count_cons]
       have hle := varMap_kerase_le rid
       simp only [beq_iff_eq, Reference.RId.injEq]
       simp only [Ne.symm hrid, if_false]
@@ -221,7 +221,7 @@ theorem makeRegion_H2 : ValidConfig cfg →
       unfold Frame.refs
       rw [newFrame_def]
       dsimp
-      rw [List.count_append, hobjmap_fresh_zero, List.count_cons]
+      rw [List.count_append, hobjmap_fresh_zero, List.map_cons, List.count_cons]
       simp only [BEq.rfl, if_true]
       have hker_le := varMap_kerase_le cfg.freshRegionId
       rw [hvarmap_fresh_zero] at hker_le
@@ -488,7 +488,7 @@ theorem makeRegion_S2 : ValidConfig cfg →
       rcases href with hobjmap | hvarmap
       · right
         exact List.mem_append_left _ hobjmap
-      · rw [List.mem_cons] at hvarmap
+      · rw [List.map_cons, List.mem_cons] at hvarmap
         rcases hvarmap with heqref | hker
         · left; exact heqref
         · right
@@ -589,7 +589,7 @@ theorem makeRegion_S3 : ValidConfig cfg →
       rcases href with hobjmap | hvarmap
       · right
         exact List.mem_append_left _ hobjmap
-      · rw [List.mem_cons] at hvarmap
+      · rw [List.map_cons, List.mem_cons] at hvarmap
         rcases hvarmap with heqref | hker
         · left; exact heqref
         · right
@@ -720,7 +720,7 @@ theorem makeRegion_HS1 : ValidConfig cfg →
       rcases href with hobjmap | hvarmap
       · right
         exact List.mem_append_left _ hobjmap
-      · rw [List.mem_cons] at hvarmap
+      · rw [List.map_cons, List.mem_cons] at hvarmap
         rcases hvarmap with heqref | hker
         · left; exact heqref
         · right
@@ -742,7 +742,7 @@ theorem makeRegion_HS1 : ValidConfig cfg →
       dsimp
       rw [List.kerase_of_notMem_keys (RuntimeConfig.freshRegionId_not_mem cfg)]
       unfold Region.objectIds
-      dsimp
+      rfl
     unfold HS1
     rw [← h]
     unfold RuntimeConfig.refs RuntimeConfig.objectIds
@@ -813,7 +813,7 @@ theorem makeRegion_HS2 : ValidConfig cfg →
       rcases href with hobjmap | hvarmap
       · right
         exact List.mem_append_left _ hobjmap
-      · rw [List.mem_cons] at hvarmap
+      · rw [List.map_cons, List.mem_cons] at hvarmap
         rcases hvarmap with heqref | hker
         · left; exact heqref
         · right

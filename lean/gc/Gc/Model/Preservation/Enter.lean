@@ -19,9 +19,9 @@ theorem enter_corollary_1 :
   have hneq : (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ≠ ⟨rid2, region2⟩ := by
     intro heq
     exact hne (congrArg Sigma.fst heq)
+  haveI : Std.Symm (fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds) := ⟨fun _ _ hd => List.disjoint_symm hd⟩
   have disj := List.Pairwise.forall
     (R := fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds)
-    (fun _ _ hd => List.disjoint_symm hd)
     pairwise_disjoint mem1 mem2 hneq
   unfold Region.objectIds at disj
   exact disj in1 in2
@@ -291,7 +291,7 @@ theorem enter_L1 : ValidConfig cfg →
                 dsimp
               exact List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys mem_a (AList.lookup_mem_entries heapLookup)
             subst a
-            rw [f, e, List.map_append, List.map_append, List.map_cons]
+            rw [f, e, List.map_cons, List.map_append, List.map_append, List.map_cons]
             dsimp
             exact List.perm_middle
           have cfg_stack_objectIds_perm_cfg'_stack_objectIds : cfg.stack.objectIds.Perm cfg'.stack.objectIds := by
@@ -301,10 +301,8 @@ theorem enter_L1 : ValidConfig cfg →
             unfold Stack.objectIds
             rw [List.bind_eq_flatMap, List.bind_eq_flatMap, List.flatMap_id, List.flatMap_id, List.map_append]
             unfold Frame.objectIds
-            dsimp
             rw [List.flatten_append]
-            dsimp
-            rw [List.append_nil]
+            simp
           unfold RuntimeConfig.objectIds
           have cfg.objectIds_perm_cfg'_objectIds : cfg.objectIds.Perm cfg'.objectIds := by
             unfold RuntimeConfig.objectIds
@@ -488,8 +486,8 @@ theorem enter_H2 : ValidConfig cfg →
                 dsimp
               exact List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys mem_a (AList.lookup_mem_entries heapLookup)
             subst a
-            rw [f, e, List.map_append, List.map_append, List.map_append, List.map_append, List.map_cons]
-            dsimp
+            rw [f, e]
+            simp only [List.map_append, List.map_cons]
             exact List.perm_middle.symm
           have h2 := vcfg.h2 rid'
           rw [← cfg_stack_refs_perm_cfg'_stack_refs.count_eq, cfg'_heap_refs_perm_cfg_heap_refs.count_eq]
@@ -774,8 +772,8 @@ theorem enter_HS1 : ValidConfig cfg →
                 dsimp
               exact List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys mem_a (AList.lookup_mem_entries heapLookup)
             subst a'
-            rw [f, e, List.map_append, List.map_append, List.map_append, List.map_append, List.map_cons]
-            dsimp
+            rw [f, e]
+            simp only [List.map_append, List.map_cons]
             exact List.perm_middle.symm
           have heap_objectIds_perm : cfg'.heap.objectIds.Perm cfg.heap.objectIds := by
             rw [← h]
@@ -792,7 +790,7 @@ theorem enter_HS1 : ValidConfig cfg →
                 dsimp
               exact List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys mem_a (AList.lookup_mem_entries heapLookup)
             subst a'
-            rw [f, e, List.map_append, List.map_append, List.map_cons]
+            rw [f, e, List.map_cons, List.map_append, List.map_append, List.map_cons]
             dsimp
             exact List.perm_middle.symm
           have refs_perm : cfg'.refs.Perm cfg.refs := by
@@ -862,8 +860,8 @@ theorem enter_HS2 : ValidConfig cfg →
                 dsimp
               exact List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys mem_a (AList.lookup_mem_entries heapLookup)
             subst a'
-            rw [f, e, List.map_append, List.map_append, List.map_append, List.map_append, List.map_cons]
-            dsimp
+            rw [f, e]
+            simp only [List.map_append, List.map_cons]
             exact List.perm_middle.symm
           have refs_perm : cfg'.refs.Perm cfg.refs := by
             unfold RuntimeConfig.refs

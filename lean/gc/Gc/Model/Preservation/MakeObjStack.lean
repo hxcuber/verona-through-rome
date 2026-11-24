@@ -192,7 +192,7 @@ theorem makeObjStack_L1 : ValidConfig cfg →
       unfold Stack.objectIds
       rw [List.bind_eq_flatMap, List.bind_eq_flatMap, List.flatMap_id, List.flatMap_id,
         List.map_append, List.flatten_append]
-      dsimp
+      simp only [List.map_cons, List.map_nil, List.flatten_cons, List.flatten_nil]
       rw [newFrame_objectIds, List.append_nil]
     have dropLast_frame_eq : Stack.objectIds cfg.stack.dropLast ++ frame.objectIds = cfg.stack.objectIds := by
       conv_rhs => rw [stack_eq]
@@ -306,6 +306,7 @@ theorem makeObjStack_H2 : ValidConfig cfg →
       have objMap_eq : List.flatMap Object.refs (∅ :: List.map (·.2) frame.objMap.entries) =
           List.flatMap Object.refs (List.map (·.2) frame.objMap.entries) := by
         simp [Object.refs]
+      simp only [List.map_cons]
       rw [objMap_eq]
       have varMap_le : List.count (Reference.RId rid)
           (Reference.OId cfg.freshObjectId :: List.map (·.2) (List.kerase x frame.varMap.entries)) ≤
@@ -381,7 +382,7 @@ theorem makeObjStack_S1 : ValidConfig cfg →
         cfg.stack.map (fun f => f.regionId) := by
       conv_rhs => rw [stack_eq]
       rw [List.map_append, List.map_append, newFrame_def]
-      dsimp
+      rfl
     rw [regionId_eq]
     exact vcfg.s1
 
@@ -426,7 +427,7 @@ theorem makeObjStack_S2 : ValidConfig cfg →
         unfold Frame.refs
         apply List.mem_append_left
         simpa [Object.refs] using hobjmap
-      · rw [List.mem_cons] at hvarmap
+      · rw [List.map_cons, List.mem_cons] at hvarmap
         rcases hvarmap with heq | hker
         · left; exact heq
         · right
@@ -641,7 +642,7 @@ theorem makeObjStack_S3 : ValidConfig cfg →
         unfold Frame.refs
         apply List.mem_append_left
         simpa [Object.refs] using hobjmap
-      · rw [List.mem_cons] at hvarmap
+      · rw [List.map_cons, List.mem_cons] at hvarmap
         rcases hvarmap with heq | hker
         · left; exact heq
         · right
@@ -928,7 +929,7 @@ theorem makeObjStack_HS1 : ValidConfig cfg →
               apply List.mem_append_left
               simpa [Object.refs] using hobjmap
             exact List.mem_append_left _ (hs1 oid (frame_refs_to_cfg_refs _ hframe))
-          · rw [List.mem_cons] at hvarmap
+          · rw [List.map_cons, List.mem_cons] at hvarmap
             rcases hvarmap with heq | hker
             · rw [Reference.OId.injEq] at heq
               exact List.mem_append_right _ (List.mem_singleton.mpr heq)
@@ -1005,7 +1006,7 @@ theorem makeObjStack_HS2 : ValidConfig cfg →
               apply List.mem_append_left
               simpa [Object.refs] using hobjmap
             exact frame_refs_to_cfg_refs _ hframe
-          · rw [List.mem_cons] at hvarmap
+          · rw [List.map_cons, List.mem_cons] at hvarmap
             rcases hvarmap with heq | hker
             · simp at heq
             · have hframe : Reference.RId rid' ∈ frame.refs := by
