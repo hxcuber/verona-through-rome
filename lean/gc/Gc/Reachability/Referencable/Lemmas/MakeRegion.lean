@@ -478,8 +478,8 @@ theorem makeRegion_corollary_frameReferencable_iff_of_lt (vcfg : ValidConfig cfg
   constructor
   · rintro ⟨start, hroot, hrtg⟩
     exact ⟨start, (hfrRootIff start).mp hroot,
-      hrtg.mono (fun a b hab => (makeRegion_corollary_refStep_iff vcfg vcfg' h a b).mp hab)⟩
+      Relation.ReflTransGen.mono (fun a b hab => (makeRegion_corollary_refStep_iff vcfg vcfg' h a b).mp hab) _ _ hrtg⟩
   · rintro ⟨start, hroot, hrtg⟩
     exact ⟨start, (hfrRootIff start).mpr hroot,
-      hrtg.mono (fun a b hab => (makeRegion_corollary_refStep_iff vcfg vcfg' h a b).mpr hab)⟩
+      Relation.ReflTransGen.mono (fun a b hab => (makeRegion_corollary_refStep_iff vcfg vcfg' h a b).mpr hab) _ _ hrtg⟩
 

@@ -40,7 +40,7 @@ theorem varAsgn_cr3 : ValidReachableConfig cfg →
   rw [FrameReferencable_iff_reflTransGen] at hreach
   obtain ⟨start, hroot, hrtg⟩ := hreach
   have hrtgDown : Relation.ReflTransGen (RefStep cfg) start (Reference.OId oid) :=
-    hrtg.mono (fun a b hab => (hRefStepIff a b).mpr hab)
+    Relation.ReflTransGen.mono (fun a b hab => (hRefStepIff a b).mpr hab) _ _ hrtg
   have escape : ∀ oidw : ObjectId, resolveFA y cfg = some (Reference.OId oidw) →
       start = Reference.OId oidw →
       FrameReferencable cfg frameD.index (Reference.OId oid) := by
@@ -223,7 +223,7 @@ theorem varAsgn_cr3 : ValidReachableConfig cfg →
         · rw [hidx2D', hidx2]
         · rw [hrid2D', hheap_eq]; exact hlookup2
   have hrtg2Up : Relation.ReflTransGen (RefStep cfg') start2 (Reference.OId oid) :=
-    hrtg2.mono (fun a b hab => (hRefStepIff a b).mp hab)
+    Relation.ReflTransGen.mono (fun a b hab => (hRefStepIff a b).mp hab) _ _ hrtg2
   rw [FrameReferencable_iff_reflTransGen, ← hidxD]
   exact ⟨start2, hrootUp, hrtg2Up⟩
 

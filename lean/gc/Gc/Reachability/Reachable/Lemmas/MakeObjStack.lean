@@ -255,7 +255,6 @@ theorem makeObjStack_fresh_objAt_cfg' {cfg cfg' : RuntimeConfig} (h : makeObjSta
     dsimp only
     apply List.mem_mapIdx.mpr
     refine ⟨dropLastLen, by rw [hdropLastLen_def]; simp, ?_⟩
-    dsimp only
     rw [List.getElem_append_right (by rw [hdropLastLen_def])]
     simp [hdropLastLen_def]
   have hfind : cfg'.stackWithIndex.find? (fun frame => frame.index == dropLastLen) =

@@ -64,9 +64,9 @@ theorem merge_corollary_region_unique
   have hneq : (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ≠ ⟨rid2, region2⟩ := by
     intro heq
     exact hne (congrArg Sigma.fst heq)
+  haveI : Std.Symm (fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds) := ⟨fun _ _ hd => List.disjoint_symm hd⟩
   have disj := List.Pairwise.forall
     (R := fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds)
-    (fun _ _ hd => List.disjoint_symm hd)
     pairwise_disjoint mem1 mem2 hneq
   unfold Region.objectIds at disj
   exact disj in1 in2
@@ -295,7 +295,7 @@ theorem merge_H2 : ValidConfig cfg →
     have hcount := merge_corollary_alist_insert_count_eq
       (v_old := Reference.RId rid') (v_new := Reference.OId region'.bridgeObjectId) (t := Reference.RId rid) hxref
     rw [hOId_ne] at hcount
-    simp only [Bool.false_eq_true, if_false, Nat.add_zero] at hcount
+    simp only [Bool.false_eq_true, ite_false, Nat.add_zero] at hcount
     omega
   have newFrame_refs_le : (Frame.refs { frame with
       varMap := frame.varMap.insert x (Reference.OId region'.bridgeObjectId) }).count (Reference.RId rid) ≤
@@ -1108,7 +1108,7 @@ theorem merge_HS2 : ValidConfig cfg →
   have hcount := merge_corollary_alist_insert_count_eq
     (v_old := Reference.RId rid') (v_new := Reference.OId region'.bridgeObjectId) (t := Reference.RId rid') hxref
   rw [hOId_ne] at hcount
-  simp only [beq_self_eq_true, if_true, Bool.false_eq_true, if_false] at hcount
+  simp only [beq_self_eq_true, ite_true, Bool.false_eq_true, ite_false] at hcount
   have newFrame_count_eq : (Frame.refs { frame with
       varMap := frame.varMap.insert x (Reference.OId region'.bridgeObjectId) }).count (Reference.RId rid') + 1 =
       frame.refs.count (Reference.RId rid') := by

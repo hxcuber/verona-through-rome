@@ -40,7 +40,7 @@ theorem makeObjRegion_cases {cfg cfg' : RuntimeConfig} (h : makeObjRegion x cfg 
       | Closed => rw [hstatus] at h; contradiction
       | Open =>
         rw [hstatus] at h
-        rw [if_pos (by rfl)] at h
+        rw [ite_eq_left (by rfl)] at h
         rw [← hstatus] at h
         rw [Option.some_inj] at h
         refine ⟨frame, region, ?_, ?_, ?_, h.symm⟩ <;> first | rfl | assumption

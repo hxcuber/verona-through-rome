@@ -359,11 +359,11 @@ theorem fieldAsgn_corollary_object_insert_count_le {obj : Object} {field : Field
     have hold : obj.entries.map (·.2) = l1e.map (·.2) ++ v0 :: l2e.map (·.2) := by
       rw [heq, List.map_append, List.map_cons]
     rw [hnew, hold, List.count_cons, List.map_append, List.count_append, List.count_append,
-      List.count_cons, hne, if_neg (by decide)]
+      List.count_cons, hne, ite_eq_right (by decide)]
     split_ifs <;> omega
   · have hnew : (AList.insert field v obj).entries.map (·.2) = v :: obj.entries.map (·.2) := by
       rw [AList.entries_insert_of_notMem hfield, List.map_cons]
-    rw [hnew, List.count_cons, hne, if_neg (by decide)]
+    rw [hnew, List.count_cons, hne, ite_eq_right (by decide)]
     omega
 
 -- ObjMap-level count propagation: given the mutated object's own count bound (from
@@ -529,7 +529,7 @@ theorem fieldAsgn_corollary_resolveV_oid_mem_objectIds {cfg : RuntimeConfig} (vc
       rw [hlookupV] at hrv
       dsimp at hrv
       by_cases hbv : frameV.bridgeVar == var
-      · rw [if_pos hbv] at hrv
+      · rw [ite_eq_left hbv] at hrv
         cases hregionV : cfg.heap.lookup frameV.regionId with
         | none => rw [hregionV] at hrv; dsimp at hrv; contradiction
         | some regionV =>
@@ -546,7 +546,7 @@ theorem fieldAsgn_corollary_resolveV_oid_mem_objectIds {cfg : RuntimeConfig} (vc
           · exact List.mem_map_of_mem (f := fun e : Sigma (fun _ : RegionId => Region) => e.2.objectIds)
               (AList.mem_lookup_iff.mp (by rw [hregionV]; rfl))
           · rw [← hrv]; exact AList.mem_keys.mp hmemBridge
-      · rw [if_neg hbv] at hrv; contradiction
+      · rw [ite_eq_right hbv] at hrv; contradiction
 
 -- A List.Perm doesn't change what `.contains` reports (order-independent).
 theorem fieldAsgn_corollary_perm_contains_eq {α : Type*} [BEq α] [LawfulBEq α] {l l' : List α}
@@ -645,9 +645,9 @@ theorem fieldAsgn_corollary_region_unique
   have hneq : (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ≠ ⟨rid2, region2⟩ := by
     intro heq
     exact hne (congrArg Sigma.fst heq)
+  haveI : Std.Symm (fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds) := ⟨fun _ _ hd => List.disjoint_symm hd⟩
   have disj := List.Pairwise.forall
     (R := fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds)
-    (fun _ _ hd => List.disjoint_symm hd)
     pairwise_disjoint mem1 mem2 hneq
   unfold Region.objectIds at disj
   exact disj in1 in2
@@ -915,7 +915,7 @@ theorem fieldAsgn_corollary_resolveV_loc_ancestor {cfg : RuntimeConfig} {var : V
       rw [hlookupV] at hrv
       dsimp at hrv
       by_cases hbv : frameV.bridgeVar == var
-      · rw [if_pos hbv] at hrv
+      · rw [ite_eq_left hbv] at hrv
         cases hregionV : cfg.heap.lookup frameV.regionId with
         | none => rw [hregionV] at hrv; dsimp at hrv; contradiction
         | some regionV =>
@@ -929,7 +929,7 @@ theorem fieldAsgn_corollary_resolveV_loc_ancestor {cfg : RuntimeConfig} {var : V
             (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨regionV, hregionV, hmemBridge⟩
           rw [hrv, hloc0, Option.some_inj, Location.Rgn.injEq] at hlocBridge
           exact ⟨frameV, hframeV_mem, hlocBridge.symm, hframeV_lt⟩
-      · rw [if_neg hbv] at hrv; contradiction
+      · rw [ite_eq_right hbv] at hrv; contradiction
 
 theorem fieldAsgn_S3 : ValidConfig cfg →
   fieldAsgn x yf cfg = some cfg' →

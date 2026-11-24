@@ -116,7 +116,7 @@ theorem makeObjStack_cr3 : ValidReachableConfig cfg →
     have hroot_down : FrameRoot cfg frame'.index (Reference.OId start_oid) :=
       makeObjStack_corollary_frameRoot_down h hstart_ne_fresh hroot
     have hrtg_down : Relation.ReflTransGen (RefStep cfg) (Reference.OId start_oid) (Reference.OId oid) :=
-      hrtg.mono (fun a b hab => (makeObjStack_corollary_refStep_iff vcfg vcfg' h a b).mpr hab)
+      Relation.ReflTransGen.mono (fun a b hab => (makeObjStack_corollary_refStep_iff vcfg vcfg' h a b).mpr hab) _ _ hrtg
     have hreachDown : FrameReferencable cfg frame'.index (Reference.OId oid) :=
       (FrameReferencable_iff_reflTransGen cfg frame'.index (Reference.OId oid)).mpr
         ⟨Reference.OId start_oid, hroot_down, hrtg_down⟩
@@ -140,7 +140,7 @@ theorem makeObjStack_cr3 : ValidReachableConfig cfg →
     rw [FrameReferencable_iff_reflTransGen] at hconcDown ⊢
     obtain ⟨start2, hroot2, hrtg2⟩ := hconcDown
     exact ⟨start2, (frameRoot_iff_nonlast frame.index hframe_lt_dropLast start2).mp hroot2,
-      hrtg2.mono (fun a b hab => (makeObjStack_corollary_refStep_iff vcfg vcfg' h a b).mp hab)⟩
+      Relation.ReflTransGen.mono (fun a b hab => (makeObjStack_corollary_refStep_iff vcfg vcfg' h a b).mp hab) _ _ hrtg2⟩
   · -- Non-last position: transport everything down to `cfg`, apply `vrcfg.cr3`, transport back up.
     have hframe'_lt_dropLast : frame'.index < cfg.stack.dropLast.length := by
       have hframe'_lt2 : frame'.index < cfg.stack.dropLast.length + 1 := by
@@ -152,13 +152,13 @@ theorem makeObjStack_cr3 : ValidReachableConfig cfg →
       rw [FrameReferencable_iff_reflTransGen] at hreach ⊢
       obtain ⟨start, hroot, hrtg⟩ := hreach
       exact ⟨start, (frameRoot_iff_nonlast frame'.index hframe'_lt_dropLast start).mpr hroot,
-        hrtg.mono (fun a b hab => (makeObjStack_corollary_refStep_iff vcfg vcfg' h a b).mpr hab)⟩
+        Relation.ReflTransGen.mono (fun a b hab => (makeObjStack_corollary_refStep_iff vcfg vcfg' h a b).mpr hab) _ _ hrtg⟩
     have hconcDown : FrameReferencable cfg frame.index (Reference.OId oid) :=
       vrcfg.cr3 frame hframeMemCfg frame' hframe'MemCfg hlt oid hlocDown hreachDown
     rw [FrameReferencable_iff_reflTransGen] at hconcDown ⊢
     obtain ⟨start2, hroot2, hrtg2⟩ := hconcDown
     exact ⟨start2, (frameRoot_iff_nonlast frame.index hframe_lt_dropLast start2).mp hroot2,
-      hrtg2.mono (fun a b hab => (makeObjStack_corollary_refStep_iff vcfg vcfg' h a b).mp hab)⟩
+      Relation.ReflTransGen.mono (fun a b hab => (makeObjStack_corollary_refStep_iff vcfg vcfg' h a b).mp hab) _ _ hrtg2⟩
 
 theorem makeObjStack_reachable_valid : ValidReachableConfig cfg →
   makeObjStack x cfg = some cfg' →

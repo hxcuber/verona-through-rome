@@ -16,10 +16,10 @@ theorem List.mem_of_mem_dropLast_mapIdx {β : Type u_1} {α : Type u_2} {f : Nat
   | cons head tail ih =>
     cases tail with
     | nil =>
-      dsimp at h
+      rw [List.dropLast_singleton] at h
       contradiction
     | cons head' tail' =>
-      dsimp at h
+      rw [List.dropLast_cons_cons] at h
       rw [List.mapIdx_cons] at h
       cases h with
       | head =>
@@ -90,7 +90,7 @@ theorem List.Sublist.flatten_sublist {α : Type} {l m : List (List α)} (h : l.S
   | cons head sublist ih =>
     rw [List.flatten_cons]
     exact List.sublist_append_of_sublist_right ih
-  | cons₂ head sublist ih =>
+  | cons_cons head sublist ih =>
     rw [List.flatten_cons, List.flatten_cons]
     exact (List.append_sublist_append_left head).mpr ih
 

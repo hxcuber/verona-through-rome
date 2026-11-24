@@ -180,7 +180,7 @@ theorem rid_loc_rgn_iff_in_heap : ValidConfig cfg →
       obtain ⟨region, pair_in_heap⟩ := List.mem_keys.mp h
       use region
       exact AList.mem_lookup_iff.mpr pair_in_heap
-    · rw [if_neg h] at loc_rid
+    · rw [ite_eq_right h] at loc_rid
       contradiction
   · intro region_in_heap
     obtain ⟨region, pair_in_heap⟩ := region_in_heap
@@ -188,7 +188,7 @@ theorem rid_loc_rgn_iff_in_heap : ValidConfig cfg →
     dsimp
     apply Option.isSome_of_eq_some at pair_in_heap
     rw [AList.lookup_isSome, AList.mem_keys, ← List.contains_iff_mem] at pair_in_heap
-    rw [if_pos pair_in_heap]
+    rw [ite_eq_left pair_in_heap]
 
 theorem oid_loc_rgn_iff_in_heap : ValidConfig cfg →
   ((Reference.OId oid).loc? cfg = some (Location.Rgn rid) ↔

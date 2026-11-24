@@ -102,7 +102,7 @@ theorem merge_cr3 : ValidReachableConfig cfg →
       ¬ Relation.ReflTransGen (RefStep cfg') (Reference.OId region'.bridgeObjectId) (Reference.OId oid) := by
     intro hchain
     have hchain_cfg : Relation.ReflTransGen (RefStep cfg) (Reference.OId region'.bridgeObjectId) (Reference.OId oid) :=
-      hchain.mono (fun a b hab => (merge_corollary_refStep_iff vcfg h a b).mpr hab)
+      Relation.ReflTransGen.mono (fun a b hab => (merge_corollary_refStep_iff vcfg h a b).mpr hab) _ _ hchain
     have hregReach : RegionReferencable cfg rid' (Reference.OId oid) :=
       (RegionReferencable_iff_reflTransGen cfg rid' (Reference.OId oid)).mpr ⟨region', hregion', hchain_cfg⟩
     have hloc_rid' := RegionReferencable_stays_in_region vcfg hregReach
@@ -142,7 +142,7 @@ theorem merge_cr3 : ValidReachableConfig cfg →
   have hroot_down : FrameRoot cfg frame'.index (Reference.OId start_oid) :=
     merge_corollary_frameRoot_down vcfg' hframe1Last hregion1 hregion' hcfg' hne_start hroot
   have hrtg_down : Relation.ReflTransGen (RefStep cfg) (Reference.OId start_oid) (Reference.OId oid) :=
-    hrtg.mono (fun a b hab => (merge_corollary_refStep_iff vcfg h a b).mpr hab)
+    Relation.ReflTransGen.mono (fun a b hab => (merge_corollary_refStep_iff vcfg h a b).mpr hab) _ _ hrtg
   have hreachDown : FrameReferencable cfg frame'.index (Reference.OId oid) :=
     (FrameReferencable_iff_reflTransGen cfg frame'.index (Reference.OId oid)).mpr
       ⟨Reference.OId start_oid, hroot_down, hrtg_down⟩
@@ -161,7 +161,7 @@ theorem merge_cr3 : ValidReachableConfig cfg →
     rw [FrameReferencable_iff_reflTransGen] at hconcDown ⊢
     obtain ⟨start2, hroot2, hrtg2⟩ := hconcDown
     exact ⟨start2, frameRoot_up_frame start2 hroot2,
-      hrtg2.mono (fun a b hab => (merge_corollary_refStep_iff vcfg h a b).mp hab)⟩
+      Relation.ReflTransGen.mono (fun a b hab => (merge_corollary_refStep_iff vcfg h a b).mp hab) _ _ hrtg2⟩
   · have hframe'_lt_dropLast : frame'.index < cfg.stack.dropLast.length := by
       have hframe'_lt2 : frame'.index < cfg.stack.dropLast.length + 1 := by
         rw [← hlen']; exact hframe'_lt
@@ -173,7 +173,7 @@ theorem merge_cr3 : ValidReachableConfig cfg →
     rw [FrameReferencable_iff_reflTransGen] at hconcDown ⊢
     obtain ⟨start2, hroot2, hrtg2⟩ := hconcDown
     exact ⟨start2, frameRoot_up_frame start2 hroot2,
-      hrtg2.mono (fun a b hab => (merge_corollary_refStep_iff vcfg h a b).mp hab)⟩
+      Relation.ReflTransGen.mono (fun a b hab => (merge_corollary_refStep_iff vcfg h a b).mp hab) _ _ hrtg2⟩
 
 theorem merge_reachable_valid : ValidReachableConfig cfg →
   merge x cfg = some cfg' →

@@ -39,7 +39,7 @@ theorem makeObjRegion_corollary_objectIds_perm : ValidConfig cfg →
       | Closed => rw [regionStatus] at h; contradiction
       | Open =>
         rw [regionStatus] at h
-        rw [if_pos (by rfl)] at h
+        rw [ite_eq_left (by rfl)] at h
         rw [Option.some_inj] at h
         have fresh_not_in_region := makeObjRegion_corollary_fresh_not_in_region heapLookup
         set newRegion : Region :=
@@ -142,7 +142,7 @@ theorem makeObjRegion_L2 : ValidConfig cfg →
       | Closed => rw [regionStatus] at h; contradiction
       | Open =>
         rw [regionStatus] at h
-        rw [if_pos (by rfl)] at h
+        rw [ite_eq_left (by rfl)] at h
         rw [Option.some_inj] at h
         unfold L2
         rw [← h]
@@ -188,7 +188,7 @@ theorem makeObjRegion_H1 : ValidConfig cfg →
       | Closed => rw [regionStatus] at h; contradiction
       | Open =>
         rw [regionStatus] at h
-        rw [if_pos (by rfl)] at h
+        rw [ite_eq_left (by rfl)] at h
         rw [Option.some_inj] at h
         unfold H1
         rw [← h]
@@ -238,7 +238,7 @@ theorem makeObjRegion_corollary_heap_refs_perm : ValidConfig cfg →
       | Closed => rw [regionStatus] at h; contradiction
       | Open =>
         rw [regionStatus] at h
-        rw [if_pos (by rfl)] at h
+        rw [ite_eq_left (by rfl)] at h
         rw [Option.some_inj] at h
         have fresh_not_in_region := makeObjRegion_corollary_fresh_not_in_region heapLookup
         set newRegion : Region :=
@@ -289,7 +289,7 @@ theorem makeObjRegion_H2 : ValidConfig cfg →
       | Closed => rw [regionStatus] at h; contradiction
       | Open =>
         rw [regionStatus] at h
-        rw [if_pos (by rfl)] at h
+        rw [ite_eq_left (by rfl)] at h
         rw [Option.some_inj] at h
         unfold H2
         intro rid
@@ -306,7 +306,7 @@ theorem makeObjRegion_H2 : ValidConfig cfg →
           dsimp
           rw [List.count_append, List.count_append]
           apply Nat.add_le_add_left
-          rw [List.count_cons]
+          rw [List.map_cons, List.count_cons]
           have hne : (Reference.OId cfg.freshObjectId == Reference.RId rid) = false := rfl
           rw [hne]
           dsimp
@@ -350,9 +350,9 @@ theorem makeObjRegion_corollary_region_unique
   have hneq : (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ≠ ⟨rid2, region2⟩ := by
     intro heq
     exact hne (congrArg Sigma.fst heq)
+  haveI : Std.Symm (fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds) := ⟨fun _ _ hd => List.disjoint_symm hd⟩
   have disj := List.Pairwise.forall
     (R := fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds)
-    (fun _ _ hd => List.disjoint_symm hd)
     pairwise_disjoint mem1 mem2 hneq
   unfold Region.objectIds at disj
   exact disj in1 in2
@@ -398,7 +398,7 @@ theorem makeObjRegion_corollary_loc_eq : ValidConfig cfg →
       | Closed => rw [regionStatus] at h; contradiction
       | Open =>
         rw [regionStatus] at h
-        rw [if_pos (by rfl)] at h
+        rw [ite_eq_left (by rfl)] at h
         rw [Option.some_inj] at h
         have l1 := vcfg.l1
         have fresh_not_in_region := makeObjRegion_corollary_fresh_not_in_region heapLookup
@@ -592,7 +592,7 @@ theorem makeObjRegion_H3 : ValidConfig cfg →
       | Closed => rw [regionStatus] at h; contradiction
       | Open =>
         rw [regionStatus] at h
-        rw [if_pos (by rfl)] at h
+        rw [ite_eq_left (by rfl)] at h
         rw [Option.some_inj] at h
         have fresh_not_in_region := makeObjRegion_corollary_fresh_not_in_region heapLookup
         set newRegion : Region :=
@@ -653,7 +653,7 @@ theorem makeObjRegion_S1 : ValidConfig cfg →
       | Closed => rw [regionStatus] at h; contradiction
       | Open =>
         rw [regionStatus] at h
-        rw [if_pos (by rfl)] at h
+        rw [ite_eq_left (by rfl)] at h
         rw [Option.some_inj] at h
         unfold S1
         rw [← h]
@@ -693,7 +693,7 @@ theorem makeObjRegion_corollary_loc_fresh : ValidConfig cfg →
       | Closed => rw [regionStatus] at h; contradiction
       | Open =>
         rw [regionStatus] at h
-        rw [if_pos (by rfl)] at h
+        rw [ite_eq_left (by rfl)] at h
         rw [Option.some_inj] at h
         refine ⟨frame, ?_, ?_⟩
         · rfl
@@ -800,7 +800,7 @@ theorem makeObjRegion_S2 : ValidConfig cfg →
       | Closed => rw [regionStatus] at h; contradiction
       | Open =>
         rw [regionStatus] at h
-        rw [if_pos (by rfl)] at h
+        rw [ite_eq_left (by rfl)] at h
         rw [Option.some_inj] at h
         set newFrame : Frame :=
           { regionId := frame.regionId, bridgeVar := frame.bridgeVar, objMap := frame.objMap,
@@ -815,7 +815,7 @@ theorem makeObjRegion_S2 : ValidConfig cfg →
           rcases href with hobjmap | hvarmap
           · right
             exact List.mem_append_left _ hobjmap
-          · rw [List.mem_cons] at hvarmap
+          · rw [List.map_cons, List.mem_cons] at hvarmap
             rcases hvarmap with heqref | hker
             · left; exact heqref
             · right
@@ -917,7 +917,7 @@ theorem makeObjRegion_S3 : ValidConfig cfg →
       | Closed => rw [regionStatus] at h; contradiction
       | Open =>
         rw [regionStatus] at h
-        rw [if_pos (by rfl)] at h
+        rw [ite_eq_left (by rfl)] at h
         rw [Option.some_inj] at h
         set newFrame : Frame :=
           { regionId := frame.regionId, bridgeVar := frame.bridgeVar, objMap := frame.objMap,
@@ -932,7 +932,7 @@ theorem makeObjRegion_S3 : ValidConfig cfg →
           rcases href with hobjmap | hvarmap
           · right
             exact List.mem_append_left _ hobjmap
-          · rw [List.mem_cons] at hvarmap
+          · rw [List.map_cons, List.mem_cons] at hvarmap
             rcases hvarmap with heqref | hker
             · left; exact heqref
             · right
@@ -1050,7 +1050,7 @@ theorem makeObjRegion_HS1 : ValidConfig cfg →
       | Closed => rw [regionStatus] at h; contradiction
       | Open =>
         rw [regionStatus] at h
-        rw [if_pos (by rfl)] at h
+        rw [ite_eq_left (by rfl)] at h
         rw [Option.some_inj] at h
         have fresh_not_in_region := makeObjRegion_corollary_fresh_not_in_region heapLookup
         set newRegion : Region :=
@@ -1071,7 +1071,7 @@ theorem makeObjRegion_HS1 : ValidConfig cfg →
           rcases href with hobjmap | hvarmap
           · right
             exact List.mem_append_left _ hobjmap
-          · rw [List.mem_cons] at hvarmap
+          · rw [List.map_cons, List.mem_cons] at hvarmap
             rcases hvarmap with heqref | hker
             · left; exact heqref
             · right
@@ -1151,7 +1151,7 @@ theorem makeObjRegion_HS2 : ValidConfig cfg →
       | Closed => rw [regionStatus] at h; contradiction
       | Open =>
         rw [regionStatus] at h
-        rw [if_pos (by rfl)] at h
+        rw [ite_eq_left (by rfl)] at h
         rw [Option.some_inj] at h
         have heap_keys_iff : ∀ r, r ∈ cfg'.heap.keys ↔ r ∈ cfg.heap.keys := by
           intro r
@@ -1198,7 +1198,7 @@ theorem makeObjRegion_HS2 : ValidConfig cfg →
           rcases href with hobjmap | hvarmap
           · right
             exact List.mem_append_left _ hobjmap
-          · rw [List.mem_cons] at hvarmap
+          · rw [List.map_cons, List.mem_cons] at hvarmap
             rcases hvarmap with heqref | hker
             · left; exact heqref
             · right

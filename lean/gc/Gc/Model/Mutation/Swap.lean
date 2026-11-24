@@ -175,7 +175,7 @@ theorem swap_cases (h : swap x yf cfg = some cfg') :
             dsimp at h
             refine ⟨yfRefLoc, rfl, ?_⟩
             by_cases hxb : (x != frame.bridgeVar) = true
-            · rw [if_pos hxb] at h
+            · rw [ite_eq_left hxb] at h
               rw [bne_iff_ne] at hxb
               cases hxr : frame.varMap.lookup x with
               | none => rw [hxr] at h; contradiction
@@ -190,7 +190,7 @@ theorem swap_cases (h : swap x yf cfg = some cfg') :
                   | Stk fid =>
                     dsimp at h
                     by_cases hfid : (fid == frame.index) = true
-                    · rw [if_pos hfid] at h
+                    · rw [ite_eq_left hfid] at h
                       rw [beq_iff_eq] at hfid
                       cases hobj : frame.objMap.lookup yoid with
                       | none => rw [hobj] at h; contradiction
@@ -201,11 +201,11 @@ theorem swap_cases (h : swap x yf cfg = some cfg') :
                         left
                         subst hfid
                         exact ⟨yoid, xRef, obj, hxb, rfl, rfl, rfl, hobj, h.symm⟩
-                    · rw [if_neg hfid] at h; contradiction
+                    · rw [ite_eq_right hfid] at h; contradiction
                   | Rgn rid =>
                     dsimp at h
                     by_cases hrid : (rid == frame.regionId) = true
-                    · rw [if_pos hrid] at h
+                    · rw [ite_eq_left hrid] at h
                       rw [beq_iff_eq] at hrid
                       cases hregion : cfg.heap.lookup rid with
                       | none => rw [hregion] at h; contradiction
@@ -230,7 +230,7 @@ theorem swap_cases (h : swap x yf cfg = some cfg') :
                               | Rgn xrid =>
                                 dsimp at h
                                 by_cases hcond : xrid == frame.regionId ∧ region.status == Status.Open
-                                · rw [if_pos hcond] at h
+                                · rw [ite_eq_left hcond] at h
                                   obtain ⟨hxridEq0, hstatusEq0'⟩ := hcond
                                   rw [beq_iff_eq] at hxridEq0
                                   have hstatusEq0 : region.status = Status.Open := by
@@ -241,11 +241,11 @@ theorem swap_cases (h : swap x yf cfg = some cfg') :
                                   right; left
                                   exact ⟨yoid, rid, region, obj, xoid, xrid, hxb, rfl, rfl, hrid, hregion, hobj,
                                     rfl, hxrl, hxridEq0, hstatusEq0, h.symm⟩
-                                · rw [if_neg hcond] at h; contradiction
+                                · rw [ite_eq_right hcond] at h; contradiction
                           | RId xrid0 =>
                             dsimp at h
                             by_cases hstatus : region.status == Status.Open
-                            · rw [if_pos hstatus] at h
+                            · rw [ite_eq_left hstatus] at h
                               have hstatusEq : region.status = Status.Open := by
                                 cases hs : region.status with
                                 | Open => rfl
@@ -254,9 +254,9 @@ theorem swap_cases (h : swap x yf cfg = some cfg') :
                               right; right; left
                               exact ⟨yoid, rid, region, obj, xrid0, hxb, rfl, rfl, hrid, hregion, hobj, rfl,
                                 hstatusEq, h.symm⟩
-                            · rw [if_neg hstatus] at h; contradiction
-                    · rw [if_neg hrid] at h; contradiction
-            · rw [if_neg hxb] at h
+                            · rw [ite_eq_right hstatus] at h; contradiction
+                    · rw [ite_eq_right hrid] at h; contradiction
+            · rw [ite_eq_right hxb] at h
               rw [Bool.not_eq_true] at hxb
               have hxb' : x = frame.bridgeVar := by
                 by_contra hne
@@ -277,7 +277,7 @@ theorem swap_cases (h : swap x yf cfg = some cfg') :
                     | Rgn yfrid =>
                       dsimp at h
                       by_cases hcond2 : yrid == frame.regionId ∧ yfrid == frame.regionId
-                      · rw [if_pos hcond2] at h
+                      · rw [ite_eq_left hcond2] at h
                         obtain ⟨hyridEq, hyfridEq⟩ := hcond2
                         rw [beq_iff_eq] at hyridEq hyfridEq
                         cases hregion : cfg.heap.lookup yrid with
@@ -294,4 +294,4 @@ theorem swap_cases (h : swap x yf cfg = some cfg') :
                             right; right; right
                             exact ⟨yoid, yrid, yfoid, yfrid, region, obj, hxb', rfl, rfl, rfl, rfl,
                               hyridEq, hyfridEq, hregion, hobj, h.symm⟩
-                      · rw [if_neg hcond2] at h; contradiction
+                      · rw [ite_eq_right hcond2] at h; contradiction

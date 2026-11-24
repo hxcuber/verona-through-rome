@@ -306,8 +306,7 @@ theorem loc_ne_none_of_mem_objectIds (cfg : RuntimeConfig) (hvalid : ValidConfig
         have hlen : n < cfg.stackWithIndex.length := by
           unfold RuntimeConfig.stackWithIndex; rwa [List.length_mapIdx]
         have hget : cfg.stackWithIndex[n].objMap = frame0.objMap := by
-          unfold RuntimeConfig.stackWithIndex
-          rw [List.getElem_mapIdx, hn_eq]
+          simp only [RuntimeConfig.stackWithIndex, List.getElem_mapIdx, hn_eq]
         have hmemW := List.getElem_mem hlen
         have hcontains : cfg.stackWithIndex[n].objMap.keys.contains oid = true := by
           rw [hget]; exact List.contains_iff_mem.mpr (AList.mem_keys.mpr hoid_mem)
@@ -352,7 +351,7 @@ theorem resolveV_frameRoot {cfg : RuntimeConfig} {var : VarName} {oid : ObjectId
       rw [hlookupV] at hrv
       dsimp at hrv
       by_cases hbv : frameV.bridgeVar == var
-      · rw [if_pos hbv] at hrv
+      · rw [ite_eq_left hbv] at hrv
         cases hregionV : cfg.heap.lookup frameV.regionId with
         | none => rw [hregionV] at hrv; dsimp at hrv; contradiction
         | some regionV =>
@@ -360,7 +359,7 @@ theorem resolveV_frameRoot {cfg : RuntimeConfig} {var : VarName} {oid : ObjectId
           dsimp at hrv
           rw [Option.some_inj, Reference.OId.injEq] at hrv
           exact ⟨frameV, hframeV_mem, Or.inr ⟨frameV, hframeV_mem, rfl, regionV, hregionV, by rw [hrv]⟩⟩
-      · rw [if_neg hbv] at hrv; contradiction
+      · rw [ite_eq_right hbv] at hrv; contradiction
 
 -- A successful `resolveFA` retrieves a value that's already `FrameReferencable` from *some* frame:
 -- the root var/bridge value resolves to some container object oid0 (via `resolveV_frameRoot`),

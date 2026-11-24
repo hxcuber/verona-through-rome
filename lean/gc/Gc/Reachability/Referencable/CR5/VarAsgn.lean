@@ -86,6 +86,6 @@ theorem cr5_step_varAsgn (x : VarName) (yf : FieldAccess) : CR5_step (Stmt.varAs
   rw [FrameReferencable_iff_reflTransGen, FrameReferencable_iff_reflTransGen]
   constructor
   · rintro ⟨start, hroot, hrtg⟩
-    exact ⟨start, (hfrRootIff start).mp hroot, hrtg.mono (fun a b hab => (hRefStepIff a b).mp hab)⟩
+    exact ⟨start, (hfrRootIff start).mp hroot, Relation.ReflTransGen.mono (fun a b hab => (hRefStepIff a b).mp hab) _ _ hrtg⟩
   · rintro ⟨start, hroot, hrtg⟩
-    exact ⟨start, (hfrRootIff start).mpr hroot, hrtg.mono (fun a b hab => (hRefStepIff a b).mpr hab)⟩
+    exact ⟨start, (hfrRootIff start).mpr hroot, Relation.ReflTransGen.mono (fun a b hab => (hRefStepIff a b).mpr hab) _ _ hrtg⟩

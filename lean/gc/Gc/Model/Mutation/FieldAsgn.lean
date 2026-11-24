@@ -96,7 +96,7 @@ theorem fieldAsgn_cases (h : fieldAsgn xf y cfg = some cfg') :
               | Stk fid =>
                 dsimp at h
                 by_cases hfid : (fid == frame.index) = true
-                · rw [if_pos hfid] at h
+                · rw [ite_eq_left hfid] at h
                   rw [beq_iff_eq] at hfid
                   cases hobj : frame.objMap.lookup oid with
                   | none => rw [hobj] at h; contradiction
@@ -107,11 +107,11 @@ theorem fieldAsgn_cases (h : fieldAsgn xf y cfg = some cfg') :
                     left
                     subst hfid
                     exact ⟨oid, oid_y, obj, rfl, rfl, hloc, hobj, h.symm⟩
-                · rw [if_neg hfid] at h; contradiction
+                · rw [ite_eq_right hfid] at h; contradiction
               | Rgn rid =>
                 dsimp at h
                 by_cases hfrid : (rid == frame.regionId) = true
-                · rw [if_pos hfrid] at h
+                · rw [ite_eq_left hfrid] at h
                   rw [beq_iff_eq] at hfrid
                   cases hregion : cfg.heap.lookup rid with
                   | none => rw [hregion] at h; contradiction
@@ -133,7 +133,7 @@ theorem fieldAsgn_cases (h : fieldAsgn xf y cfg = some cfg') :
                         | Rgn rid' =>
                           dsimp at h
                           by_cases hcond : rid == rid' ∧ region.status == Status.Open
-                          · rw [if_pos hcond] at h
+                          · rw [ite_eq_left hcond] at h
                             obtain ⟨hridEq0, hstatusEq0'⟩ := hcond
                             rw [beq_iff_eq] at hridEq0
                             have hstatusEq0 : region.status = Status.Open := by
@@ -145,5 +145,5 @@ theorem fieldAsgn_cases (h : fieldAsgn xf y cfg = some cfg') :
                             subst hridEq0
                             exact ⟨oid, oid_y, rid, region, obj, rfl, rfl, hloc, hregion, hobj, hyloc,
                               hstatusEq0, hfrid, h.symm⟩
-                          · rw [if_neg hcond] at h; contradiction
-                · rw [if_neg hfrid] at h; contradiction
+                          · rw [ite_eq_right hcond] at h; contradiction
+                · rw [ite_eq_right hfrid] at h; contradiction

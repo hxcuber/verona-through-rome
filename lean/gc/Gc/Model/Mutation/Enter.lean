@@ -45,6 +45,6 @@ theorem enter_cases {cfg cfg' : RuntimeConfig} (h : enter xf a cfg = some cfg') 
         | Open => rw [hstatus] at h; contradiction
         | Closed =>
           rw [hstatus] at h
-          rw [if_pos (by rfl)] at h
+          rw [ite_eq_left (by rfl)] at h
           rw [Option.some_inj] at h
           exact ⟨rid, region, rfl, hheapLookup, hstatus, h.symm⟩

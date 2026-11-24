@@ -30,8 +30,8 @@ All commands below assume `cd lean/gc`.
   `lake build Gc.Reachability.Reachable.Lemmas`, `lake build Gc.Reachability.Referencable.CR3.All`) or
   the Lean LSP tools. Prefer building the specific module(s) you're touching by qualified name for
   faster iteration.
-- Toolchain is pinned via `lean-toolchain` (`leanprover/lean4:v4.29.0-rc6`) and dependencies via
-  `lake-manifest.json`; the main dependency is `mathlib`. First builds after a fresh clone can be slow
+- Toolchain is pinned via `lean-toolchain` (`leanprover/lean4:v4.36.0`) and dependencies via
+  `lake-manifest.json`; the main dependency is `mathlib`, pinned to its `v4.36.0` tag in `lakefile.toml`. First builds after a fresh clone can be slow
   because of mathlib — subsequent builds reuse `.lake/build`.
 
 ## Workflow

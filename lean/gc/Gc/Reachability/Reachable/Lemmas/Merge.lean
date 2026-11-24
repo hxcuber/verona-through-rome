@@ -33,8 +33,7 @@ theorem loc_ne_none_of_mem_objectIds (cfg : RuntimeConfig) (hvalid : ValidConfig
         have hlen : n < cfg.stackWithIndex.length := by
           unfold RuntimeConfig.stackWithIndex; rwa [List.length_mapIdx]
         have hget : cfg.stackWithIndex[n].objMap = frame0.objMap := by
-          unfold RuntimeConfig.stackWithIndex
-          rw [List.getElem_mapIdx, hn_eq]
+          simp only [RuntimeConfig.stackWithIndex, List.getElem_mapIdx, hn_eq]
         have hmemW := List.getElem_mem hlen
         have hcontains : cfg.stackWithIndex[n].objMap.keys.contains oid = true := by
           rw [hget]; exact List.contains_iff_mem.mpr (AList.mem_keys.mpr hoid_mem)
