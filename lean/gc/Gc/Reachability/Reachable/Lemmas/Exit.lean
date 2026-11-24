@@ -52,7 +52,6 @@ theorem exit_poppedFrame_mem {cfg : RuntimeConfig} {poppedFrame : Frame}
   unfold RuntimeConfig.stackWithIndex
   apply List.mem_mapIdx.mpr
   refine ⟨cfg.stack.length - 1, by omega, ?_⟩
-  dsimp only
   rw [hgetElem]
 
 -- A frame before the popped one has a different regionId (S1: injective across the stack).

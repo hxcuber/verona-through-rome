@@ -33,7 +33,7 @@ theorem resolveV_frameRoot {cfg : RuntimeConfig} {var : VarName} {oid : ObjectId
       rw [hlookupV] at hrv
       dsimp at hrv
       by_cases hbv : frameV.bridgeVar == var
-      · rw [if_pos hbv] at hrv
+      · rw [ite_eq_left hbv] at hrv
         cases hregionV : cfg.heap.lookup frameV.regionId with
         | none => rw [hregionV] at hrv; dsimp at hrv; contradiction
         | some regionV =>
@@ -41,7 +41,7 @@ theorem resolveV_frameRoot {cfg : RuntimeConfig} {var : VarName} {oid : ObjectId
           dsimp at hrv
           rw [Option.some_inj, Reference.OId.injEq] at hrv
           exact ⟨frameV, hframeV_mem, Or.inr ⟨frameV, hframeV_mem, rfl, regionV, hregionV, by rw [hrv]⟩⟩
-      · rw [if_neg hbv] at hrv; contradiction
+      · rw [ite_eq_right hbv] at hrv; contradiction
 
 -- A successful `resolveFA` traces back to a genuine `FrameReachable`: the root resolves via `resolveV_frameRoot`, plus one more `ReachableStep` hop.
 theorem resolveFA_frameReach {cfg : RuntimeConfig} {y : FieldAccess} {ref : Reference}

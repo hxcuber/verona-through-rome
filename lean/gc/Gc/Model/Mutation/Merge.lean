@@ -62,7 +62,7 @@ theorem merge_cases (h : merge x cfg = some cfg') :
             rw [hregion'] at h
             dsimp at h
             by_cases hcond : region'.status = Status.Closed ∧ region.status = Status.Open
-            · rw [if_pos hcond] at h
+            · rw [ite_eq_left hcond] at h
               rw [Option.some_inj] at h
               exact ⟨frame, rid', region, region', rfl, hxref, hregion, hregion', hcond.1, hcond.2, h.symm⟩
-            · rw [if_neg hcond] at h; contradiction
+            · rw [ite_eq_right hcond] at h; contradiction

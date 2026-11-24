@@ -92,7 +92,7 @@ theorem exit_corollary_1 :
   intro vcfg h ref
   unfold exit at h
   by_cases stack_length : cfg.stack.length >= 2
-  · rw [if_pos stack_length] at h
+  · rw [ite_eq_left stack_length] at h
     cases stackGetLast : List.getLast? cfg.stack with
     | none =>
       rw [stackGetLast] at h
@@ -122,7 +122,7 @@ theorem exit_corollary_1 :
           rw [← region''_in_heap] at region''_status
           rw [region''_status]
           rfl
-        rw [if_pos helper, Option.some_inj] at h
+        rw [ite_eq_left helper, Option.some_inj] at h
         subst h
         constructor
         · intro forward
@@ -131,7 +131,7 @@ theorem exit_corollary_1 :
             unfold Reference.loc? at forward
             dsimp at forward
             by_cases heapLookup' : (AList.keys cfg.heap).contains rid
-            · rw [if_pos heapLookup'] at forward
+            · rw [ite_eq_left heapLookup'] at forward
               by_cases rid_eq_frame'_regionId : rid = frame'.regionId
               · subst rid
                 have : (AList.insert frame'.regionId
@@ -141,7 +141,7 @@ theorem exit_corollary_1 :
                   left
                 unfold Reference.loc?
                 dsimp
-                rw [if_pos this]
+                rw [ite_eq_left this]
                 exact forward
               · have : (AList.insert frame'.regionId
                     { bridgeObjectId := region'.bridgeObjectId, objMap := region'.objMap, status := Status.Closed }
@@ -153,9 +153,9 @@ theorem exit_corollary_1 :
                   exact List.contains_iff_mem.mp heapLookup'
                 unfold Reference.loc?
                 dsimp
-                rw [if_pos this]
+                rw [ite_eq_left this]
                 exact forward
-            · rw [if_neg heapLookup'] at forward
+            · rw [ite_eq_right heapLookup'] at forward
               contradiction
           | OId oid =>
             unfold Reference.loc? at forward
@@ -268,7 +268,7 @@ theorem exit_corollary_1 :
             by_cases heapLookup' : (AList.keys (AList.insert frame'.regionId
                 { bridgeObjectId := region'.bridgeObjectId, objMap := region'.objMap, status := Status.Closed }
                 cfg.heap)).contains rid
-            · rw [if_pos heapLookup'] at backward
+            · rw [ite_eq_left heapLookup'] at backward
               unfold Reference.loc?
               dsimp
               by_cases rid_eq_frame'_regionId : rid = frame'.regionId
@@ -279,15 +279,15 @@ theorem exit_corollary_1 :
                   dsimp at heapLookup
                   unfold AList.keys
                   exact List.contains_iff_mem.mpr heapLookup
-                rw [if_pos this]
+                rw [ite_eq_left this]
                 exact backward
               · have : cfg.heap.keys.contains rid = true := by
                   rw [List.contains_iff_mem, ← AList.mem_keys, AList.mem_insert] at heapLookup'
                   replace heapLookup' := Or.resolve_left heapLookup' rid_eq_frame'_regionId
                   exact List.contains_iff_mem.mpr heapLookup'
-                rw [if_pos this]
+                rw [ite_eq_left this]
                 exact backward
-            · rw [if_neg heapLookup'] at backward
+            · rw [ite_eq_right heapLookup'] at backward
               contradiction
           | OId oid =>
             unfold Reference.loc? at backward
@@ -372,7 +372,7 @@ theorem exit_corollary_1 :
               unfold Reference.loc?
               dsimp
               rw [stackLookup_none, heapLookup_orig]
-  · rw [if_neg stack_length] at h
+  · rw [ite_eq_right stack_length] at h
     contradiction
 
 theorem exit_corollary_2 :
@@ -384,7 +384,7 @@ theorem exit_corollary_2 :
   intro vcfg h region_in_old_heap region''_in_new_heap
   unfold exit at h
   by_cases stack_length : cfg.stack.length >= 2
-  · rw [if_pos stack_length] at h
+  · rw [ite_eq_left stack_length] at h
     cases stackGetLast : List.getLast? cfg.stack with
     | none =>
       rw [stackGetLast] at h
@@ -414,7 +414,7 @@ theorem exit_corollary_2 :
           rw [← region''_in_heap] at region''_status
           rw [region''_status]
           rfl
-        rw [if_pos helper, Option.some_inj] at h
+        rw [ite_eq_left helper, Option.some_inj] at h
         subst h
         by_cases rid_eq_frame'_regionId : rid = frame'.regionId
         · subst rid
@@ -428,7 +428,7 @@ theorem exit_corollary_2 :
           rw [region''_in_new_heap, Option.some_inj] at region_in_old_heap
           subst region_in_old_heap
           dsimp
-  · rw [if_neg stack_length] at h
+  · rw [ite_eq_right stack_length] at h
     contradiction
 
 theorem exit_corollary_3 :
@@ -438,7 +438,7 @@ theorem exit_corollary_3 :
   intro vcfg h rid
   unfold exit at h
   by_cases stack_length : cfg.stack.length >= 2
-  · rw [if_pos stack_length] at h
+  · rw [ite_eq_left stack_length] at h
     cases stackGetLast : List.getLast? cfg.stack with
     | none =>
       rw [stackGetLast] at h
@@ -468,7 +468,7 @@ theorem exit_corollary_3 :
           rw [← region''_in_heap] at region''_status
           rw [region''_status]
           rfl
-        rw [if_pos helper, Option.some_inj] at h
+        rw [ite_eq_left helper, Option.some_inj] at h
         subst h
         intro forwards
         cases rid with
@@ -478,9 +478,9 @@ theorem exit_corollary_3 :
           by_cases heapLookup' : (AList.keys (AList.insert frame'.regionId
               { bridgeObjectId := region'.bridgeObjectId, objMap := region'.objMap, status := Status.Closed }
               cfg.heap)).contains rid'
-          · rw [if_pos heapLookup', Option.some_inj] at forwards
+          · rw [ite_eq_left heapLookup', Option.some_inj] at forwards
             injection forwards
-          · rw [if_neg heapLookup'] at forwards
+          · rw [ite_eq_right heapLookup'] at forwards
             contradiction
         | OId oid =>
           unfold Reference.loc? at forwards
@@ -561,7 +561,7 @@ theorem exit_corollary_3 :
               rw [heapLookupNew] at forwards
               dsimp at forwards
               contradiction
-  · rw [if_neg stack_length] at h
+  · rw [ite_eq_right stack_length] at h
     contradiction
 
 theorem exit_H1 : ValidConfig cfg →
@@ -570,7 +570,7 @@ theorem exit_H1 : ValidConfig cfg →
   intro vcfg h region region_in_heap
   unfold exit at h
   by_cases stack_length : cfg.stack.length >= 2
-  · rw [if_pos stack_length] at h
+  · rw [ite_eq_left stack_length] at h
     cases stackGetLast : List.getLast? cfg.stack with
     | none =>
       rw [stackGetLast] at h
@@ -600,7 +600,7 @@ theorem exit_H1 : ValidConfig cfg →
           rw [← region''_in_heap] at region''_status
           rw [region''_status]
           rfl
-        rw [if_pos helper, Option.some_inj] at h
+        rw [ite_eq_left helper, Option.some_inj] at h
         subst h
         have h1 : H1 cfg := vcfg.h1
         cases region_in_heap with
@@ -616,7 +616,7 @@ theorem exit_H1 : ValidConfig cfg →
             have sublist := List.Sublist.map (λ x => x.snd) kerase_sublist
             exact List.Sublist.mem region_in_tail sublist
           exact h1 region region_in_old_heap
-  · rw [if_neg stack_length] at h
+  · rw [ite_eq_right stack_length] at h
     contradiction
 
 theorem exit_L1 : ValidConfig cfg →
@@ -626,7 +626,7 @@ theorem exit_L1 : ValidConfig cfg →
   unfold exit at h
   unfold L1
   by_cases stack_length : cfg.stack.length >= 2
-  · rw [if_pos stack_length] at h
+  · rw [ite_eq_left stack_length] at h
     cases stackGetLast : List.getLast? cfg.stack with
     | none =>
       rw [stackGetLast] at h
@@ -656,7 +656,7 @@ theorem exit_L1 : ValidConfig cfg →
           rw [← region''_in_heap] at region''_status
           rw [region''_status]
           rfl
-        rw [if_pos helper, Option.some_inj] at h
+        rw [ite_eq_left helper, Option.some_inj] at h
         subst h
         have l1 : L1 cfg := vcfg.l1
         unfold L1
@@ -713,7 +713,7 @@ theorem exit_L1 : ValidConfig cfg →
           apply (List.Perm.disjoint_right new_heap_objectIds_perm_old_heap_objectIds).mpr
           exact old_disjoint
         exact List.nodup_append'.mpr ⟨new_stack_objectIds_nodup, new_heap_objectIds_nodup, new_disjoint⟩
-  · rw [if_neg stack_length] at h
+  · rw [ite_eq_right stack_length] at h
     contradiction
 
 theorem exit_H2 : ValidConfig cfg →
@@ -723,7 +723,7 @@ theorem exit_H2 : ValidConfig cfg →
   intro vcfg h rid
   unfold exit at h
   by_cases stack_length : cfg.stack.length >= 2
-  · rw [if_pos stack_length] at h
+  · rw [ite_eq_left stack_length] at h
     cases stackGetLast : List.getLast? cfg.stack with
     | none =>
       rw [stackGetLast] at h
@@ -753,7 +753,7 @@ theorem exit_H2 : ValidConfig cfg →
           rw [← region''_in_heap] at region''_status
           rw [region''_status]
           rfl
-        rw [if_pos helper, Option.some_inj] at h
+        rw [ite_eq_left helper, Option.some_inj] at h
         subst h
         dsimp
         have h2 : H2 cfg := vcfg.h2
@@ -802,7 +802,7 @@ theorem exit_H2 : ValidConfig cfg →
           exact Nat.add_le_add A (Nat.le_of_eq B)
 
         exact Nat.le_trans new_le_old (h2 rid)
-  · rw [if_neg stack_length] at h
+  · rw [ite_eq_right stack_length] at h
     contradiction
 
 theorem exit_H3 : ValidConfig cfg →
@@ -813,7 +813,7 @@ theorem exit_H3 : ValidConfig cfg →
   have h' := h
   unfold exit at h
   by_cases stack_length : cfg.stack.length >= 2
-  · rw [if_pos stack_length] at h
+  · rw [ite_eq_left stack_length] at h
     cases stackGetLast : List.getLast? cfg.stack with
     | none =>
       rw [stackGetLast] at h
@@ -843,7 +843,7 @@ theorem exit_H3 : ValidConfig cfg →
           rw [← region''_in_heap] at region''_status
           rw [region''_status]
           rfl
-        rw [if_pos helper, Option.some_inj] at h
+        rw [ite_eq_left helper, Option.some_inj] at h
         subst h
         have h3 : H3 cfg := vcfg.h3
         by_cases rid_eq_frame'_regionId : rid = frame'.regionId
@@ -857,7 +857,7 @@ theorem exit_H3 : ValidConfig cfg →
         · rw [AList.lookup_insert_ne rid_eq_frame'_regionId] at region_in_new_heap
           apply (exit_corollary_1 vcfg h' (Reference.OId oid)).mp
           exact h3 rid oid region region_in_new_heap region_contains_oid
-  · rw [if_neg stack_length] at h
+  · rw [ite_eq_right stack_length] at h
     contradiction
 
 theorem exit_L2 : ValidConfig cfg →
@@ -866,7 +866,7 @@ theorem exit_L2 : ValidConfig cfg →
   intro vcfg h frame frame_in_new_stack
   unfold exit at h
   by_cases stack_length : cfg.stack.length >= 2
-  · rw [if_pos stack_length] at h
+  · rw [ite_eq_left stack_length] at h
     cases stackGetLast : List.getLast? cfg.stack with
     | none =>
       rw [stackGetLast] at h
@@ -896,7 +896,7 @@ theorem exit_L2 : ValidConfig cfg →
           rw [← region''_in_heap] at region''_status
           rw [region''_status]
           rfl
-        rw [if_pos helper, Option.some_inj] at h
+        rw [ite_eq_left helper, Option.some_inj] at h
         subst h
         dsimp at frame_in_new_stack
         obtain ⟨region_frame, region_frame_in_heap, region_frame_open⟩ :=
@@ -924,7 +924,7 @@ theorem exit_L2 : ValidConfig cfg →
           contradiction
         rw [AList.lookup_insert_ne frame_regionId_ne_frame'_regionId]
         exact ⟨region_frame, region_frame_in_heap, region_frame_open⟩
-  · rw [if_neg stack_length] at h
+  · rw [ite_eq_right stack_length] at h
     contradiction
 
 theorem exit_S1 : ValidConfig cfg →
@@ -934,7 +934,7 @@ theorem exit_S1 : ValidConfig cfg →
   unfold exit at h
   unfold S1
   by_cases stack_length : cfg.stack.length >= 2
-  · rw [if_pos stack_length] at h
+  · rw [ite_eq_left stack_length] at h
     cases stackGetLast : List.getLast? cfg.stack with
     | none =>
       rw [stackGetLast] at h
@@ -964,7 +964,7 @@ theorem exit_S1 : ValidConfig cfg →
           rw [← region''_in_heap] at region''_status
           rw [region''_status]
           rfl
-        rw [if_pos helper, Option.some_inj] at h
+        rw [ite_eq_left helper, Option.some_inj] at h
         subst h
         have s1 : S1 cfg := vcfg.s1
         unfold S1 at s1
@@ -980,7 +980,7 @@ theorem exit_S1 : ValidConfig cfg →
         simp only [List.map_cons, List.map_nil] at s1
         rw [List.nodup_append', List.disjoint_singleton] at s1
         exact s1.left
-  · rw [if_neg stack_length] at h
+  · rw [ite_eq_right stack_length] at h
     contradiction
 
 theorem exit_S2 : ValidConfig cfg →
@@ -992,7 +992,7 @@ theorem exit_S2 : ValidConfig cfg →
   have h' := h
   unfold exit at h
   by_cases stack_length : cfg.stack.length >= 2
-  · rw [if_pos stack_length] at h
+  · rw [ite_eq_left stack_length] at h
     cases stackGetLast : List.getLast? cfg.stack with
     | none =>
       rw [stackGetLast] at h
@@ -1022,7 +1022,7 @@ theorem exit_S2 : ValidConfig cfg →
           rw [← region''_in_heap] at region''_status
           rw [region''_status]
           rfl
-        rw [if_pos helper, Option.some_inj] at h
+        rw [ite_eq_left helper, Option.some_inj] at h
         subst h
         have s2 : S2 cfg := vcfg.s2
         apply exit_corollary_3 vcfg h' ref at ref_loc
@@ -1033,7 +1033,7 @@ theorem exit_S2 : ValidConfig cfg →
           apply List.mem_of_mem_dropLast_mapIdx at frame_in_new_stack
           exact frame_in_new_stack
         exact s2 frame frame_in_old_stack ref ref_in_frame fid oid ref_eq ref_loc
-  · rw [if_neg stack_length] at h
+  · rw [ite_eq_right stack_length] at h
     contradiction
 
 theorem exit_S3 : ValidConfig cfg →
@@ -1045,7 +1045,7 @@ theorem exit_S3 : ValidConfig cfg →
   have h' := h
   unfold exit at h
   by_cases stack_length : cfg.stack.length >= 2
-  · rw [if_pos stack_length] at h
+  · rw [ite_eq_left stack_length] at h
     cases stackGetLast : List.getLast? cfg.stack with
     | none =>
       rw [stackGetLast] at h
@@ -1075,7 +1075,7 @@ theorem exit_S3 : ValidConfig cfg →
           rw [← region''_in_heap] at region''_status
           rw [region''_status]
           rfl
-        rw [if_pos helper, Option.some_inj] at h
+        rw [ite_eq_left helper, Option.some_inj] at h
         subst h
         have s4 : S3 cfg := vcfg.s3
         have frame_in_old_stack : frame ∈ cfg.stackWithIndex := by
@@ -1114,7 +1114,7 @@ theorem exit_S3 : ValidConfig cfg →
           · rw [← List.getElem_dropLast k_lt_dropLast] at frame''_eq
             exact frame''_eq
         exact ⟨frame'', frame''_in_new_stack, frame''_regionId_eq_rid, frame''_index_le_frame_index⟩
-  · rw [if_neg stack_length] at h
+  · rw [ite_eq_right stack_length] at h
     contradiction
 
 theorem exit_HS1 : ValidConfig cfg →
@@ -1124,7 +1124,7 @@ theorem exit_HS1 : ValidConfig cfg →
   have h' := h
   unfold exit at h
   by_cases stack_length : cfg.stack.length >= 2
-  · rw [if_pos stack_length] at h
+  · rw [ite_eq_left stack_length] at h
     cases stackGetLast : List.getLast? cfg.stack with
     | none => rw [stackGetLast] at h; contradiction
     | some frame' =>
@@ -1148,7 +1148,7 @@ theorem exit_HS1 : ValidConfig cfg →
           rw [← region''_in_heap] at region''_status
           rw [region''_status]
           rfl
-        rw [if_pos helper, Option.some_inj] at h
+        rw [ite_eq_left helper, Option.some_inj] at h
         subst h
         unfold HS1
         intro oid hmem
@@ -1273,7 +1273,7 @@ theorem exit_HS1 : ValidConfig cfg →
           have loc_rgn := vcfg.h3 rid oid region2 hlookup hoid_mem
           rw [loc_eq] at loc_rgn
           simp at loc_rgn
-  · rw [if_neg stack_length] at h
+  · rw [ite_eq_right stack_length] at h
     contradiction
 
 theorem exit_HS2 : ValidConfig cfg →
@@ -1283,7 +1283,7 @@ theorem exit_HS2 : ValidConfig cfg →
   have h' := h
   unfold exit at h
   by_cases stack_length : cfg.stack.length >= 2
-  · rw [if_pos stack_length] at h
+  · rw [ite_eq_left stack_length] at h
     cases stackGetLast : List.getLast? cfg.stack with
     | none => rw [stackGetLast] at h; contradiction
     | some frame' =>
@@ -1307,7 +1307,7 @@ theorem exit_HS2 : ValidConfig cfg →
           rw [← region''_in_heap] at region''_status
           rw [region''_status]
           rfl
-        rw [if_pos helper, Option.some_inj] at h
+        rw [ite_eq_left helper, Option.some_inj] at h
         subst h
         unfold HS2
         intro rid' hmem
@@ -1355,7 +1355,7 @@ theorem exit_HS2 : ValidConfig cfg →
           simp
         · rw [AList.lookup_insert_ne hr]
           exact rid_mem_cfg
-  · rw [if_neg stack_length] at h
+  · rw [ite_eq_right stack_length] at h
     contradiction
 
 theorem exit_valid : ValidConfig cfg → exit cfg = some cfg' → ValidConfig cfg' := by

@@ -57,7 +57,7 @@ theorem enter_corollary_2 : ValidConfig cfg →
           contradiction
         | Closed =>
           rw [regionStatus] at h
-          rw [if_pos (by rfl)] at h
+          rw [ite_eq_left (by rfl)] at h
           rw [Option.some_inj] at h
           subst h
           have l1 := vcfg.l1
@@ -219,7 +219,7 @@ theorem enter_corollary_3 : ∀ ref : Reference,
             contradiction
           | Closed =>
             rw [regionStatus] at h
-            rw [if_pos (by rfl)] at h
+            rw [ite_eq_left (by rfl)] at h
             rw [Option.some_inj] at h
             subst h
             unfold Reference.loc?
@@ -272,7 +272,7 @@ theorem enter_L1 : ValidConfig cfg →
           contradiction
         | Closed =>
           rw [regionStatus] at h
-          rw [if_pos (by rfl)] at h
+          rw [ite_eq_left (by rfl)] at h
           rw [Option.some_inj] at h
           unfold L1
           have cfg_heap_objectIds_perm_cfg'_heap_objectIds : cfg.heap.objectIds.Perm cfg'.heap.objectIds := by
@@ -340,7 +340,7 @@ theorem enter_L2 : ValidConfig cfg →
           contradiction
         | Closed =>
           rw [regionStatus] at h
-          rw [if_pos (by rfl)] at h
+          rw [ite_eq_left (by rfl)] at h
           rw [Option.some_inj] at h
           unfold L2
           have l2 := vcfg.l2
@@ -410,7 +410,7 @@ theorem enter_H1 : ValidConfig cfg →
           contradiction
         | Closed =>
           rw [regionStatus] at h
-          rw [if_pos (by rfl)] at h
+          rw [ite_eq_left (by rfl)] at h
           rw [Option.some_inj] at h
           unfold H1
           have h1 := vcfg.h1
@@ -461,7 +461,7 @@ theorem enter_H2 : ValidConfig cfg →
           contradiction
         | Closed =>
           rw [regionStatus] at h
-          rw [if_pos (by rfl)] at h
+          rw [ite_eq_left (by rfl)] at h
           rw [Option.some_inj] at h
           unfold H2
           intro rid'
@@ -524,7 +524,7 @@ theorem enter_H3 : ValidConfig cfg →
           contradiction
         | Closed =>
           rw [regionStatus] at h
-          rw [if_pos (by rfl)] at h
+          rw [ite_eq_left (by rfl)] at h
           rw [Option.some_inj] at h
           subst h
           have h3 := vcfg.h3
@@ -570,7 +570,7 @@ theorem enter_S1 : ValidConfig cfg →
           contradiction
         | Closed =>
           rw [regionStatus] at h
-          rw [if_pos (by rfl)] at h
+          rw [ite_eq_left (by rfl)] at h
           rw [Option.some_inj] at h
           subst h
           unfold S1
@@ -621,7 +621,7 @@ theorem enter_S2 : ValidConfig cfg →
           contradiction
         | Closed =>
           rw [regionStatus] at h
-          rw [if_pos (by rfl)] at h
+          rw [ite_eq_left (by rfl)] at h
           rw [Option.some_inj] at h
           subst h
           unfold S2
@@ -679,7 +679,7 @@ theorem enter_S3 : ValidConfig cfg →
           contradiction
         | Closed =>
           rw [regionStatus] at h
-          rw [if_pos (by rfl)] at h
+          rw [ite_eq_left (by rfl)] at h
           rw [Option.some_inj] at h
           subst h
           unfold S3
@@ -741,7 +741,7 @@ theorem enter_HS1 : ValidConfig cfg →
           contradiction
         | Closed =>
           rw [regionStatus] at h
-          rw [if_pos (by rfl)] at h
+          rw [ite_eq_left (by rfl)] at h
           rw [Option.some_inj] at h
           unfold HS1
           intro oid hmem
@@ -834,7 +834,7 @@ theorem enter_HS2 : ValidConfig cfg →
           contradiction
         | Closed =>
           rw [regionStatus] at h
-          rw [if_pos (by rfl)] at h
+          rw [ite_eq_left (by rfl)] at h
           rw [Option.some_inj] at h
           unfold HS2
           intro rid' hmem

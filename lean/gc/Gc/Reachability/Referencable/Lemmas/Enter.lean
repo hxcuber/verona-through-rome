@@ -149,10 +149,10 @@ theorem enter_corollary_frameReferencable_iff (vcfg : ValidConfig cfg) (vcfg' : 
   constructor
   · rintro ⟨start, hroot, hrtg⟩
     exact ⟨start, (enter_corollary_frameRoot_iff vcfg h frame0 hframe0 start).mp hroot,
-      hrtg.mono (fun x y hxy => (enter_corollary_refStep_iff vcfg vcfg' h x y).mp hxy)⟩
+      Relation.ReflTransGen.mono (fun x y hxy => (enter_corollary_refStep_iff vcfg vcfg' h x y).mp hxy) _ _ hrtg⟩
   · rintro ⟨start, hroot, hrtg⟩
     exact ⟨start, (enter_corollary_frameRoot_iff vcfg h frame0 hframe0 start).mpr hroot,
-      hrtg.mono (fun x y hxy => (enter_corollary_refStep_iff vcfg vcfg' h x y).mpr hxy)⟩
+      Relation.ReflTransGen.mono (fun x y hxy => (enter_corollary_refStep_iff vcfg vcfg' h x y).mpr hxy) _ _ hrtg⟩
 
 theorem enter_corollary_mem_index_lt {cfg : RuntimeConfig} {frame : FrameWithIndex}
     (hframe : frame ∈ cfg.stackWithIndex) : frame.index < cfg.stack.length := by

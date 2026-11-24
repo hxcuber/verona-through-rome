@@ -429,7 +429,7 @@ theorem varAsgn_corollary_resolveV_loc_ancestor {cfg : RuntimeConfig} {var : Var
       rw [hlookupV] at hrv
       dsimp at hrv
       by_cases hbv : frameV.bridgeVar == var
-      · rw [if_pos hbv] at hrv
+      · rw [ite_eq_left hbv] at hrv
         cases hregionV : cfg.heap.lookup frameV.regionId with
         | none => rw [hregionV] at hrv; dsimp at hrv; contradiction
         | some regionV =>
@@ -444,7 +444,7 @@ theorem varAsgn_corollary_resolveV_loc_ancestor {cfg : RuntimeConfig} {var : Var
             (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨regionV, hregionV, hmemBridge⟩
           rw [hrv, hloc0, Option.some_inj, Location.Rgn.injEq] at hlocBridge
           exact ⟨frameV, hframeV_mem, hlocBridge.symm, hframeV_lt⟩
-      · rw [if_neg hbv] at hrv; contradiction
+      · rw [ite_eq_right hbv] at hrv; contradiction
 
 -- A successful `resolveFA` retrieving a heap-located reference already has an owning ancestor
 -- frame on the stack -- combines the Stk-root case (direct s3 application) and the Rgn-root case

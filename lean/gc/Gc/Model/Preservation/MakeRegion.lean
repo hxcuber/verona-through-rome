@@ -195,7 +195,7 @@ theorem makeRegion_H2 : ValidConfig cfg →
       rw [List.map_cons, List.count_cons]
       have hle := varMap_kerase_le rid
       simp only [beq_iff_eq, Reference.RId.injEq]
-      simp only [Ne.symm hrid, if_false]
+      simp only [Ne.symm hrid, ite_false]
       omega
     have hvarmap_fresh_zero :
         List.count (Reference.RId cfg.freshRegionId) (frame.varMap.entries.map (·.2)) = 0 := by
@@ -222,7 +222,7 @@ theorem makeRegion_H2 : ValidConfig cfg →
       rw [newFrame_def]
       dsimp
       rw [List.count_append, hobjmap_fresh_zero, List.map_cons, List.count_cons]
-      simp only [BEq.rfl, if_true]
+      simp only [BEq.rfl, ite_true]
       have hker_le := varMap_kerase_le cfg.freshRegionId
       rw [hvarmap_fresh_zero] at hker_le
       omega
