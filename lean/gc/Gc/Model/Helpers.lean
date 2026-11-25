@@ -2,7 +2,6 @@ module
 
 public import Gc.Model.Types
 public import Gc.Model.Theorems
-public import Mathlib.Data.List.AList
 
 @[expose] public section
 

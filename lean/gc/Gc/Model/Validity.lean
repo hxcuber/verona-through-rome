@@ -1,8 +1,6 @@
 module
 
-public import Gc.Model.Types
 public import Gc.Model.Helpers
-public import Gc.Model.Theorems
 public import Mathlib.Data.List.Pairwise
 
 @[expose] public section

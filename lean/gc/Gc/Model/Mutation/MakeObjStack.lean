@@ -1,7 +1,6 @@
 module
 
 public import Gc.Model.Helpers
-public import Gc.Model.Types
 
 @[expose] public section
 

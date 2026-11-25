@@ -1,10 +1,6 @@
 module
 
-public import Gc.Model.Types
-public import Gc.Model.Helpers
 public import Gc.Model.Validity
-
-public import Mathlib.Data.List.AList
 
 @[expose] public section
 

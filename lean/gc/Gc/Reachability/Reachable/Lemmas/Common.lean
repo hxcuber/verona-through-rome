@@ -1,11 +1,6 @@
 module
 
-public import Gc.Model.Types
-public import Gc.Model.Helpers
-public import Gc.Model.Validity
-public import Gc.Model.Mutation.Mutation
 public import Gc.Model.Preservation
-public import Gc.Reachability.Reachable.Semantics
 public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Def
 
 @[expose] public section
@@ -518,8 +513,6 @@ theorem objAt_heap_insert_eq {cfg : RuntimeConfig} {rid : RegionId} {region newR
       simp [hregion, hlk]
     · simp [AList.lookup_insert_ne hridx]
   · rfl
-
-
 
 -- `ReachableStep` agrees for every source other than `OId yoid` once `objAt?` (off `yoid`) and `RId` steps agree.
 theorem step_iff_of_ne_of_objAt {cfg cfg' : RuntimeConfig} {yoid : ObjectId}

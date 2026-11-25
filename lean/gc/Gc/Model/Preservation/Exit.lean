@@ -1,13 +1,7 @@
 module
 
-public import Gc.Model.Types
-public import Gc.Model.Helpers
-public import Gc.Model.Validity
-public import Gc.Model.Theorems
 public import Gc.Model.Mutation.Exit
 public import Gc.Model.Preservation.Common
-
-public import Mathlib.Data.List.Infix
 
 @[expose] public section
 

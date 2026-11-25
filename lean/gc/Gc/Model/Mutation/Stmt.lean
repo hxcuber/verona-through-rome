@@ -1,6 +1,5 @@
 module
 
-public import Gc.Model.Types
 public import Gc.Model.Mutation.Mutation
 
 @[expose] public section

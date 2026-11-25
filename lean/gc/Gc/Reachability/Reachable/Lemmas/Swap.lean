@@ -1,14 +1,5 @@
 module
 
-public import Gc.Model.Types
-public import Gc.Model.Helpers
-public import Gc.Model.Validity
-public import Gc.Model.Mutation.Mutation
-public import Gc.Model.Preservation
-public import Gc.Reachability.Reachable.Semantics
-public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Def
-public import Gc.Reachability.Reachable.Lemmas.Common
-public import Gc.Reachability.Reachable.Lemmas.VarAsgn
 public import Gc.Reachability.Reachable.Lemmas.FieldAsgn
 public import Gc.Reachability.Reachable.Lemmas.Merge
 
@@ -87,7 +78,6 @@ theorem swap_frame_transport_up (h : swap x yf cfg = some cfg')
     stackWithIndex_frame_transport_up_of_shape_eq (proj := fun f => (f.regionId, f.bridgeVar))
       (swap_stack_shape_eq h) fr hfr
   exact ⟨fr0, hmem, hidx, Prod.ext_iff.mp hproj⟩
-
 
 -- STACK branch: for any oid' other than the mutated container, `objAt?` is unaffected.
 private theorem swap_stack_objAt_eq_of_ne {cfg : RuntimeConfig} {frame0 : FrameWithIndex}
