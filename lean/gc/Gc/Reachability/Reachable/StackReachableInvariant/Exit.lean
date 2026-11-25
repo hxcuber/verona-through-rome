@@ -9,6 +9,7 @@ public import Gc.Model.Preservation
 public import Gc.Reachability.Reachable.Semantics
 public import Gc.Reachability.Reachable.StackReachableInvariant.Def
 public import Gc.Reachability.Reachable.Lemmas
+public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Exit
 
 @[expose] public section
 
@@ -16,41 +17,16 @@ theorem stackReachable_invariant_exit :
     StackReachable_invariant_for_suspended_region_objects Stmt.exit := by
   intro cfg cfg' vcfg h hcr3 frame hframeMem hframeSusp oid hloc
   have h' : exit cfg = some cfg' := h
-  obtain ⟨poppedFrame, region0, hlen, hlast, hlookupRid, hopenRid, hcfg'⟩ := exit_cases h'
-  obtain ⟨region, hlookup, hopen⟩ := l2_of_stackWithIndex vcfg hframeMem
-  have hlenEq : cfg.stackWithIndex.length = cfg.stack.length := by
-    unfold RuntimeConfig.stackWithIndex; rw [List.length_mapIdx]
-  have hframeSusp' : frame.index < cfg.stack.length - 1 := by rw [← hlenEq]; exact hframeSusp
-  have hridNe : frame.regionId ≠ poppedFrame.regionId := regionId_ne_last_of_suspended vcfg hframeMem hframeSusp' hlast
-  have hlookup' : cfg'.heap.lookup frame.regionId = some region := by
-    rw [hcfg']; dsimp only; rw [AList.lookup_insert_ne hridNe]; exact hlookup
-  have hne_oid : (Reference.OId oid).loc? cfg ≠ some (Location.Stk (cfg.stack.length - 1)) := by
-    rw [hloc]; simp
-  have hloc' : (Reference.OId oid).loc? cfg' = some (Location.Rgn frame.regionId) := by
-    rw [← exit_loc_eq_of_ne_popped vcfg h' oid hne_oid]; exact hloc
-  constructor
-  · -- forward: G = poppedFrame collapses via the CR3-style hypothesis; any other G survives `exit` unchanged.
-    rintro ⟨G, hGmem, hGreach⟩
-    by_cases hGeq : G.index = cfg.stack.length - 1
-    · have hlt : frame.index < G.index := by rw [hGeq]; exact hframeSusp'
-      have hframeReach : FrameReachable cfg frame.index (Reference.OId oid) :=
-        hcr3 frame hframeMem G hGmem hlt oid hloc hGreach
-      have hframeReach' : FrameReachable cfg' frame.index (Reference.OId oid) :=
-        exit_frame_reachable_transport vcfg h' hlast hcfg' hlookup hopen hloc
-          hframeMem hframeSusp' hframeReach
-      exact ⟨frame, exit_frame_mem_up h' hframeMem hframeSusp', hframeReach'⟩
-    · have hGltlen : G.index < cfg.stack.length := by
-        obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hGmem
-        have hidx : G.index = n := by rw [← hfeq]
-        rw [hidx]; exact hn
-      have hGlt : G.index < cfg.stack.length - 1 :=
-        lt_of_le_of_ne (Nat.le_sub_one_of_lt hGltlen) hGeq
-      have hGreach' := exit_frame_reachable_transport vcfg h' hlast hcfg' hlookup hopen hloc
-        hGmem hGlt hGreach
-      exact ⟨G, exit_frame_mem_up h' hGmem hGlt, hGreach'⟩
-  · -- backward: every `cfg'.stackWithIndex` member is automatically a surviving frame.
-    rintro ⟨G, hGmem, hGreach⟩
-    obtain ⟨hGmemcfg, hGlt⟩ := exit_frame_mem_down h' hGmem
-    have hGreach2 := exit_frame_reachable_transport_backward vcfg h' hlast hcfg' hlookup hlookup' hopen hloc'
-      hGmem hGreach
-    exact ⟨G, hGmemcfg, hGreach2⟩
+  have hs : frame.index < cfg.stack.length - 1 := by simpa [RuntimeConfig.stackWithIndex] using hframeSusp
+  obtain ⟨-, hiff⟩ := exit_suspended_reach vcfg h' hframeMem hs
+    (by rwa [← exit_loc_eq_of_ne_popped vcfg h' oid (by simp [hloc])])
+  refine ⟨fun ⟨G, hG, hr⟩ => ?_, fun ⟨G, hG, hr⟩ => ?_⟩
+  · by_cases hGlt : G.index < cfg.stack.length - 1
+    · exact ⟨G, exit_frame_mem_up h' hG hGlt, (hiff G hG hGlt).mp hr⟩
+    · have hGeq : G.index = cfg.stack.length - 1 := by
+        obtain ⟨n, hn, rfl⟩ := List.mem_mapIdx.mp hG
+        grind
+      exact ⟨frame, exit_frame_mem_up h' hframeMem hs,
+        (hiff frame hframeMem hs).mp (hcr3 frame hframeMem G hG (hGeq ▸ hs) oid hloc hr)⟩
+  · obtain ⟨hGm, hGlt⟩ := exit_frame_mem_down h' hG
+    exact ⟨G, hGm, (hiff G hGm hGlt).mpr hr⟩
