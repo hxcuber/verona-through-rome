@@ -31,24 +31,9 @@ theorem enter_cases {cfg cfg' : RuntimeConfig} (h : enter xf a cfg = some cfg') 
         stack := cfg.stack ++ [{ regionId := rid, bridgeVar := a, objMap := ∅, varMap := ∅ }],
         heap := cfg.heap.insert rid { region with status := Status.Open } } := by
   unfold enter at h
-  cases hresolve : resolveFA xf cfg with
-  | none => rw [hresolve] at h; contradiction
-  | some xfRef =>
-    rw [hresolve] at h
-    dsimp at h
-    cases xfRef with
-    | OId _ => contradiction
-    | RId rid =>
-      dsimp at h
-      cases hheapLookup : cfg.heap.lookup rid with
-      | none => rw [hheapLookup] at h; contradiction
-      | some region =>
-        rw [hheapLookup] at h
-        dsimp at h
-        cases hstatus : region.status with
-        | Open => rw [hstatus] at h; contradiction
-        | Closed =>
-          rw [hstatus] at h
-          rw [ite_eq_left (by rfl)] at h
-          rw [Option.some_inj] at h
-          exact ⟨rid, region, rfl, hheapLookup, hstatus, h.symm⟩
+  rcases hr : resolveFA xf cfg with _ | _ | _ | rid <;> simp [hr] at h
+  rename_i rid
+  rcases hl : cfg.heap.lookup rid with _ | region
+  · simp_all
+  · cases hs : region.status <;> simp_all
+    exact absurd h.1 (by decide)

@@ -68,86 +68,17 @@ theorem fieldAsgn_cases (h : fieldAsgn xf y cfg = some cfg') :
           cfg' = { cfg with heap := cfg.heap.insert rid { region with
             objMap := region.objMap.insert oid (obj.insert xf.field (Reference.OId oid_y)) } })) := by
   unfold fieldAsgn at h
-  cases hframe : cfg.stackWithIndex.getLast? with
-  | none => rw [hframe] at h; contradiction
-  | some frame =>
-    rw [hframe] at h
-    dsimp at h
-    refine ⟨frame, rfl, ?_⟩
-    cases hxr : resolveV xf.root cfg with
-    | none => rw [hxr] at h; contradiction
-    | some xRef =>
-      rw [hxr] at h
-      dsimp at h
-      cases hyr : resolveV y cfg with
-      | none => rw [hyr] at h; contradiction
-      | some yRef =>
-        rw [hyr] at h
-        dsimp at h
-        cases xRef with
-        | RId rid0 => dsimp at h; contradiction
-        | OId oid =>
-          cases yRef with
-          | RId rid1 => dsimp at h; contradiction
-          | OId oid_y =>
-            dsimp at h
-            cases hloc : (Reference.OId oid).loc? cfg with
-            | none => rw [hloc] at h; dsimp at h; contradiction
-            | some loc =>
-              rw [hloc] at h
-              dsimp at h
-              cases loc with
-              | Stk fid =>
-                dsimp at h
-                by_cases hfid : (fid == frame.index) = true
-                · rw [ite_eq_left hfid] at h
-                  rw [beq_iff_eq] at hfid
-                  cases hobj : frame.objMap.lookup oid with
-                  | none => rw [hobj] at h; contradiction
-                  | some obj =>
-                    rw [hobj] at h
-                    dsimp at h
-                    rw [Option.some_inj] at h
-                    left
-                    subst hfid
-                    exact ⟨oid, oid_y, obj, rfl, rfl, hloc, hobj, h.symm⟩
-                · rw [ite_eq_right hfid] at h; contradiction
-              | Rgn rid =>
-                dsimp at h
-                by_cases hfrid : (rid == frame.regionId) = true
-                · rw [ite_eq_left hfrid] at h
-                  rw [beq_iff_eq] at hfrid
-                  cases hregion : cfg.heap.lookup rid with
-                  | none => rw [hregion] at h; contradiction
-                  | some region =>
-                    rw [hregion] at h
-                    dsimp at h
-                    cases hobj : region.objMap.lookup oid with
-                    | none => rw [hobj] at h; contradiction
-                    | some obj =>
-                      rw [hobj] at h
-                      dsimp at h
-                      cases hyloc : (Reference.OId oid_y).loc? cfg with
-                      | none => rw [hyloc] at h; dsimp at h; contradiction
-                      | some yloc =>
-                        rw [hyloc] at h
-                        dsimp at h
-                        cases yloc with
-                        | Stk fid' => dsimp at h; contradiction
-                        | Rgn rid' =>
-                          dsimp at h
-                          by_cases hcond : rid == rid' ∧ region.status == Status.Open
-                          · rw [ite_eq_left hcond] at h
-                            obtain ⟨hridEq0, hstatusEq0'⟩ := hcond
-                            rw [beq_iff_eq] at hridEq0
-                            have hstatusEq0 : region.status = Status.Open := by
-                              cases hs : region.status with
-                              | Open => rfl
-                              | Closed => rw [hs] at hstatusEq0'; contradiction
-                            rw [Option.some_inj] at h
-                            right
-                            subst hridEq0
-                            exact ⟨oid, oid_y, rid, region, obj, rfl, rfl, hloc, hregion, hobj, hyloc,
-                              hstatusEq0, hfrid, h.symm⟩
-                          · rw [ite_eq_right hcond] at h; contradiction
-                · rw [ite_eq_right hfrid] at h; contradiction
+  rcases hframe : cfg.stackWithIndex.getLast? with _ | frame
+  · simp_all
+  · refine ⟨frame, rfl, ?_⟩
+    rcases hxr : resolveV xf.root cfg with _ | ⟨_ | oid⟩ <;> simp_all
+    rcases hyr : resolveV y cfg with _ | ⟨_ | oid_y⟩ <;> simp_all
+    rcases hloc : (Reference.OId oid).loc? cfg with _ | ⟨fid | rid⟩ <;> simp_all
+    · obtain ⟨rfl, h⟩ := h
+      rcases hl : cfg.heap.lookup frame.regionId with _ | region <;> simp_all
+      rcases ho : region.objMap.lookup oid with _ | obj <;> simp_all
+      rcases hy : (Reference.OId oid_y).loc? cfg with _ | ⟨rid' | _⟩ <;> simp_all
+      cases hs : region.status <;> simp_all
+      exact absurd h.1.2 (by decide)
+    · obtain ⟨rfl, h⟩ := h
+      rcases ho : frame.objMap.lookup oid with _ | obj <;> simp_all

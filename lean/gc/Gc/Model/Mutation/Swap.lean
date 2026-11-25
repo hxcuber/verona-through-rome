@@ -148,154 +148,73 @@ theorem swap_cases (h : swap x yf cfg = some cfg') :
             objMap := region.objMap.insert yoid (obj.insert yf.field (Reference.OId region.bridgeObjectId)) }
         })) := by
   unfold swap at h
-  cases hframe : cfg.stackWithIndex.getLast? with
-  | none => rw [hframe] at h; contradiction
-  | some frame =>
-    rw [hframe] at h
-    dsimp at h
-    refine ⟨frame, rfl, ?_⟩
-    cases hyr : resolveV yf.root cfg with
-    | none => rw [hyr] at h; contradiction
-    | some yRef =>
-      rw [hyr] at h
-      dsimp at h
-      refine ⟨yRef, rfl, ?_⟩
-      cases hyrl : yRef.loc? cfg with
-      | none => rw [hyrl] at h; contradiction
-      | some yRefLoc =>
-        rw [hyrl] at h
-        dsimp at h
-        refine ⟨yRefLoc, rfl, ?_⟩
-        cases hyf : resolveFA yf cfg with
-        | none => rw [hyf] at h; contradiction
-        | some yfRef =>
-          rw [hyf] at h
-          dsimp at h
-          refine ⟨yfRef, rfl, ?_⟩
-          cases hyfl : yfRef.loc? cfg with
-          | none => rw [hyfl] at h; contradiction
-          | some yfRefLoc =>
-            rw [hyfl] at h
-            dsimp at h
-            refine ⟨yfRefLoc, rfl, ?_⟩
-            by_cases hxb : (x != frame.bridgeVar) = true
-            · rw [ite_eq_left hxb] at h
-              rw [bne_iff_ne] at hxb
-              cases hxr : frame.varMap.lookup x with
-              | none => rw [hxr] at h; contradiction
-              | some xRef =>
-                rw [hxr] at h
-                dsimp at h
-                cases yRef with
-                | RId yrid0 => dsimp at h; contradiction
-                | OId yoid =>
-                  dsimp at h
-                  cases yRefLoc with
-                  | Stk fid =>
-                    dsimp at h
-                    by_cases hfid : (fid == frame.index) = true
-                    · rw [ite_eq_left hfid] at h
-                      rw [beq_iff_eq] at hfid
-                      cases hobj : frame.objMap.lookup yoid with
-                      | none => rw [hobj] at h; contradiction
-                      | some obj =>
-                        rw [hobj] at h
-                        dsimp at h
-                        rw [Option.some_inj] at h
-                        left
-                        subst hfid
-                        exact ⟨yoid, xRef, obj, hxb, rfl, rfl, rfl, hobj, h.symm⟩
-                    · rw [ite_eq_right hfid] at h; contradiction
-                  | Rgn rid =>
-                    dsimp at h
-                    by_cases hrid : (rid == frame.regionId) = true
-                    · rw [ite_eq_left hrid] at h
-                      rw [beq_iff_eq] at hrid
-                      cases hregion : cfg.heap.lookup rid with
-                      | none => rw [hregion] at h; contradiction
-                      | some region =>
-                        rw [hregion] at h
-                        dsimp at h
-                        cases hobj : region.objMap.lookup yoid with
-                        | none => rw [hobj] at h; contradiction
-                        | some obj =>
-                          rw [hobj] at h
-                          dsimp at h
-                          cases xRef with
-                          | OId xoid =>
-                            dsimp at h
-                            cases hxrl : (Reference.OId xoid).loc? cfg with
-                            | none => rw [hxrl] at h; dsimp at h; contradiction
-                            | some xRefLoc =>
-                              rw [hxrl] at h
-                              dsimp at h
-                              cases xRefLoc with
-                              | Stk fid' => dsimp at h; contradiction
-                              | Rgn xrid =>
-                                dsimp at h
-                                by_cases hcond : xrid == frame.regionId ∧ region.status == Status.Open
-                                · rw [ite_eq_left hcond] at h
-                                  obtain ⟨hxridEq0, hstatusEq0'⟩ := hcond
-                                  rw [beq_iff_eq] at hxridEq0
-                                  have hstatusEq0 : region.status = Status.Open := by
-                                    cases hs : region.status with
-                                    | Open => rfl
-                                    | Closed => rw [hs] at hstatusEq0'; contradiction
-                                  rw [Option.some_inj] at h
-                                  right; left
-                                  exact ⟨yoid, rid, region, obj, xoid, xrid, hxb, rfl, rfl, hrid, hregion, hobj,
-                                    rfl, hxrl, hxridEq0, hstatusEq0, h.symm⟩
-                                · rw [ite_eq_right hcond] at h; contradiction
-                          | RId xrid0 =>
-                            dsimp at h
-                            by_cases hstatus : region.status == Status.Open
-                            · rw [ite_eq_left hstatus] at h
-                              have hstatusEq : region.status = Status.Open := by
-                                cases hs : region.status with
-                                | Open => rfl
-                                | Closed => rw [hs] at hstatus; contradiction
-                              rw [Option.some_inj] at h
-                              right; right; left
-                              exact ⟨yoid, rid, region, obj, xrid0, hxb, rfl, rfl, hrid, hregion, hobj, rfl,
-                                hstatusEq, h.symm⟩
-                            · rw [ite_eq_right hstatus] at h; contradiction
-                    · rw [ite_eq_right hrid] at h; contradiction
-            · rw [ite_eq_right hxb] at h
-              rw [Bool.not_eq_true] at hxb
-              have hxb' : x = frame.bridgeVar := by
-                by_contra hne
-                have : (x != frame.bridgeVar) = true := by
-                  rw [bne_iff_ne]; exact hne
-                rw [this] at hxb; contradiction
-              cases yRef with
-              | RId yrid0 => dsimp at h; contradiction
-              | OId yoid =>
-                cases yRefLoc with
-                | Stk fid => dsimp at h; contradiction
-                | Rgn yrid =>
-                  cases yfRef with
-                  | RId yfrid0 => dsimp at h; contradiction
-                  | OId yfoid =>
-                    cases yfRefLoc with
-                    | Stk fid' => dsimp at h; contradiction
-                    | Rgn yfrid =>
-                      dsimp at h
-                      by_cases hcond2 : yrid == frame.regionId ∧ yfrid == frame.regionId
-                      · rw [ite_eq_left hcond2] at h
-                        obtain ⟨hyridEq, hyfridEq⟩ := hcond2
-                        rw [beq_iff_eq] at hyridEq hyfridEq
-                        cases hregion : cfg.heap.lookup yrid with
-                        | none => rw [hregion] at h; contradiction
-                        | some region =>
-                          rw [hregion] at h
-                          dsimp at h
-                          cases hobj : region.objMap.lookup yoid with
-                          | none => rw [hobj] at h; contradiction
-                          | some obj =>
-                            rw [hobj] at h
-                            dsimp at h
-                            rw [Option.some_inj] at h
-                            right; right; right
-                            exact ⟨yoid, yrid, yfoid, yfrid, region, obj, hxb', rfl, rfl, rfl, rfl,
-                              hyridEq, hyfridEq, hregion, hobj, h.symm⟩
-                      · rw [ite_eq_right hcond2] at h; contradiction
+  rcases hframe : cfg.stackWithIndex.getLast? with _ | frame
+  · simp_all
+  rw [hframe] at h
+  dsimp at h
+  refine ⟨frame, rfl, ?_⟩
+  rcases hyr : resolveV yf.root cfg with _ | yRef
+  · simp_all
+  rw [hyr] at h
+  dsimp at h
+  refine ⟨yRef, rfl, ?_⟩
+  rcases hyrl : yRef.loc? cfg with _ | yRefLoc
+  · simp_all
+  rw [hyrl] at h
+  dsimp at h
+  refine ⟨yRefLoc, rfl, ?_⟩
+  rcases hyf : resolveFA yf cfg with _ | yfRef
+  · simp_all
+  rw [hyf] at h
+  dsimp at h
+  refine ⟨yfRef, rfl, ?_⟩
+  rcases hyfl : yfRef.loc? cfg with _ | yfRefLoc
+  · simp_all
+  rw [hyfl] at h
+  dsimp at h
+  refine ⟨yfRefLoc, rfl, ?_⟩
+  clear hframe hyr hyrl hyf hyfl
+  by_cases hxb : x = frame.bridgeVar
+  · rcases yRef with _ | yoid <;> rcases yRefLoc with yrid | _ <;> rcases yfRef with _ | yfoid <;>
+      rcases yfRefLoc with yfrid | _ <;> simp [hxb] at h
+    obtain ⟨⟨rfl, rfl⟩, h⟩ := h
+    rcases hl : cfg.heap.lookup frame.regionId with _ | region
+    · simp [hl] at h
+    rcases ho : region.objMap.lookup yoid with _ | obj
+    · simp [hl, ho] at h
+    simp only [hl, ho, Option.bind_some, Option.some.injEq] at h
+    exact Or.inr (Or.inr (Or.inr ⟨yoid, _, yfoid, _, region, obj, hxb, rfl, rfl, rfl, rfl, rfl, rfl, hl, ho,
+      h.symm⟩))
+  · simp [hxb] at h
+    rcases hx : frame.varMap.lookup x with _ | xRef
+    · simp [hx] at h
+    simp only [hx, Option.bind_some] at h
+    rcases yRef with _ | yoid
+    · simp at h
+    rcases yRefLoc with rid | fid
+    · simp at h
+      obtain ⟨rfl, h⟩ := h
+      rcases hl : cfg.heap.lookup frame.regionId with _ | region
+      · simp [hl] at h
+      rcases ho : region.objMap.lookup yoid with _ | obj
+      · simp [hl, ho] at h
+      simp only [hl, ho, Option.bind_some] at h
+      rcases xRef with xrid | xoid
+      · cases hs : region.status <;> simp_all
+        exact absurd h.1 (by decide)
+      · dsimp only at h
+        rcases hxl : (Reference.OId xoid).loc? cfg with _ | ⟨xrid | fid⟩
+        · simp [hxl] at h
+        · simp only [hxl, Option.bind_some] at h
+          cases hs : region.status <;> simp [hs] at h
+          · obtain ⟨⟨rfl, -⟩, rfl⟩ := h
+            exact Or.inr (Or.inl ⟨yoid, _, region, obj, xoid, _, hxb, rfl, rfl, rfl, hl, ho, rfl, hxl, rfl, hs,
+              by rw [hs]⟩)
+          · exact absurd h.1.2 (by decide)
+        · simp [hxl] at h
+    · simp at h
+      obtain ⟨rfl, h⟩ := h
+      rcases ho : frame.objMap.lookup yoid with _ | obj
+      · simp [ho] at h
+      simp only [ho, Option.bind_some, Option.some.injEq] at h
+      exact Or.inl ⟨yoid, xRef, obj, hxb, rfl, rfl, rfl, ho, h.symm⟩

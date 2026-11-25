@@ -27,22 +27,10 @@ theorem exit_cases {cfg cfg' : RuntimeConfig} (h : exit cfg = some cfg') :
         heap := cfg.heap.insert poppedFrame.regionId { region with status := Status.Closed } } := by
   unfold exit at h
   by_cases hlen : cfg.stack.length ≥ 2
-  · rw [ite_eq_left hlen] at h
-    cases hlast : cfg.stack.getLast? with
-    | none => rw [hlast] at h; contradiction
-    | some poppedFrame =>
-      rw [hlast] at h
-      dsimp at h
-      cases hlookup : cfg.heap.lookup poppedFrame.regionId with
-      | none => rw [hlookup] at h; contradiction
-      | some region =>
-        rw [hlookup] at h
-        dsimp at h
-        cases hstatus : region.status with
-        | Closed => rw [hstatus] at h; contradiction
-        | Open =>
-          rw [hstatus] at h
-          rw [ite_eq_left (by rfl)] at h
-          rw [Option.some_inj] at h
-          refine ⟨poppedFrame, region, hlen, ?_, ?_, ?_, h.symm⟩ <;> first | rfl | assumption
-  · rw [ite_eq_right hlen] at h; contradiction
+  · rcases hlast : cfg.stack.getLast? with _ | f
+    · simp_all
+    · rcases hl : cfg.heap.lookup f.regionId with _ | region
+      · simp_all
+      · cases hs : region.status <;> simp_all
+        exact absurd h.1 (by decide)
+  · simp_all

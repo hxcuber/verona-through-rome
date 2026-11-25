@@ -41,32 +41,10 @@ theorem merge_cases (h : merge x cfg = some cfg') :
           [ { frame with varMap := frame.varMap.insert x (Reference.OId region'.bridgeObjectId) } ]
       } := by
   unfold merge at h
-  cases hframe : cfg.stack.getLast? with
-  | none => rw [hframe] at h; contradiction
-  | some frame =>
-    rw [hframe] at h
-    dsimp at h
-    cases hxref : frame.varMap.lookup x with
-    | none => rw [hxref] at h; contradiction
-    | some xRef =>
-      rw [hxref] at h
-      dsimp at h
-      cases xRef with
-      | OId oid0 => dsimp at h; contradiction
-      | RId rid' =>
-        dsimp at h
-        cases hregion : cfg.heap.lookup frame.regionId with
-        | none => rw [hregion] at h; contradiction
-        | some region =>
-          rw [hregion] at h
-          dsimp at h
-          cases hregion' : cfg.heap.lookup rid' with
-          | none => rw [hregion'] at h; contradiction
-          | some region' =>
-            rw [hregion'] at h
-            dsimp at h
-            by_cases hcond : region'.status = Status.Closed ∧ region.status = Status.Open
-            · rw [ite_eq_left hcond] at h
-              rw [Option.some_inj] at h
-              exact ⟨frame, rid', region, region', rfl, hxref, hregion, hregion', hcond.1, hcond.2, h.symm⟩
-            · rw [ite_eq_right hcond] at h; contradiction
+  rcases hframe : cfg.stack.getLast? with _ | frame
+  · simp_all
+  · rcases hx : frame.varMap.lookup x with _ | ⟨rid' | oid⟩
+    · simp_all
+    · rcases hr : cfg.heap.lookup frame.regionId with _ | region <;>
+        rcases hr' : cfg.heap.lookup rid' with _ | region' <;> simp_all
+    · simp_all
