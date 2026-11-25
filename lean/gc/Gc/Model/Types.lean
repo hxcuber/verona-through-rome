@@ -38,9 +38,7 @@ structure Frame where
 structure FrameWithIndex extends Frame where
   index : Index
 
--- we append to the list to push frames onto the stack
--- a bigger index indicates a later frame
--- the top of the stack is the end of the list
+-- frames are pushed by appending: the top of the stack is the end of the list, and a bigger index is a later frame
 abbrev Stack := List Frame
 abbrev StackWithIndex := List FrameWithIndex
 abbrev Heap := AList (λ _ : RegionId => Region)
@@ -60,4 +58,3 @@ structure FieldAccess where
   root : VarName
   field : FieldName
 
--- y.f x.f.a.b.c
