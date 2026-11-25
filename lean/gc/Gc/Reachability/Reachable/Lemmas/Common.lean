@@ -29,14 +29,14 @@ theorem mem_frame_refs_of_mem_varMap {frame : Frame} {var : VarName} {b : Refere
   List.mem_append_right _ (List.mem_map_of_mem (AList.lookup_mem_entries hlookup))
 
 -- A region's bridge object lives in that region (H1).
-private theorem bridge_loc {cfg : RuntimeConfig} (vcfg : ValidConfig cfg) {rid : RegionId} {region : Region}
+theorem bridge_loc {cfg : RuntimeConfig} (vcfg : ValidConfig cfg) {rid : RegionId} {region : Region}
     (hlookup : cfg.heap.lookup rid = some region) :
     (Reference.OId region.bridgeObjectId).loc? cfg = some (Location.Rgn rid) :=
   (oid_loc_rgn_iff_in_heap vcfg).mpr
     ⟨region, hlookup, vcfg.h1 region (List.mem_map_of_mem (AList.lookup_mem_entries hlookup))⟩
 
 -- An `OId` hop's target is a ref of the source's container, either a heap region or a stack frame.
-private theorem oid_step_container {cfg : RuntimeConfig} {oid : ObjectId} {b : Reference}
+theorem oid_step_container {cfg : RuntimeConfig} {oid : ObjectId} {b : Reference}
     (hstep : ReachableStep cfg (Reference.OId oid) b) :
     (∃ rid region, (Reference.OId oid).loc? cfg = some (Location.Rgn rid) ∧
       cfg.heap.lookup rid = some region ∧ b ∈ region.refs) ∨
@@ -57,7 +57,7 @@ private theorem oid_step_container {cfg : RuntimeConfig} {oid : ObjectId} {b : R
   · simp at hobjAt
 
 -- An `RId` hop lands on the region's own bridge object, which lives in that (Closed) region.
-private theorem rid_step_inv {cfg : RuntimeConfig} (vcfg : ValidConfig cfg) {rid : RegionId} {oid : ObjectId}
+theorem rid_step_inv {cfg : RuntimeConfig} (vcfg : ValidConfig cfg) {rid : RegionId} {oid : ObjectId}
     (hstep : ReachableStep cfg (Reference.RId rid) (Reference.OId oid)) :
     (Reference.OId oid).loc? cfg = some (Location.Rgn rid) ∧ ∃ region, cfg.heap.lookup rid = some region ∧
       region.status = Status.Closed ∧ oid = region.bridgeObjectId := by
@@ -66,7 +66,7 @@ private theorem rid_step_inv {cfg : RuntimeConfig} (vcfg : ValidConfig cfg) {rid
   exact ⟨bridge_loc vcfg hl, region, hl, hc, rfl⟩
 
 -- Every predecessor of an in-region object: an in-region object, a stack object holding it, or the region's portal `RId`.
-private theorem predecessor_cases {cfg : RuntimeConfig} (vcfg : ValidConfig cfg) {rid : RegionId} {oid : ObjectId}
+theorem predecessor_cases {cfg : RuntimeConfig} (vcfg : ValidConfig cfg) {rid : RegionId} {oid : ObjectId}
     (hloc : (Reference.OId oid).loc? cfg = some (Location.Rgn rid))
     {a : Reference} (hstep : ReachableStep cfg a (Reference.OId oid)) :
     (∃ oid', a = Reference.OId oid' ∧ (Reference.OId oid').loc? cfg = some (Location.Rgn rid)) ∨
@@ -305,7 +305,7 @@ theorem FrameReachable_extend {cfg : RuntimeConfig} {fid : Index} {x y : Referen
   | tail _ hstep ih => exact .step hstep ih
 
 -- Any root-to-object chain into a Closed region passes through the portal `RId rid` and is region-reachable.
-private theorem closed_chain {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
+theorem closed_chain {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
     {rid : RegionId} {region : Region} (hlookup : cfg.heap.lookup rid = some region)
     (hclosed : region.status = Status.Closed) {fid : Index} {start : Reference} (hroot : FrameRoot cfg fid start) :
     ∀ ref, Relation.ReflTransGen (ReachableStep cfg) start ref →
