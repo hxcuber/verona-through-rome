@@ -6,415 +6,216 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Final year project (Imperial College, 2025-26): a Lean 4 formalization of a Verona/Reggio-style
 region-based memory management model (stack + heap of regions, bridge objects, region open/closed
-status) and, building on top of that, reachability definitions intended to support proving garbage
+status) and, on top of it, reachability definitions and per-operation invariants supporting garbage
 collection safety guarantees.
 
 Repo layout:
-- `lean/gc/` — the actual Lean 4 project (everything below refers to paths relative to this directory).
-- `lean/gc/README.md` — raw meeting notes / design-decision log, not user docs. Useful for *why* the
-  model is shaped the way it is (e.g. why `RegionId` is kept separate from `BridgeObjectId`, why a
-  stack frame owns its own `objMap` for temporaries, why there's a single combined heap rather than
-  separate open/closed/frozen heaps).
-- `report.pdf`, `slides.pdf` — the written FYP report and presentation slides (binary, not source).
+- `lean/gc/`: the Lean 4 project. All paths below are relative to this directory.
+- `lean/gc/README.md`: raw meeting notes and design-decision log, not user docs. Read it for *why* the
+  model is shaped the way it is (e.g. why `RegionId` is separate from `BridgeObjectId`, why a stack frame
+  owns its own `objMap` for temporaries, why there's a single combined heap).
+- `report.pdf`, `slides.pdf`: the written FYP report and presentation slides (binary).
 
 ## Commands
 
 All commands below assume `cd lean/gc`.
 
-- **Build/check a single file**: `lake build Gc.Model.Theorems` (dotted module path mirrors the file
-  path, e.g. `Gc/Model/Preservation/Swap.lean` → `Gc.Model.Preservation.Swap`).
-- **`lake build` (bare, no target) succeeds end to end**, including `Gc`, `Main`, and the `gc`
-  executable, with zero `sorry`s anywhere under `Gc/`. Note: `Gc/Reachability/Reachable/` and
-  `Gc/Reachability/Referencable/` (deprecated — see Architecture below) are not imported from
-  `Gc.lean`, so neither is covered by the bare build — check them via qualified-name builds (e.g.
-  `lake build Gc.Reachability.Reachable.Lemmas`, `lake build Gc.Reachability.Referencable.CR3.All`) or
-  the Lean LSP tools. Prefer building the specific module(s) you're touching by qualified name for
-  faster iteration.
-- Toolchain is pinned via `lean-toolchain` (`leanprover/lean4:v4.36.0`) and dependencies via
-  `lake-manifest.json`; the main dependency is `mathlib`, pinned to its `v4.36.0` tag in `lakefile.toml`. First builds after a fresh clone can be slow
-  because of mathlib — subsequent builds reuse `.lake/build`.
+- **Whole project**: `lake build`. `Gc.lean` imports every top-level module, so a bare build checks the
+  entire development (Model and Reachable layers), plus `Main` and the `gc` executable. It builds with
+  zero errors, zero warnings and zero `sorry`.
+- **Single module**: `lake build Gc.Model.Preservation.Swap` (the dotted path mirrors the file path).
+- Toolchain is pinned via `lean-toolchain` (`leanprover/lean4:v4.36.0`). The main dependency is
+  `mathlib`, pinned to its `v4.36.0` tag in `lakefile.toml`. First builds after a fresh clone are slow
+  because of mathlib; later builds reuse `.lake/build`.
 
 ## Workflow
 
-Do all iteration on this project through the `/lean4` skills (`/lean4:prove`, `/lean4:draft`,
-`/lean4:refactor`, `/lean4:golf`, `/lean4:review`, `/lean4:checkpoint`, etc.) and the Lean LSP MCP
-tools (`lean_goal`, `lean_diagnostic_messages`, `lean_multi_attempt`, `lean_verify`, ...) rather than
-shelling out to `lake build`/`grep` and hand-simulating goal states. The LSP tools are faster (no
-full-file recompile per check), give exact goal states instead of guessed ones, and are what this
-repo's whole proof-engineering convention (per-file corollaries, `lean_goal`-confirmed case splits,
-axiom checks via `lean_verify`) already assumes. Fall back to raw `lake build`/`grep` only when
-there's a concrete reason the LSP path doesn't work (e.g. checking the *whole-project* build after a
-cross-file change, or the LSP server is unresponsive/stale) — and say so explicitly when you do.
+Iterate through the `/lean4` skills (`/lean4:prove`, `/lean4:draft`, `/lean4:refactor`, `/lean4:golf`,
+`/lean4:review`, `/lean4:checkpoint`, ...) and the Lean LSP MCP tools (`lean_goal`,
+`lean_diagnostic_messages`, `lean_multi_attempt`, `lean_file_outline`, `lean_verify`, ...) rather than
+shelling out to `lake build`/`grep` and hand-simulating goal states. Fall back to `lake build` only for a
+concrete reason (checking the whole-project build after a cross-file change, or a stale/unresponsive LSP),
+and say so when you do.
+
+## Module system
+
+Every file uses the Lean module system with the same header shape:
+
+```lean
+module
+
+public import Gc.Some.Dependency
+
+@[expose] public section
+```
+
+- Imports are minimal: a file does not re-import anything already brought in transitively by another of
+  its imports. Aggregator files (`Gc.lean`, `Mutation/Mutation.lean`, `Preservation.lean`,
+  `Reachable/Lemmas.lean`, the `All.lean` files) list their members explicitly.
+- File-local helpers are `private`, so they are invisible downstream and can't clash with same-named
+  helpers in sibling files. A helper needed by more than one file is made public and lives in the
+  appropriate shared file (see the `Common.lean` files below).
 
 ## Architecture
 
-The proof development has three layers under `Gc/`.
+### `Gc/Model/`: the runtime model and its operational semantics
 
-### `Gc/Model/` — the runtime model and its operational semantics (complete, zero `sorry`)
+- `Types.lean`: the core data model: `RegionId`/`ObjectId`/`BridgeObjectId`, `Reference` (`RId`/`OId`),
+  `VarMap`/`ObjMap` (as `AList`s), `Region` (bridge object + objects + `Status` Open/Closed), `Frame`
+  (region, bridge var, local var map, local obj map), `Stack`, `Heap`, `RuntimeConfig` (`stack` + `heap`),
+  `Location` (`Rgn`/`Stk`).
+- `Helpers.lean`: projections and derived queries: `refs`/`objectIds` of objects, regions, frames, heap,
+  stack and config; `regionIds`; `freshRegionId`/`freshObjectId` (with `_not_mem` lemmas);
+  `Reference.loc?` (where a reference lives); `Reference.objAt?`; `resolveV`/`resolveFA` (variable and
+  field-access expressions).
+- `Validity.lean`: `ValidConfig`, a bundle of **10** named invariants: `L1`/`L2` (global, e.g. object-id
+  uniqueness, stack regions are Open), `H1`/`H2`/`H3` (heap shape, e.g. a region's bridge object is in its
+  own objMap, at most one external ref to a region, region-internal refs resolve back into that region),
+  `S1`/`S2`/`S3` (stack shape, e.g. no two frames share a region, no reference from an earlier frame into a
+  strictly later frame/region), `HS1` (every stored `OId` is in `cfg.objectIds`) and `HS2` (every stored
+  `RId` is a heap key). Also `oid_loc_rgn_iff_in_heap`/`oid_loc_stk_iff_in_stack` and the
+  `oid_in_stack_implies_not_in_heap` pair relating `loc?` to actual placement.
+- `Theorems.lean`: generic `List`/`AList` lemmas (not domain-specific), e.g. `List.find?_eq_some_of_unique`,
+  `List.kunion_eq_append_of_disjoint_keys`, `List.two_le_count_flatMap_of_ne`,
+  `List.eq_of_mem_flatten_map_nodup`/`List.index_eq_of_mem_flatten_map_nodup`,
+  `AList.keys_insert_perm_of_mem`.
+- `Mutation/<Op>.lean`, one per operation (`Enter`, `Exit`, `FieldAsgn`, `MakeObjRegion`, `MakeObjStack`,
+  `MakeRegion`, `Merge`, `Swap`, `VarAsgn`): the operation itself (`RuntimeConfig → Option RuntimeConfig`,
+  `none` meaning stuck/illegal) **and** a public `<op>_cases` lemma unpacking its `do`-block into explicit
+  ∃-bundles. Every downstream proof about an op opens with `obtain ⟨..., rfl⟩ := <op>_cases h` instead of
+  unfolding the operation. `Mutation/Mutation.lean` aggregates the nine.
+- `Mutation/Stmt.lean`: `inductive Stmt` (one constructor per operation) and `step : Stmt → RuntimeConfig →
+  Option RuntimeConfig`, so later layers can quantify over all operations.
+- `Start.lean`: `RuntimeConfig.start` (one root region, one root frame) and `RuntimeConfig.start_valid`.
+- `Preservation/<Op>.lean`: proves the op preserves each invariant (`<op>_L1` … `<op>_HS2`) and combines
+  them into `<op>_valid : ValidConfig cfg → <op> ... cfg = some cfg' → ValidConfig cfg'`. The usual shape:
+  one `<op>_cases` opener, one `<op>_loc`-style lemma describing every `loc?` after the op in terms of
+  before, and frame-counterpart lemmas ("each new frame has an old counterpart with the same index and
+  region", and conversely) from which the stack invariants follow. A new operation gets its own
+  `Preservation/<Op>.lean` of this shape.
+- `Preservation/Common.lean`: shared stack/heap transport facts. Check here (`lean_file_outline`) before
+  re-deriving one. Highlights: `heap_region_unique`, `loc_match_eq`, `loc_eq_of_find_map_eq`,
+  `stack_eq_of_stackWithIndex_getLast?`, `stackWithIndex_eq_of_getLast?`,
+  `stackWithIndex_mk_append_singleton`, `stackWithIndex_frame_transport_down/up_of_shape_eq`,
+  `refs_mem_of_stackWithIndex`, `stack_refs_mem`, `frame_varMap_insert_refs_mem`,
+  `object_insert_refs_mem`, `objMap_insert_field_refs_mem`, `heap_insert_refs_mem`,
+  `heap_insert_objectIds_perm`, `freshObjectId_not_mem_frame`, `ne_freshObjectId_of_mem_refs`,
+  `merge_corollary_regionId_unique_index`, `swap_corollary_stackWithIndex_index_inj`.
+- `Preservation.lean`: aggregator; defines `StepPreserves`/`AllPreserve` and proves
+  `allPreserve_ValidConfig : AllPreserve ValidConfig` by `cases` on `Stmt`.
 
-- `Types.lean` — the core data model: `RegionId`/`ObjectId`/`BridgeObjectId`, `Reference` (`RId`/`OId`),
-  `VarMap`/`ObjMap` (as `AList`s), `Region` (bridge object + objects + open/closed `Status`), `Frame`
-  (a stack frame: its region, bridge var, local var map and local obj map), `Stack`, `Heap`,
-  `RuntimeConfig` (`stack` + `heap`), and `Location` (`Rgn`/`Stk`).
-- `Helpers.lean` — projections and derived queries over the model: collecting `refs`/`objectIds` from
-  frames/regions/heap/stack, `freshObjectId`, resolving where a `Reference` lives (`Reference.loc?`),
-  and resolving variable/field-access expressions against a config (`resolveV`, `resolveFA`). Also has
-  `RuntimeConfig.freshObjectId_not_mem` (`cfg.freshObjectId ∉ cfg.objectIds`), proved via two small
-  generic lemmas in `Theorems.lean` (`List.le_foldl_max_self`, `List.mem_le_foldl_max`) about
-  `List.foldl max`.
-- `Validity.lean` — defines `ValidConfig` as a bundle of **9** named invariants: `L1`/`L2` (global,
-  e.g. object-id uniqueness, stack regions are Open), `H1`/`H2`/`H3` (heap-shape invariants, e.g. a
-  region's bridge object is in its own objMap, at most one external ref to a region, region-internal
-  refs resolve back into that region), `S1`/`S2`/`S3` (stack-shape invariants, e.g. no two frames share
-  a region, no reference from an earlier frame into a strictly later frame/region), and `HS1` ("no
-  dangling pointers" — every `Reference.OId oid` stored anywhere in `cfg.refs` has `oid ∈
-  cfg.objectIds`; see the comment above its definition for the full rationale — `H2`/`H3`/`S2`/`S3`
-  alone are vacuous for a stored ref that doesn't yet resolve to anything, so nothing else rules out a
-  stale reference coincidentally colliding with a freshly allocated id later on). Also has lemmas
-  relating an id's `loc?` to where it actually sits in the stack/heap (`oid_loc_rgn_iff_in_heap`,
-  `oid_loc_stk_iff_in_stack`).
-- `Mutation/` — the operational semantics, one file per operation (`Enter`, `Exit`, `FieldAsgn`,
-  `MakeObjRegion`, `MakeObjStack`, `MakeRegion`, `Merge`, `Swap`, `VarAsgn`); `Mutation.lean` is a
-  9-line aggregator importing all nine. Each `Mutation/<Op>.lean` defines the operation itself
-  (`varAsgn`, `fieldAsgn`, `swap`, `enter`, `exit`, `makeObjStack`, `makeObjRegion`, `makeRegion`,
-  `merge` — each takes a `RuntimeConfig` and returns `Option RuntimeConfig`, `none` meaning the
-  transition is stuck/illegal, e.g. an out-of-region write) **and** a public `<op>_cases` lemma
-  unpacking the `do`-block into its explicit disjunction-of-∃-bundles branches — reused by both
-  `Gc/Model/Preservation/<Op>.lean` and `Gc/Reachability/Referencable/Lemmas/<Op>.lean`.
-- `Mutation/Stmt.lean` — reifies a single operation as data: `inductive Stmt` (one constructor per
-  operation, carrying its arguments) plus `step : Stmt → RuntimeConfig → Option RuntimeConfig`
-  dispatching to the real operation. Lets later layers state "for all 9 operations" claims by
-  quantifying over `Stmt` instead of writing 9 separate theorems.
-- `Start.lean` — `RuntimeConfig.start` (the initial configuration: one root region, one root frame) and
-  a proof that it satisfies `ValidConfig`.
-- `Preservation/*.lean` — one file per `Mutation` operation. Each proves that the operation preserves
-  `ValidConfig` by discharging the 9 sub-invariants (`<op>_L1` … `<op>_S3`, plus `<op>_HS1`)
-  individually and then combining them into a single `<op>_valid : ValidConfig cfg → op ... cfg = some
-  cfg' → ValidConfig cfg'`. **This is the recurring proof-engineering pattern in the repo** — a new
-  mutation operation is expected to get its own `Preservation/<Op>.lean` following this same shape.
-- `Preservation.lean` — aggregator: imports all 9 `Preservation/*.lean` files plus `Mutation/Stmt.lean`
-  and defines `StepPreserves`/`AllPreserve` (a property `P` of configs preserved no matter which `Stmt`
-  ran) and `allPreserve_ValidConfig : AllPreserve ValidConfig`, dispatching to the 9 `<op>_valid` proofs
-  via `cases cmd with` on `Stmt`.
-- `Preservation/Common.lean` — generic, non-operation-specific facts factored out of individual
-  operation files once they were needed by more than one: `heap_objectIds_of_mem`,
-  `swap_corollary_stackWithIndex_index_inj`/`_find_eq`, `merge_corollary_regionId_unique_index`,
-  `stackWithIndex_getElem_index_eq`, `stackWithIndex_frame_transport_down_of_shape_eq`/`_up_of_shape_eq`,
-  `stackWithIndex_objMap_get_eq_of_last_varMap_update`. Names were kept identical to wherever they were
-  originally defined, so check here first before re-deriving a stack/heap transport fact from scratch.
-- `Theorems.lean` — generic `List`/`AList` lemmas (not domain-specific) used as a small helper library
-  by the `Preservation` proofs (e.g. `List.find?_eq_some_of_unique`, `List.kunion_eq_append_of_disjoint_keys`,
-  `List.two_le_count_flatMap_of_ne`, `List.count_le_count_flatMap_of_mem`).
+Each `<op>_valid` is a single-config invariant: nothing in this layer reasons about reachability chains.
 
-Each `<op>_valid` proof only needs `ValidConfig cfg`, i.e. it is a *single-config* invariant — no
-per-operation proof here reasons about reachability chains.
+### `Gc/Reachability/Reachable/`: reachability over `ReachableStep`
 
-### `Gc/Reachability/Referencable/` — DEPRECATED, superseded by `Gc/Reachability/Reachable/` below
+Organized property-first: one folder per headline claim, one file per operation inside it, with the shared
+per-operation toolkit in `Lemmas/`.
 
-**Deprecated.** Kept on disk (still builds standalone, zero `sorry`, via qualified-name builds) but
-deliberately unhooked from `Gc.lean`'s bare build and no longer treated as the active reachability
-layer or cited as precedent for new work — do not extend it or point new proofs at it. `Reachable/`
-below is the current, wider-scope reachability layer and should be used instead. Left here (rather than
-deleted) purely as a record of completed work: `RefStep` stops dead the moment a chain hits a region
-reference (`RId`) — it never crosses a region boundary — which is what report.pdf's own reachability
-notion formalizes, and CR1–CR5 are proved over it in full. `Reachable/`'s `ReachableStep` covers strictly
-more (it also crosses into a Closed region's own bridge object), which is why it now supersedes this
-folder rather than the two staying co-equal.
+- `Semantics.lean`: `ReachableStep` (an `OId` steps to any reference stored in the object it resolves to; an
+  `RId` steps into a **Closed** region's bridge object, and doesn't step at all if the region is Open, so a
+  chain can cross a Closed region's boundary), its unfolding lemmas `ReachableStep_rid_iff`/
+  `ReachableStep_oid_iff`, and `RegionReachable`/`FrameReachable`/`StackReachable`/`FrameRoot` with the
+  `RegionReachable_iff_reflTransGen`/`FrameReachable_iff_reflTransGen` conversions. Proofs work almost
+  entirely with the `Relation.ReflTransGen (ReachableStep cfg)` form. `RegionReachable`/`FrameReachable`
+  never cross an `RId` boundary within one relation; bridging that seam is what makes the Closed-region
+  results below non-trivial.
+- `Lemmas/Common.lean`: operation-independent machinery shared across the layer. Groups:
+  - step unpacking: `bridge_loc`, `oid_step_container` (the target is a ref of the source's region or stack
+    frame), `rid_step_inv`, `predecessor_cases`, `predecessor_of_region_object`,
+    `predecessor_of_closed_region_object`, `predecessor_of_stack_object`, `open_rid_no_step`;
+  - backward chase: `SafeRef`, `predecessor_safe`, `safe_reflTransGen_transport`;
+  - owner-index bounds: `stack_container_confined`, `region_container_confined`, `stack_step_index_le`;
+  - Closed regions: `closed_region_not_owned`, `closed_chain`, `RegionReachable_of_FrameReachable_closed`,
+    `FrameReachable_rid_of_closed_container`;
+  - chain building: `FrameReachable_extend`, `StackReachable_of_root`, `reflTransGen_split` (a chain under a
+    relation that changed only at one source is an old chain or ends in an old chain from the new target),
+    `StackReachable_of_edge_added`, `FrameReachable_of_StackReachable` (the forward direction every
+    `<op>_suspended_reach` uses);
+  - stack-index facts: `stackWithIndex_getLast_mem`, `regionId_ne_last_of_suspended`, `index_le_last`,
+    `index_lt_length_sub_one`, `stackWithIndex_length_of_replace_last`, `last_frame_root`;
+  - `objAt?`/step agreement after an edit: `objAt_of_loc_last`, `objAt_insert_step`, `objAt_last_frame_eq`,
+    `objAt_heap_insert_eq`, `step_iff_of_ne_of_objAt`, `rid_step_iff_of_insert_open`,
+    `ne_freshRegionId_of_lookup`, `frame_regionId_ne_fresh`.
+- `Lemmas/<Op>.lean`: per-op `loc?`/`objAt?`/`ReachableStep` agreement facts, frame-membership transports
+  (`<op>_frame_mem_up/down`, `<op>_frame_cases`), frame-reachability transports
+  (`<op>_frame_reachable_iff`), and one `<op>_suspended_reach` lemma: the argument shared by both leaf
+  files of that op. These files import `FrameReachableAtLaterFrame/Def.lean` where they need its
+  hypothesis. `Lemmas.lean` aggregates all of `Lemmas/*.lean`.
+- `StackReachableIffRegionReachableOfClosed.lean` (report.pdf CR6):
+  - `StackReachable_iff_RegionReachable_of_closed`: for a Closed region `rid` whose `RId` is
+    stack-reachable, an object inside `rid` is `StackReachable` iff it's `RegionReachable cfg rid`. The
+    forward direction needs only closedness (every path enters through the bridge hop); the `RId`
+    hypothesis is used to glue that hop onto the stack in reverse.
+  - `not_StackReachable_rid_implies_not_StackReachable_objects_of_closed`: an unreachable Closed region's
+    contents are all unreachable.
+- `FrameReachableAtLaterFrame/`:
+  - `Def.lean`: `FrameReachable_at_later_frame_implies_FrameReachable_at_frame cfg` (an object in an
+    earlier frame's region that's frame-reachable from a later frame is already frame-reachable from the
+    earlier one) and its single-step preservation wrapper `FrameReachableAtLaterFrame_step cmd`.
+  - `Start.lean`: `RuntimeConfig.start_frameReachableAtLaterFrame`, the property at the initial config.
+  - `<Op>.lean`: `frameReachableAtLaterFrame_step_<op>`, each a short derivation from
+    `Lemmas/<Op>.lean`; `All.lean`: `frameReachableAtLaterFrame_step_all` (`cases cmd`).
+- `StackReachableInvariant/`:
+  - `Def.lean`: `StackReachable_invariant_for_suspended_region_objects cmd`, the layer's headline claim:
+    for `ValidConfig cfg`, a step `cmd` to `cfg'`, the `FrameReachableAtLaterFrame` property on `cfg`,
+    and an object `oid` in the region of a *suspended* frame (index below the last frame's),
+    `StackReachable cfg (OId oid) ↔ StackReachable cfg' (OId oid)`.
+  - `<Op>.lean`: `stackReachable_invariant_<op>`, each derived from `<op>_suspended_reach`; `All.lean`:
+    `stackReachable_invariant_all`.
 
-The folder is organized **property-first** (one top-level unit per headline claim, one file per
-operation inside it), mirroring `Gc/Reachability/Reachable/`'s own layout (see that section below) —
-this was a deliberate refactor away from an earlier operation-first `Validity/Preservation/<Op>.lean`
-layout, done to match how work on this layer actually happens (one property, ground out across all 9
-ops, one commit per op) and to make the two reachability layers easier to cross-reference. The refactor
-was file-reorganization only (splitting/renaming, `private`→public where a lemma crossed a file
-boundary) — no proof content or lemma statement changed, and it kept `Referencable/`'s pre-existing
-independence from `Gc.Reachability.Reachable` (neither folder imports the other).
+Leaf files import only the `Lemmas` aggregator (plus `StackReachableInvariant/Def.lean`); they never import each other.
 
-- `Semantics.lean` — `RefStep` (`a` steps to `b` when `b` is a field value of the object `a` currently
-  resolves to, via `Reference.objAt?`) and `RefStep.exists_oid_left`; `RegionReferencable` (reachable
-  from a region's bridge object, staying inside the region), `StackReferencable`/`FrameReferencable`
-  (reachable from stack variables, optionally scoped to one frame's stack-index), and `FrameRoot` (the
-  two ways a `FrameReferencable` chain can start: a stack var's value, or a frame's own region's bridge
-  object). Also proves `RegionReferencable_iff_reflTransGen`/`FrameReferencable_iff_reflTransGen`,
-  converting the inductive props to `Relation.ReflTransGen (RefStep cfg) start ref` form — the
-  representation almost every CR1–CR5 proof actually works with.
-- `Basic.lean` — the "start reading here" file: `CR3` and `ValidReachableConfig` (below), plus
-  `Suspended`/`CR5_helper_step`/`CR5_step` and the `cr5_step_of_helper` upgrade lemma (also below) —
-  the headline `Prop` definitions the rest of the folder proves per-operation instances of.
-- `Path.lean` — a thin `Path`/`ValidPath` wrapper (`path.refs : List Reference`, valid when consecutive
-  refs are linked by `RefStep`) used specifically by the CR2 proof, which needs to reason about *every*
-  element of a chain (via `List.IsChain` induction), not just its endpoints.
-- `CR1.lean`, `CR2.lean`, `CR4.lean` — the single-config reachability corollaries (report.pdf CR1/CR2/
-  CR4), each proved once over an arbitrary `ValidConfig`/`ValidReachableConfig` rather than per
-  operation, so unlike CR3/CR5 below they don't get their own per-op folder:
-  - **`CR1.lean`**: if a region has an associated (on-stack) frame, everything region-reachable in it is
-    also frame-reachable from that frame.
-  - **`CR2.lean`**: a path rooted at frame F, ending at an object in F's own region, never passes
-    through any *other* frame's stack slot. Built from the S2/S3-driven upper/lower index bounds in
-    `Lemmas/Common.lean`, combined via `le_antisymm`.
-  - **`CR4.lean`**: an object living in a region owned by (on-stack) frame `frame` is stack-wide
-    reachable (`StackReferencable`) iff it's already reachable from `frame` alone (`FrameReferencable
-    cfg frame.index _`). Covers both an in-region object and a region reference (`RId`) one field-hop
-    beyond an in-region object — the `RId` case leans on `H2`'s global uniqueness of a region
-    reference's storage location to trace the chain back to the in-region object.
-- `Lemmas/` — the per-operation reusable lemma toolkit both `CR3/` and `CR5/` below draw on:
-  `Lemmas/Common.lean` holds generic, non-operation-specific machinery (`RegionReferencable_stays_in_region`
-  — H3-driven: once a chain resolves into a region, it never leaves; `ReflTransGen_rgn_confined` — the
-  region-chain analogue of CR2, rooted at an arbitrary point; `FrameRoot_upper_bound`/
-  `RefStep_upper_bound_step`/`ReflTransGen_upper_bound` — the S2/S3-driven upper-index-bound argument
-  behind CR2; `FrameReferencable_owner_index_le`/`_stk_index_le` — packaged wrappers: anything reached
-  along a `FrameReferencable cfg frameY.index _` chain has owner/slot index `≤ frameY.index`, the
-  workhorses several `<op>_cr3`/`CR5_step` proofs call for their "already visible from some no-later
-  frame" argument; `resolveV_frameRoot`/`resolveFA_frameReach` — a shared pair used across
-  `FieldAsgn`/`VarAsgn`/`Swap`), and `Lemmas/<Op>.lean` (one per `Stmt` constructor) holds the
-  `objAt?`/`loc?`/`RefStep` agreement facts and frame-membership/frame-reachability transports
-  (`<op>_corollary_frameReferencable_iff`(`_of_lt`)) each op's `CR3`/`CR5` proof needs — all originally
-  `private` inside a single per-op `Validity/Preservation/<Op>.lean` file, made public when that file
-  was split into this toolkit plus `CR3/<Op>.lean`. `Lemmas.lean` itself is just a 10-line aggregator
-  importing all of `Lemmas/*.lean`, mirroring `Mutation.lean`/`Preservation.lean`'s own aggregator shape.
-- `Invariants.lean` — cross-config properties about reachability being preserved for suspended regions
-  and earlier frames across a transition; definitions only, no proofs (superseded in practice by
-  `CR5_step` below).
-- `Guarantees.lean` — empty (placeholder for the eventual GC-safety theorems).
-- `CR3/` — `CR3`, a `ValidConfig`-style invariant *specifically* about reachability (defined in
-  `Basic.lean`):
+### Proving technique for "suspended region unaffected by active-frame mutation"
 
-  ```
-  def CR3 (cfg : RuntimeConfig) : Prop :=
-    ∀ frame ∈ cfg.stackWithIndex, ∀ frame' ∈ cfg.stackWithIndex,
-      frame.index < frame'.index →
-      ∀ oid, (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId) →
-      FrameReferencable cfg frame'.index (Reference.OId oid) →
-      FrameReferencable cfg frame.index (Reference.OId oid)
-  ```
+If an operation is purely additive or only touches the active (last) frame's `varMap`/scalar fields, the
+step relation is pointwise equal (or equal up to a fresh id) between `cfg` and `cfg'`, so only the root
+set needs transporting (`<op>_frame_reachable_iff`). When an operation edits an existing object's field
+(`FieldAsgn`/`Swap`), the step relation changes at the mutated container, so the proof splits each chain
+with `reflTransGen_split` and closes the branch using the new edge either by an owner-index bound
+(`region_container_confined`/`stack_container_confined`: the active container can't be reached from a
+suspended root) or by tracing the written value's own root (`resolveV_frameRoot`/`resolveFA_frameReach`).
 
-  ("if an object lives in a suspended region owned by an earlier frame F, and is frame-reachable from
-  some later frame F', it's already frame-reachable from F itself" — report.pdf CR3). Unlike L1–HS2,
-  CR3 isn't provable from a `ValidConfig` snapshot alone — it's proved to hold at `RuntimeConfig.start`
-  (`CR3/Start.lean`) and preserved by every `Mutation.lean` operation (`CR3/<Op>.lean`, one file per
-  `Stmt` constructor, each proving `<op>_cr3`/`<op>_reachable_valid` by drawing on `Lemmas/<Op>.lean`),
-  mirroring `Gc/Model/Preservation/*.lean`'s per-operation pattern. `ValidReachableConfig cfg extends
-  ValidConfig cfg` with a `cr3` field (also in `Basic.lean`). All 9 operations proved, zero `sorry`;
-  `CR3/All.lean` aggregates them (`allPreserve_ValidReachableConfig`).
-
-- `CR5/` — report.pdf CR5 ("activity in an active region and frame cannot affect the stack-reachability
-  of objects within suspended regions"), formalized as a per-operation single-step fact (mirroring how
-  CR3 itself is proved), with `Suspended`/`CR5_step`/`cr5_step_of_helper` defined in `Basic.lean`:
-
-  ```
-  def Suspended (cfg : RuntimeConfig) (i : Index) : Prop :=
-    ∃ frame ∈ cfg.stackWithIndex, frame.index = i ∧ i < cfg.stackWithIndex.length - 1
-
-  def CR5_step (cmd : Stmt) : Prop :=
-    ∀ cfg cfg' : RuntimeConfig, ValidReachableConfig cfg → step cmd cfg = some cfg' →
-      ∀ i, Suspended cfg i → ∀ ref, FrameReferencable cfg i ref →
-      (StackReferencable cfg ref ↔ StackReferencable cfg' ref)
-  ```
-
-  `CR5_step` is deliberately *restricted* to references already `FrameReferencable` from the suspended
-  frame — an unrestricted `∀ ref, StackReferencable cfg ref ↔ StackReferencable cfg' ref` is false (e.g.
-  `makeObjStack` can make a brand-new object `StackReferencable` in `cfg'` via the active frame's own
-  fresh var, with no connection to any suspended region). `Basic.lean`'s `cr5_step_of_helper` upgrades a
-  simpler `CR5_helper_step` (`FrameReferencable cfg i ref ↔ FrameReferencable cfg' i ref`) into the
-  restricted `StackReferencable` form for free, since once `ref` is already `FrameReferencable` from the
-  suspended frame, `StackReferencable cfg ref` is trivially witnessed and `StackReferencable cfg' ref`
-  falls out of unfolding `FrameRoot`. `CR5/<Op>.lean` (one file per `Stmt` constructor) each prove
-  `cr5_step_<op>` by opening with `apply cr5_step_of_helper` and drawing on `Lemmas/<Op>.lean` — there's
-  no separately-named per-operation `CR5_helper_step` fact, traded away for a cleaner public API. All 9
-  operations proved, zero `sorry`; `CR5/All.lean` aggregates them (`cr5_step_all`).
-
-  Multi-step CR5 (chaining `CR5_step` over an arbitrary-length trace, the actual report.pdf claim
-  rather than just one operation) is not currently being pursued.
-
-### `Gc/Reachability/Reachable/` — sibling reachability layer over `ReachableStep` (complete, zero `sorry`)
-
-A folder alongside `Referencable/`. Not yet imported from `Gc.lean`, so it isn't built by a bare `lake
-build` — check it via qualified-name builds (`lake build Gc.Reachability.Reachable.Lemmas`) or the
-Lean LSP tools. This layer deliberately does **not** import anything from `Gc.Reachability.Referencable`
-(explicit user instruction) — its own `Semantics.lean` restates `ReachableStep` fresh rather than
-reusing `Referencable`'s `RefStep`, even though the two are almost the same shape. The reason it
-exists as a sibling rather than living inside `Referencable/`: `Reachable/`'s `ReachableStep` is
-deliberately *stronger* than `Referencable/`'s `objAt?`/`RefStep` — an `RId` step is allowed to continue
-into a **Closed** region's own bridge object, so a chain can cross a region boundary that `Referencable/`
-would stop at.
-See `Gc/Reachability/Reachable/Semantics.lean`'s own header comment for the precise phrasing. See also
-[[project_region_object_reachability_seam]] (memory) on why `RegionReachable`/`FrameReachable` never
-cross an `RId` boundary within one relation.
-
-The folder is organized **property-first** (one top-level unit per headline claim, one file per
-operation inside it), not operation-first — this matches how work on the layer actually happens (one
-property, ground out across all 9 ops, one commit per op). There is no catch-all `Basic.lean`: every
-`Prop` definition lives directly in the same directory as the proofs that instantiate it, and generic
-unfolding facts about `Semantics.lean`'s own definitions live in `Semantics.lean` itself, right next to
-what they unfold.
-
-- `Semantics.lean` — `ReachableStep` itself (the `OId` branch is exactly `Referencable`'s `objAt?`
-  restated via `do`-notation; the new content is the `RId` branch, which steps into a `Closed` region's
-  bridge object, no step at all if `Open`), plus its unfolding lemmas `ReachableStep_rid_iff`/
-  `ReachableStep_oid_iff`;
-  `RegionReachable`/`FrameReachable`/`StackReachable`/`FrameRoot` (same shape as
-  `Referencable/Semantics.lean`'s, built on `ReachableStep`), plus `RegionReachable_implies_FrameReachable`
-  (a general, currently-unused-elsewhere corollary connecting the two); and
-  `RegionReachable_iff_reflTransGen`/`FrameReachable_iff_reflTransGen`.
-- `FrameReachableAtLaterFrame/Def.lean` — the two headline `Prop` definitions the rest of that folder
-  proves per-operation instances of: `FrameReachable_at_later_frame_implies_FrameReachable_at_frame cfg`
-  — a CR3-style property (same shape as `Referencable`'s report.pdf `CR3`, restated over this layer's
-  own `FrameReachable`) — and its `FrameReachableAtLaterFrame_step cmd` single-step-preservation
-  wrapper. Used as an explicit hypothesis by `StackReachable_invariant_for_suspended_region_objects`
-  below; not yet proved to hold at `RuntimeConfig.start`, nor bundled into a `ValidReachableConfig`-style
-  invariant the way `Referencable/`'s `CR3` is.
-- `StackReachableInvariant/Def.lean` — `StackReachable_invariant_for_suspended_region_objects cmd`, the
-  layer's headline claim (imports `FrameReachableAtLaterFrame/Def.lean` for the hypothesis above): for a
-  `ValidConfig cfg`, a mutation `cmd`, and a frame `frame` whose region is *suspended* (index strictly
-  below the active/last frame's) and holds some `oid`, `StackReachable cfg (OId oid) ↔ StackReachable
-  cfg' (OId oid)` — "liveness of objects in suspended regions is invariant to activity in an active
-  region" (the user's own reformulation of report.pdf Section 5 paragraph 4's claim; deliberately
-  drops the paper's "as long as the active region remains active" qualifier, judged unnecessary for
-  this single-step, per-operation formulation).
-- `Lemmas/` — the per-operation reusable lemma toolkit both proof passes below draw on:
-  `Lemmas/Common.lean` holds generic, non-operation-specific machinery (`SafeRef`/`predecessor_safe`/
-  `safe_reflTransGen_transport` — a backward, H3/L2-driven chase; `stackWithIndex_mem_getElem_eq`/
-  `stackWithIndex_find_index_eq_getElem` — generic `stackWithIndex`↔`getLast?`/index facts;
-  `stack_container_confined`/`region_container_confined` — owner-index-bound facts, true for any config
-  or mutation, reused by `varAsgn`'s/`swap`'s own escape arguments despite living here rather than under
-  `fieldAsgn`, where they were first needed; `closed_region_not_owned`/`predecessor_of_closed_region_object`
-  — the Closed-region analogues of `open_rid_no_step`/`predecessor_of_region_object`: the `RId` source
-  becomes the desired portal hop instead of an impossibility, and the stack-escape branch becomes
-  impossible (via S3+L2: a Closed region can never be owned by an on-stack frame) instead of allowed;
-  `RegionReachable_of_FrameReachable_closed`/`FrameReachable_rid_of_closed_container` — the two halves
-  of `StackReachableIffRegionReachableOfClosed.lean`'s confinement argument below, each a backward
-  induction over the reachability chain dispatching on `predecessor_of_closed_region_object`;
-  `FrameReachable_extend` — a small generic lemma
-  extending a `FrameReachable` witness forward along any further `ReachableStep` chain), and
-  `Lemmas/<Op>.lean` (one per `Stmt` constructor) holds
-  the `loc?`/`objAt?`/`ReachableStep` agreement facts and frame-membership/frame-reachability transports
-  (`<op>_frame_reachable_iff`) each op's proof needs. `Lemmas.lean` itself is now just a 10-line
-  aggregator importing all of `Lemmas/*.lean`, mirroring `Mutation.lean`/`Preservation.lean`'s own
-  aggregator shape.
-- `StackReachableIffRegionReachableOfClosed.lean` — the single-config reachability corollary
-  (report.pdf CR6), mirroring `Referencable/`'s
-  `CR1.lean`/`CR2.lean`/`CR4.lean` pattern: a proof drawing on `Lemmas`-level machinery can't live in
-  `Semantics.lean` without an import cycle (`Lemmas/Common.lean` imports `Semantics.lean`), so it gets
-  its own file instead. Two theorems:
-  - **`StackReachable_iff_RegionReachable_of_closed`**: given a Closed region `rid` whose `RId` is
-    itself stack-reachable, an object located inside `rid` (`loc? = Rgn rid`) is `StackReachable` iff
-    it's `RegionReachable cfg rid` — "liveness in a closed region is solely determined by
-    region-reachability." The `↔`'s forward direction doesn't actually need the `RId`-reachable
-    hypothesis: closedness alone forces every path in through the single portal hop `RId rid → bridge`
-    (`RegionReachable_of_FrameReachable_closed`); the hypothesis is only needed by the reverse
-    direction, to glue that portal hop onto the stack (`FrameReachable_extend`).
-  - **`not_StackReachable_rid_implies_not_StackReachable_objects_of_closed`**: the companion, proved
-    via its own noted contrapositive route (`FrameReachable_rid_of_closed_container`: reaching
-    anything inside a Closed region forces the region's own `RId` to already be frame-reachable too)
-    — an unreachable Closed region's contents are all unreachable.
-- `FrameReachableAtLaterFrame/` — one `frameReachableAtLaterFrame_step_<op>.lean` file per `Stmt`
-  constructor (all 9 proved, zero `sorry`), plus `All.lean`'s `frameReachableAtLaterFrame_step_all`
-  dispatcher (`cases cmd with ...`, mirroring `Referencable/CR3/All.lean`'s
-  `allPreserve_ValidReachableConfig` pattern); proves `FrameReachableAtLaterFrame_step cmd`, i.e. single-step
-  preservation of `FrameReachable_at_later_frame_implies_FrameReachable_at_frame` (see the `Def.lean`
-  bullet above). Unlike `StackReachableInvariant/`'s property (which only needs *some* witness frame
-  reaching `oid`), this one needs reachability specifically from the given earlier frame, so
-  `varAsgn`/`fieldAsgn`/`swap` each need a genuine index-bound "escape" argument (frame.index ≤
-  frameY.index for whatever frame the reachability chain actually rooted from, via
-  `region_container_confined`) rather than just transport.
-- `StackReachableInvariant/` — one `stackReachable_invariant_<op>.lean` file per `Stmt` constructor (all
-  9 proved, zero `sorry`), plus `All.lean`'s `stackReachable_invariant_all` dispatcher; proves
-  `StackReachable_invariant_for_suspended_region_objects cmd`. `merge`'s proof (in both this folder and
-  `FrameReachableAtLaterFrame/`) shares its RId-`rid'`-avoidance transport toolkit via
-  `merge_frame_transport_down`/`_up`, `merge_chain_transport_down`, and `merge_frame_reachable_iff` in
-  `Lemmas/Merge.lean`, matching the `<op>_frame_reachable_iff` shape used by every other op, rather than
-  each proof rebuilding its own local copy.
-
-## Proof-engineering gotchas (recurring across this codebase's proof style)
-
-These keep resurfacing across files in all three layers above; check here before re-deriving a
-workaround from scratch.
+## Proof-engineering gotchas
 
 - **`rw [find?_cons_of_pos/neg h]` fails via higher-order-unification ambiguity** when `h`'s type is an
-  unreduced lambda application (Lean infers the wrong split of predicate/argument from `h`'s type
-  alone). Fix: state the target `find?` equality as its own fully-concrete-typed `have` first (proved
-  via `exact`/plain term application from `h`, not `rw`), then `rw` with that `have` instead of `h`
-  directly.
-- **Multi-line record literals inside a `have`'s/theorem's type** (e.g. a new `Frame`/`Region`/
-  `RuntimeConfig` literal split across lines) repeatedly hit a hard parser error ("unexpected
-  identifier; expected '}'") unrelated to the math. Fix: `set newFrame : Frame := { ... } with
-  newFrame_def` once, right after its dependencies are established, then refer to `newFrame`
-  everywhere afterward (`set` also retroactively abstracts existing goal occurrences of the literal).
-  Alternatively collapse the literal onto one line with an explicit type ascription.
-- **`cases h : e with` generalizes *every* occurrence of `e`**, including inside a goal's own
-  `∃`-conjuncts or hypotheses introduced earlier — not just the term you meant to case on. Fix: use
-  `rfl` in place of the naively-expected hypothesis where an existential conjunct got silently
-  rewritten to a reflexive equation, or avoid a blanket `subst`/`cases` and instead `rw [h] at
-  <specific hypothesis>` targeted precisely.
-- **A lemma stated with `match ... with` syntax cannot be applied via `rw`/`simp`**, even when the
-  goal's `match` expression is alpha-equivalent to the lemma's LHS — each *occurrence* of `match`
-  syntax compiles to its own distinct auxiliary `match_1`/`match_2` definition, and `rw`/`simp` match on
-  that syntactic head, not up to defeq. Fix: apply the lemma as a **term**, not a rewrite rule — build
-  intermediate `have`s for each side, `rw` any needed equalities *inside* those (safe, no `match`
-  involved), then close via `.trans`/`exact` (which check by full defeq).
-- **`X ▸ h` can fail on `n + 1` vs `.succ` display-form mismatches**, even when the underlying types are
-  defeq. Fix: use `rw [X] at h` (or `rw [X] at h ⊢`) followed by a separate closing tactic, rather than
-  a one-shot `▸` term.
-- **`omega` occasionally fails on visibly-sufficient `Nat` constraints** ("No usable constraints found")
-  despite all the needed facts being literally in context, and can succeed moments later via
-  `lean_multi_attempt` on the identical goal — treat as LSP/omega-state flakiness, not a real proof gap.
-  Work around with an explicit lemma application (e.g. `Nat.le_of_lt_succ`, `Nat.not_le.mpr`) instead of
-  retrying `omega` in place.
-- **`AList.insert` at an already-present key reorders `.entries`** (via the underlying `kinsert`/
-  `kerase`), unlike inserting at a genuinely fresh key (`AList.entries_insert_of_notMem`, no reorder).
-  Build a `List.Perm` fact via `List.exists_of_kerase` + `NodupKeys.eq_of_mk_mem`-style reasoning when a
-  proof needs to survive an existing-key insert.
-- **`Stack.objectIds`/`Stack.refs` don't resolve via dot notation on a bare `List Frame`** — e.g.
-  `cfg.stack.dropLast.objectIds` fails ("environment does not contain `List.objectIds`") because
-  `List.dropLast`'s return type is bare `List Frame`, not the `Stack` alias. Write these as prefix
-  applications instead, `Stack.objectIds cfg.stack.dropLast`, whenever the receiver came from a `List`
-  op like `dropLast`/`++`.
-- **Mixing `=` and `~` (`List.Perm`) steps in one `calc` block doesn't parse** in this project. Build
-  `List.Perm` arguments as a flat sequence of separately-named `have`s instead, chained via explicit
-  `▸`/`.trans`.
-- **`AList.mem_insert.mpr` doesn't resolve as dot notation** — call it as `(AList.mem_insert _).mpr
-  (...)`.
-- **`Status` derives `BEq`/`DecidableEq` but not `LawfulBEq`**, so `beq_iff_eq` fails to synthesize on
-  it — case-split on `region.status` directly instead.
-- **After `rw [hne]` turns an `ite` condition into `false = true`, `split_ifs <;> omega` doesn't
-  discharge it** — `omega` doesn't inspect `Bool`-equality hypotheses. Eliminate the always-false branch
-  explicitly first, e.g. `rw [if_neg (by decide)]`.
-- **A `rw [...]` list with the same-shaped lemma appearing twice can silently rewrite the wrong
-  occurrence** (e.g. two `List.count_append`s). Split into separately-named `have`s per side instead of
-  one combined `rw` list.
-- **A record literal `{ x with ... }` inside a standalone `have`'s type elaborates at `x`'s own
-  declared type**, not the context's expected type (e.g. yields `FrameWithIndex` instead of `Frame`).
-  Fix with an explicit ascription: `({ x with ... } : Frame)`.
-- **Passing a replacement record (e.g. `newFrame`/`newRegion`) as an *implicit* argument, relying on
-  unification to recover it from a hypothesis, can silently mis-unify** to a trivial/wrong value,
-  sometimes surfacing as a confusing type mismatch several lines later rather than at the call site.
-  Make such arguments **explicit** (or pass via named `(newVal := ...)`) instead.
-- **`subst heq` (from a freshly-`intro`'d variable equated to an outer one) can eliminate the *outer*
-  variable instead of the fresh one**, silently renaming it out of scope for later code (surfaces as an
-  "unknown identifier" several lines later, not at the `subst` site). Use `rw [heq] at <specific
-  hypothesis>` instead of a blanket `subst`.
-- **`AList.lookup_insert`'s underlying `AList` argument sometimes needs to be supplied explicitly**
-  (e.g. `AList.lookup_insert cfg.heap`) when it can't be inferred purely from the expected-type
-  unification context.
-- **`induction ... using Relation.ReflTransGen.head_induction_on` bloats its motive** if a hypothesis
-  mentioning the chain's start point is already in scope when the induction starts. Generalize the
-  chain's start point away first (state the induction over an explicit `∀ a b, ...` rather than the
-  fixed endpoints already in context).
-
-### Proving technique for CR3/CR5-style "suspended region unaffected by active-frame mutation" claims
-
-The recurring shape across `<op>_cr3`, `CR5_step`, and `stackReachable_invariant_<op>`: if the mutated
-operation is purely *additive* or only touches the active (last) frame's own `varMap`/scalar fields
-(never `objMap` content), the step relation (`RefStep`/`ReachableStep`) is provably pointwise-equal or
-equal-up-to-a-fresh-id between `cfg`/`cfg'`, so no per-hop induction is needed — only the *root set*
-needs transporting. When an operation genuinely edits an existing object's field content
-(`FieldAsgn`/`Swap`), the step relation itself changes for the mutated container, and the proof needs a
-per-hop induction (`Relation.ReflTransGen.head_induction_on`) with an "escape" branch for the one hop
-that uses the newly-written edge — closed either via an owner-index bound (`FrameReachable_owner_index_le`
-et al., showing the mutated/active container can never be reached from an already-suspended root) or by
-tracing the newly-written value's own independent root (`resolveV_frameRoot`/`resolveFA_frameReach`).
+  unreduced lambda application. Fix: state the concrete `find?` equality as its own `have` (proved by
+  term application), then `rw` with that.
+- **Multi-line record literals inside a `have`'s/theorem's type** can hit a parser error ("unexpected
+  identifier; expected '}'"). Fix: `set newFrame : Frame := { ... } with newFrame_def` once and refer to
+  `newFrame`, or put the literal on one line with a type ascription.
+- **`cases h : e with` generalizes every occurrence of `e`**, including inside existential conjuncts and
+  earlier hypotheses. Use `rfl` where a conjunct became reflexive, or `rw [h] at <hyp>` targeted.
+- **A lemma stated with `match ... with` can't be used by `rw`/`simp`** on an alpha-equivalent goal (each
+  `match` compiles to its own auxiliary definition). Apply it as a term (`.trans`/`exact`, which check by
+  defeq).
+- **`X ▸ h` can fail on `n + 1` vs `.succ` display mismatches.** Use `rw [X] at h` and a separate closing
+  tactic.
+- **`omega` fails on goals over `Index`** (and is occasionally flaky on visibly sufficient `Nat` goals).
+  Use explicit lemmas instead: `Nat.le_of_lt_succ`, `lt_of_le_of_ne`, `Nat.not_le.mpr`.
+- **`AList.insert` at an already-present key reorders `.entries`** (via `kerase`), unlike a fresh key
+  (`AList.entries_insert_of_notMem`). Use the `List.Perm` facts `AList.keys_insert_perm_of_mem`,
+  `heap_insert_refs_perm`, `heap_insert_objectIds_perm`.
+- **`Stack.objectIds`/`Stack.refs` don't resolve via dot notation on a bare `List Frame`** (e.g. after
+  `dropLast`/`++`). Write `Stack.objectIds cfg.stack.dropLast`.
+- **Mixing `=` and `~` (`List.Perm`) steps in one `calc` doesn't parse.** Chain separately named `have`s
+  with `.trans`.
+- **`AList.mem_insert.mpr` doesn't resolve as dot notation.** Write `(AList.mem_insert _).mpr ...`.
+- **`Status` derives `BEq`/`DecidableEq` but not `LawfulBEq`**, so `beq_iff_eq` won't synthesize and
+  `Status.Closed == Status.Open` won't simp away. Case on the status or use `decide`.
+- **After `rw [hne]` turns an `ite` condition into `false = true`, `split_ifs <;> omega` doesn't close it.**
+  Eliminate the branch first, e.g. `rw [if_neg (by decide)]`.
+- **A `rw` list with the same-shaped lemma twice can rewrite the wrong occurrence** (e.g. two
+  `List.count_append`s). Split into separate `have`s.
+- **`{ x with ... }` inside a standalone `have`'s type elaborates at `x`'s declared type** (e.g.
+  `FrameWithIndex` instead of `Frame`). Ascribe: `({ x with ... } : Frame)`.
+- **Passing a replacement record (`newFrame`/`newRegion`) implicitly can silently mis-unify.** Pass it
+  explicitly or via `(newVal := ...)`.
+- **`subst heq` can eliminate the outer variable instead of the fresh one.** Use `rw [heq] at <hyp>`.
+- **`AList.lookup_insert` sometimes needs its `AList` explicitly**, e.g. `AList.lookup_insert cfg.heap`.
+- **`Relation.ReflTransGen.head_induction_on` bloats its motive** if a hypothesis mentioning the chain's
+  start is in scope. Generalize the start point first (induct over an explicit `∀ a b, ...`).
 
 ## Comment style
 
-Lean comments (`--`) in this repo must be single-line only. Do not write multi-line/wrapped comment
-blocks above declarations, even for non-obvious rationale — keep each comment to one line, or omit it.
+Lean comments (`--`) must be single-line: one short line per non-obvious declaration, or none. Comments
+describe the code as it is now.

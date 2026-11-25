@@ -13,8 +13,7 @@ public import Gc.Model.Mutation.Stmt
 
 @[expose] public section
 
--- `Stmt`-generic preservation: a property `P` of configs is preserved by a single `step`, and
--- `AllPreserve P` says it's preserved no matter which of the 9 operations ran.
+-- `StepPreserves P cmd`: one `step cmd` preserves `P`; `AllPreserve P`: every operation does.
 def StepPreserves (P : RuntimeConfig → Prop) (cmd : Stmt) : Prop :=
   ∀ cfg cfg', step cmd cfg = some cfg' → P cfg → P cfg'
 
