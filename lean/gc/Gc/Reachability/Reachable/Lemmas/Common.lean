@@ -6,10 +6,11 @@ public import Gc.Model.Validity
 public import Gc.Model.Mutation.Mutation
 public import Gc.Model.Preservation
 public import Gc.Reachability.Reachable.Semantics
+public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Def
 
 @[expose] public section
 
--- Generic, non-operation-specific helper lemmas shared across `Lemmas/<Op>.lean`.
+-- Generic, non-operation-specific helper lemmas shared across the Reachable layer.
 
 -- An object's own refs contribute to its region's overall refs.
 theorem mem_region_refs_of_mem_objMap {region : Region} {oid : ObjectId} {obj : Object}
@@ -389,3 +390,152 @@ theorem objAt_insert_step {cfg cfg' : RuntimeConfig} {oid : ObjectId} {obj : Obj
   subst h1
   exact (object_insert_refs_mem (List.contains_iff_mem.mp h2)).imp_right
     fun hm => ⟨obj, hobjAt, List.contains_iff_mem.mpr hm⟩
+
+-- An allocated heap key is never the fresh region id.
+theorem ne_freshRegionId_of_lookup {cfg : RuntimeConfig} {rid : RegionId} {region : Region}
+    (hl : cfg.heap.lookup rid = some region) : rid ≠ cfg.freshRegionId := fun he =>
+  cfg.freshRegionId_not_mem (he ▸ AList.mem_keys_of_lookup_eq_some hl)
+
+-- An on-stack frame's region is never the fresh region id.
+theorem frame_regionId_ne_fresh {cfg : RuntimeConfig} (vcfg : ValidConfig cfg) {S : FrameWithIndex}
+    (hS : S ∈ cfg.stackWithIndex) : S.regionId ≠ cfg.freshRegionId :=
+  ne_freshRegionId_of_lookup (l2_of_stackWithIndex vcfg hS).choose_spec.1
+
+-- A `R'`-chain, where `R'` only adds the edge `x → y` to `R`, is an `R`-chain or ends in an `R`-chain from `y`.
+theorem reflTransGen_split {α : Type*} {R R' : α → α → Prop} {x y : α}
+    (hne : ∀ a, a ≠ x → ∀ b, R' a b → R a b) (hx : ∀ c, R' x c → c = y ∨ R x c)
+    {a b : α} (h : Relation.ReflTransGen R' a b) :
+    Relation.ReflTransGen R a b ∨ Relation.ReflTransGen R y b := by
+  induction h using Relation.ReflTransGen.head_induction_on with
+  | refl => exact .inl .refl
+  | @head p c hstep _ ih =>
+    rcases ih with ih | ih
+    · by_cases hp : p = x
+      · subst hp
+        rcases hx c hstep with rfl | hs
+        · exact .inr ih
+        · exact .inl (.head hs ih)
+      · exact .inl (.head (hne p hp c hstep) ih)
+    · exact .inr ih
+
+-- A chain from any frame root witnesses stack-reachability.
+theorem StackReachable_of_root {cfg : RuntimeConfig} {fid : Index} {s r : Reference} (hs : FrameRoot cfg fid s)
+    (hc : Relation.ReflTransGen (ReachableStep cfg) s r) : StackReachable cfg r := by
+  have hfr := (FrameReachable_iff_reflTransGen ..).mpr ⟨s, hs, hc⟩
+  rcases hs with ⟨S, hS, rfl, -⟩ | ⟨S, hS, rfl, -⟩ <;> exact ⟨S, hS, hfr⟩
+
+-- If steps only change at `OId yoid`, which gains at most the stack-reachable `newVal`, and every `cfg'` root is stack-reachable in `cfg`, so is everything.
+theorem StackReachable_of_edge_added {cfg cfg' : RuntimeConfig} {yoid : ObjectId} {newVal : Reference} {fid : Index}
+    (hS : ∀ a, a ≠ Reference.OId yoid → ∀ b, ReachableStep cfg a b ↔ ReachableStep cfg' a b)
+    (hY : ∀ c, ReachableStep cfg' (Reference.OId yoid) c → c = newVal ∨ ReachableStep cfg (Reference.OId yoid) c)
+    (hN : StackReachable cfg newVal) (hR : ∀ s, FrameRoot cfg' fid s → StackReachable cfg s)
+    {r : Reference} (hr : FrameReachable cfg' fid r) : StackReachable cfg r := by
+  obtain ⟨s, hs, hc⟩ := (FrameReachable_iff_reflTransGen ..).mp hr
+  rcases reflTransGen_split (fun a ha b => (hS a ha b).mpr) hY hc with hc | hc
+  · obtain ⟨E, hE, hr⟩ := hR s hs
+    exact ⟨E, hE, FrameReachable_extend hr hc⟩
+  · obtain ⟨E, hE, hr⟩ := hN
+    exact ⟨E, hE, FrameReachable_extend hr hc⟩
+
+-- A stack-reachable object in on-stack frame `F`'s region is already reachable from `F`.
+theorem FrameReachable_of_StackReachable {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (hFR3 : FrameReachable_at_later_frame_implies_FrameReachable_at_frame cfg) {F : FrameWithIndex}
+    (hF : F ∈ cfg.stackWithIndex) {oid : ObjectId} (hloc : (Reference.OId oid).loc? cfg = some (Location.Rgn F.regionId))
+    (hs : StackReachable cfg (.OId oid)) : FrameReachable cfg F.index (.OId oid) := by
+  obtain ⟨E, hE, hr⟩ := hs
+  obtain ⟨regionF, hlkF, hopenF⟩ := l2_of_stackWithIndex vcfg hF
+  rcases (region_container_confined vcfg hlkF hopenF hF rfl hloc hr).eq_or_lt with heq | hlt
+  · exact swap_corollary_stackWithIndex_index_inj hE hF heq.symm ▸ hr
+  · exact hFR3 F hF E hE hlt oid hloc hr
+
+-- Replacing the last stack frame preserves the stack length.
+theorem stackWithIndex_length_of_replace_last {cfg cfg' : RuntimeConfig} {A B : Frame}
+    (hA : cfg.stack.getLast? = some A) (h : cfg'.stack = cfg.stack.dropLast ++ [B]) :
+    cfg'.stackWithIndex.length = cfg.stackWithIndex.length := by
+  have := congrArg List.length (List.dropLast_append_getLast? A hA)
+  simp [RuntimeConfig.stackWithIndex, h] at this ⊢
+  omega
+
+-- A frame strictly below some frame of an equal-length config is suspended.
+theorem index_lt_length_sub_one {cfg cfg' : RuntimeConfig}
+    (hlen : cfg'.stackWithIndex.length = cfg.stackWithIndex.length) {F F' : FrameWithIndex}
+    (hF' : F' ∈ cfg'.stackWithIndex) (hlt : F.index < F'.index) : F.index < cfg.stackWithIndex.length - 1 :=
+  Nat.lt_sub_of_add_lt (lt_of_le_of_lt hlt (hlen ▸ (List.getElem?_eq_some_iff.mp (stackWithIndex_mem_getElem_eq hF')).1))
+
+-- Every frame sits at or below the last frame's index.
+theorem index_le_last {cfg : RuntimeConfig} {frame0 fr : FrameWithIndex}
+    (hframe0 : cfg.stackWithIndex.getLast? = some frame0) (hfr : fr ∈ cfg.stackWithIndex) : fr.index ≤ frame0.index := by
+  have hidx := (stack_eq_of_stackWithIndex_getLast? hframe0).2
+  obtain ⟨n, hn, rfl⟩ := List.mem_mapIdx.mp hfr
+  rw [List.length_dropLast] at hidx
+  exact hidx ▸ Nat.le_sub_one_of_lt hn
+
+-- A root of the last frame of a stack `L ++ [g]` is one of `g`'s vars or the bridge of `g`'s region.
+theorem last_frame_root {c : RuntimeConfig} {L : List Frame} {g : Frame} {s : Reference}
+    (h : FrameRoot c L.length s) (hst : c.stack = L ++ [g]) :
+    (∃ var, g.varMap.lookup var = some s) ∨
+      ∃ region, c.heap.lookup g.regionId = some region ∧ s = Reference.OId region.bridgeObjectId := by
+  have key : ∀ fr ∈ c.stackWithIndex, fr.index = L.length → fr = { g with index := L.length } := by
+    intro fr hfr hidx
+    rw [RuntimeConfig.stackWithIndex, hst, List.mapIdx_concat, List.mem_append, List.mem_singleton] at hfr
+    rcases hfr with hfr | rfl
+    · obtain ⟨n, hn, rfl⟩ := List.mem_mapIdx.mp hfr
+      exact absurd hidx (Nat.ne_of_lt hn)
+    · rfl
+  rcases h with ⟨fr, hfr, hidx, hv⟩ | ⟨fr, hfr, hidx, hb⟩
+  · obtain rfl := key fr hfr hidx
+    exact .inl hv
+  · obtain rfl := key fr hfr hidx
+    exact .inr hb
+
+-- Replacing the last frame by `g` leaves `objAt? o` unchanged when `loc? o` and `g`'s entry at `o` agree.
+theorem objAt_last_frame_eq {cfg : RuntimeConfig} {frame : FrameWithIndex} {g : Frame} {o : ObjectId}
+    (hframe : cfg.stackWithIndex.getLast? = some frame)
+    (hloc : (Reference.OId o).loc? cfg = (Reference.OId o).loc? { cfg with stack := cfg.stack.dropLast ++ [g] })
+    (hlk : g.objMap.lookup o = frame.objMap.lookup o) :
+    (Reference.OId o).objAt? cfg = (Reference.OId o).objAt? { cfg with stack := cfg.stack.dropLast ++ [g] } := by
+  simp only [Reference.objAt?, ← hloc]
+  rcases (Reference.OId o).loc? cfg with _ | _ | fid
+  · rfl
+  · rfl
+  dsimp only
+  rw [stackWithIndex_find_index_eq_getElem, stackWithIndex_find_index_eq_getElem,
+    stackWithIndex_eq_of_getLast? (stack_getLast?_of_stackWithIndex_getLast? hframe), stackWithIndex_mk_append_singleton]
+  simp only [List.getElem?_append, List.getElem?_singleton]
+  split_ifs <;> simp [hlk]
+
+-- Inserting `newRegion` at `rid` leaves `objAt? o` unchanged when `loc? o` and the new entry at `o` agree.
+theorem objAt_heap_insert_eq {cfg : RuntimeConfig} {rid : RegionId} {region newRegion : Region}
+    {o : ObjectId} (hregion : cfg.heap.lookup rid = some region)
+    (hloc : (Reference.OId o).loc? cfg = (Reference.OId o).loc? { cfg with heap := cfg.heap.insert rid newRegion })
+    (hlk : newRegion.objMap.lookup o = region.objMap.lookup o) :
+    (Reference.OId o).objAt? cfg = (Reference.OId o).objAt? { cfg with heap := cfg.heap.insert rid newRegion } := by
+  simp only [Reference.objAt?, ← hloc]
+  rcases (Reference.OId o).loc? cfg with _ | ridX | _
+  · rfl
+  · by_cases hridx : ridX = rid
+    · subst hridx
+      simp [hregion, hlk]
+    · simp [AList.lookup_insert_ne hridx]
+  · rfl
+
+
+
+-- `ReachableStep` agrees for every source other than `OId yoid` once `objAt?` (off `yoid`) and `RId` steps agree.
+theorem step_iff_of_ne_of_objAt {cfg cfg' : RuntimeConfig} {yoid : ObjectId}
+    (hobjAt : ∀ o, o ≠ yoid → (Reference.OId o).objAt? cfg = (Reference.OId o).objAt? cfg')
+    (hrid : ∀ r b, ReachableStep cfg (Reference.RId r) b ↔ ReachableStep cfg' (Reference.RId r) b) :
+    ∀ a : Reference, a ≠ Reference.OId yoid → ∀ b : Reference, ReachableStep cfg a b ↔ ReachableStep cfg' a b := by
+  rintro (r | o) hane b
+  · exact hrid r b
+  · rw [ReachableStep_oid_iff, ReachableStep_oid_iff, hobjAt o (by rintro rfl; exact hane rfl)]
+
+-- `RId` steps agree after replacing an Open region by another Open region (neither ever steps).
+theorem rid_step_iff_of_insert_open {cfg cfg' : RuntimeConfig} {rid : RegionId} {region newRegion : Region}
+    (hregion : cfg.heap.lookup rid = some region) (hstatus : region.status = Status.Open)
+    (hheap : cfg'.heap = cfg.heap.insert rid newRegion) (hnew : newRegion.status = Status.Open)
+    (r : RegionId) (b : Reference) : ReachableStep cfg (Reference.RId r) b ↔ ReachableStep cfg' (Reference.RId r) b := by
+  by_cases hr : r = rid
+  · subst hr
+    exact iff_of_false (open_rid_no_step hregion hstatus) (open_rid_no_step (hheap ▸ AList.lookup_insert cfg.heap) hnew)
+  · simp only [ReachableStep_rid_iff, hheap, AList.lookup_insert_ne hr]

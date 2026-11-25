@@ -14,37 +14,6 @@ public import Gc.Reachability.Reachable.Lemmas.Merge
 
 @[expose] public section
 
--- Replacing the last frame by `g` leaves `objAt? o` unchanged when `loc? o` and `g`'s entry at `o` agree.
-private theorem objAt_last_frame_eq {cfg : RuntimeConfig} {frame : FrameWithIndex} {g : Frame} {o : ObjectId}
-    (hframe : cfg.stackWithIndex.getLast? = some frame)
-    (hloc : (Reference.OId o).loc? cfg = (Reference.OId o).loc? { cfg with stack := cfg.stack.dropLast ++ [g] })
-    (hlk : g.objMap.lookup o = frame.objMap.lookup o) :
-    (Reference.OId o).objAt? cfg = (Reference.OId o).objAt? { cfg with stack := cfg.stack.dropLast ++ [g] } := by
-  simp only [Reference.objAt?, ← hloc]
-  rcases (Reference.OId o).loc? cfg with _ | _ | fid
-  · rfl
-  · rfl
-  dsimp only
-  rw [stackWithIndex_find_index_eq_getElem, stackWithIndex_find_index_eq_getElem,
-    stackWithIndex_eq_of_getLast? (stack_getLast?_of_stackWithIndex_getLast? hframe), stackWithIndex_mk_append_singleton]
-  simp only [List.getElem?_append, List.getElem?_singleton]
-  split_ifs <;> simp [hlk]
-
--- Inserting `newRegion` at `rid` leaves `objAt? o` unchanged when `loc? o` and the new entry at `o` agree.
-private theorem objAt_heap_insert_eq {cfg : RuntimeConfig} {rid : RegionId} {region newRegion : Region}
-    {o : ObjectId} (hregion : cfg.heap.lookup rid = some region)
-    (hloc : (Reference.OId o).loc? cfg = (Reference.OId o).loc? { cfg with heap := cfg.heap.insert rid newRegion })
-    (hlk : newRegion.objMap.lookup o = region.objMap.lookup o) :
-    (Reference.OId o).objAt? cfg = (Reference.OId o).objAt? { cfg with heap := cfg.heap.insert rid newRegion } := by
-  simp only [Reference.objAt?, ← hloc]
-  rcases (Reference.OId o).loc? cfg with _ | ridX | _
-  · rfl
-  · by_cases hridx : ridX = rid
-    · subst hridx
-      simp [hregion, hlk]
-    · simp [AList.lookup_insert_ne hridx]
-  · rfl
-
 -- A varMap-only change to the last frame never affects `objAt?`.
 private theorem swap_varmap_objAt_eq {cfg : RuntimeConfig} {frame : FrameWithIndex} {newVarMap : VarMap}
     (hframe : cfg.stackWithIndex.getLast? = some frame) (oid' : ObjectId) :
@@ -130,25 +99,6 @@ private theorem swap_stack_objAt_eq_of_ne {cfg : RuntimeConfig} {frame0 : FrameW
         [({ frame0 with varMap := newVarMap, objMap := frame0.objMap.insert yoid (obj.insert field newVal) } :
           Frame)] } :=
   objAt_last_frame_eq hframe0 (swap_corollary_stack_loc_eq hframe0 hobj oid') (AList.lookup_insert_ne hne)
-
--- `ReachableStep` agrees for every source other than `OId yoid` once `objAt?` (off `yoid`) and `RId` steps agree.
-private theorem step_iff_of_ne_of_objAt {cfg cfg' : RuntimeConfig} {yoid : ObjectId}
-    (hobjAt : ∀ o, o ≠ yoid → (Reference.OId o).objAt? cfg = (Reference.OId o).objAt? cfg')
-    (hrid : ∀ r b, ReachableStep cfg (Reference.RId r) b ↔ ReachableStep cfg' (Reference.RId r) b) :
-    ∀ a : Reference, a ≠ Reference.OId yoid → ∀ b : Reference, ReachableStep cfg a b ↔ ReachableStep cfg' a b := by
-  rintro (r | o) hane b
-  · exact hrid r b
-  · rw [ReachableStep_oid_iff, ReachableStep_oid_iff, hobjAt o (by rintro rfl; exact hane rfl)]
-
--- `RId` steps agree after replacing an Open region by another Open region (neither ever steps).
-private theorem rid_step_iff_of_insert_open {cfg cfg' : RuntimeConfig} {rid : RegionId} {region newRegion : Region}
-    (hregion : cfg.heap.lookup rid = some region) (hstatus : region.status = Status.Open)
-    (hheap : cfg'.heap = cfg.heap.insert rid newRegion) (hnew : newRegion.status = Status.Open)
-    (r : RegionId) (b : Reference) : ReachableStep cfg (Reference.RId r) b ↔ ReachableStep cfg' (Reference.RId r) b := by
-  by_cases hr : r = rid
-  · subst hr
-    exact iff_of_false (open_rid_no_step hregion hstatus) (open_rid_no_step (hheap ▸ AList.lookup_insert cfg.heap) hnew)
-  · simp only [ReachableStep_rid_iff, hheap, AList.lookup_insert_ne hr]
 
 -- `ReachableStep` agrees for any source other than the mutated container (STACK branch): heap untouched, so `RId` hops are trivial.
 theorem swap_stack_step_iff_of_ne {cfg cfg' : RuntimeConfig} {frame0 : FrameWithIndex}
@@ -305,3 +255,59 @@ theorem swap_bridge_yoid_step_of_ne {cfg : RuntimeConfig} (vcfg : ValidConfig cf
     {c : Reference} (hstep : ReachableStep ({ cfg with heap := cfg.heap.insert rid ({ region with bridgeObjectId := newBridge, objMap := region.objMap.insert yoid (obj.insert field newVal) } : Region) }) (Reference.OId yoid) c) :
     c = newVal ∨ ReachableStep cfg (Reference.OId yoid) c :=
   objAt_insert_step (by simp [Reference.objAt?, hlocm, hregion, hobj]) (swap_region_objAt_mutated vcfg hregion hobj hlocm) hstep
+
+-- Anything reachable from the mutated (last) frame after a swap was already stack-reachable before it.
+private theorem swap_escape {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg) (h : swap x yf cfg = some cfg')
+    {r : Reference} (hr : FrameReachable cfg' cfg.stack.dropLast.length r) : StackReachable cfg r := by
+  obtain ⟨f0, hf0, yRef, -, yRefLoc, hyrl, yfRef, hyf, _, -, hcase⟩ := swap_cases h
+  have hmem0 := List.mem_of_getLast? hf0
+  have hst := (stack_eq_of_stackWithIndex_getLast? hf0).1
+  have hvar : ∀ var s, (f0.varMap.insert x yfRef).lookup var = some s → StackReachable cfg s := by
+    intro var s hv
+    by_cases hvx : var = x
+    · subst hvx
+      rw [AList.lookup_insert, Option.some_inj] at hv
+      exact hv ▸ resolveFA_frameReach hyf
+    · rw [AList.lookup_insert_ne hvx] at hv
+      exact ⟨f0, hmem0, .var hmem0 hv⟩
+  rcases hcase with ⟨yoid, xRef, obj, -, rfl, rfl, hxr, hobj, rfl⟩ |
+    ⟨yoid, rid, region, obj, xoid, xrid, -, rfl, rfl, rfl, hregion, hobj, hxr, -, -, hstatus, rfl⟩ |
+    ⟨yoid, rid, region, obj, xrid, -, rfl, rfl, rfl, hregion, hobj, hxr, hstatus, rfl⟩ |
+    ⟨yoid, yrid, yfoid, yfrid, region, obj, -, rfl, rfl, rfl, -, rfl, -, hregion, hobj, rfl⟩
+  · refine StackReachable_of_edge_added (swap_stack_step_iff_of_ne hf0 hobj rfl)
+      (fun _ hc => swap_stack_yoid_step_of_ne hf0 hyrl hobj rfl hc) ⟨f0, hmem0, .var hmem0 hxr⟩ (fun s hs => ?_) hr
+    rcases last_frame_root hs rfl with ⟨var, hv⟩ | ⟨rg, hlk, rfl⟩
+    · exact hvar var s hv
+    · exact ⟨f0, hmem0, .bridge hmem0 hlk rfl⟩
+  all_goals first
+    | obtain ⟨_, hlk0, hstatus⟩ := l2_of_stackWithIndex vcfg hmem0
+      obtain rfl := Option.some_inj.mp (hregion.symm.trans hlk0)
+      refine StackReachable_of_edge_added (swap_bridge_step_iff_of_ne vcfg hregion hobj hstatus rfl)
+        (fun _ hc => swap_bridge_yoid_step_of_ne vcfg hregion hobj hyrl hc) ⟨f0, hmem0, .bridge hmem0 hregion rfl⟩
+        (fun s hs => ?_) hr
+      rcases last_frame_root hs hst with ⟨var, hv⟩ | ⟨rg, hlk, rfl⟩
+      · exact ⟨f0, hmem0, .var hmem0 hv⟩
+      · simp only [AList.lookup_insert, Option.some_inj] at hlk
+        subst hlk
+        exact resolveFA_frameReach hyf
+    | refine StackReachable_of_edge_added (swap_region_stack_step_iff_of_ne vcfg hf0 hregion hobj hstatus rfl)
+        (fun _ hc => swap_region_stack_yoid_step_of_ne vcfg hf0 hregion hobj hyrl hc) ⟨f0, hmem0, .var hmem0 hxr⟩
+        (fun s hs => ?_) hr
+      rcases last_frame_root hs rfl with ⟨var, hv⟩ | ⟨rg, hlk, rfl⟩
+      · exact hvar var s hv
+      · simp only [AList.lookup_insert, Option.some_inj] at hlk
+        subst hlk
+        exact ⟨f0, hmem0, .bridge hmem0 hregion rfl⟩
+
+-- Anything reachable from any frame after a swap was already stack-reachable before it.
+theorem swap_reach_down {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg) (h : swap x yf cfg = some cfg')
+    {G : FrameWithIndex} (hG : G ∈ cfg'.stackWithIndex) {r : Reference} (hr : FrameReachable cfg' G.index r) :
+    StackReachable cfg r := by
+  obtain ⟨frame0, hframe0, -⟩ := swap_cases h
+  have hidx0 := (stack_eq_of_stackWithIndex_getLast? hframe0).2
+  by_cases hGeq : G.index = frame0.index
+  · exact swap_escape vcfg h (hidx0 ▸ hGeq ▸ hr)
+  · obtain ⟨Gd, hGdmem, hidxGd, -, -⟩ := swap_frame_transport_down h G hG
+    have hGLt : G.index < cfg.stack.dropLast.length :=
+      hidx0 ▸ lt_of_le_of_ne (hidxGd ▸ index_le_last hframe0 hGdmem) hGeq
+    exact ⟨Gd, hGdmem, hidxGd ▸ (swap_frame_reachable_iff_of_lt vcfg (swap_valid vcfg h) h G hGLt _).mpr hr⟩

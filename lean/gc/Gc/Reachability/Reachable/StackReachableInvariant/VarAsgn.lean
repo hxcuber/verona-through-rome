@@ -9,7 +9,6 @@ public import Gc.Model.Preservation
 public import Gc.Reachability.Reachable.Semantics
 public import Gc.Reachability.Reachable.StackReachableInvariant.Def
 public import Gc.Reachability.Reachable.Lemmas
-public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.VarAsgn
 
 @[expose] public section
 

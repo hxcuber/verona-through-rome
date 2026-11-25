@@ -6,6 +6,7 @@ public import Gc.Model.Validity
 public import Gc.Model.Mutation.Mutation
 public import Gc.Model.Preservation
 public import Gc.Reachability.Reachable.Semantics
+public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Def
 public import Gc.Reachability.Reachable.Lemmas.Common
 public import Gc.Reachability.Reachable.Lemmas.MakeObjStack
 
@@ -36,44 +37,6 @@ theorem resolveFA_frameReach {cfg : RuntimeConfig} {y : FieldAccess} {ref : Refe
     rcases hloc : (Reference.OId oid0).loc? cfg with _ | _ | _ <;> simp_all [Option.bind_eq_some_iff] <;> aesop
   exact ⟨frameY, hmem, .step ((ReachableStep_oid_iff ..).mpr ⟨obj, hobj, List.contains_iff_mem.mpr (List.mem_map_of_mem (AList.lookup_mem_entries hf))⟩)
     ((FrameReachable_iff_reflTransGen ..).mpr ⟨_, hroot, .refl⟩)⟩
-
--- H3-confinement lifted along the whole chain: an `OId` reached from `rid`'s bridge resolves back into `rid`, or into a region entered via a Closed-region hop.
-theorem RegionReachable_oid_confined {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
-    {rid : RegionId} {region : Region} (_hlookup : cfg.heap.lookup rid = some region)
-    {ref : Reference} (hrr : RegionReachable cfg rid ref) :
-    (∃ oid ridCur region', ref = Reference.OId oid ∧ (Reference.OId oid).loc? cfg = some (Location.Rgn ridCur) ∧
-       cfg.heap.lookup ridCur = some region' ∧ (ridCur = rid ∨ region'.status = Status.Closed)) ∨
-    (∃ ridR, ref = Reference.RId ridR) := by
-  clear _hlookup
-  induction hrr with
-  | bridge hlk hbridge => exact .inl ⟨_, _, _, rfl, hbridge ▸ bridge_loc vcfg hlk, hlk, .inl rfl⟩
-  | step hstep _ ih =>
-    rcases ih vcfg with ⟨oidA, ridCur, region', rfl, hlocA, hlkA, hcaseA⟩ | ⟨ridA, rfl⟩
-    · obtain ⟨obj, hobjAt, hcontains⟩ := hstep
-      simp only [Reference.objAt?, hlocA, hlkA, Option.bind_some] at hobjAt
-      have hmemB := mem_region_refs_of_mem_objMap hobjAt (List.contains_iff_mem.mp hcontains)
-      rename_i refCur _ _
-      rcases refCur with ridB | oidB
-      · exact .inr ⟨ridB, rfl⟩
-      · exact .inl ⟨oidB, ridCur, region', rfl, vcfg.h3 ridCur oidB region' hlkA hmemB, hlkA, hcaseA⟩
-    · obtain ⟨regionR, hlkR, hclosedR, rfl⟩ := hstep
-      exact .inl ⟨_, ridA, regionR, rfl, bridge_loc vcfg hlkR, hlkR, .inr hclosedR⟩
-
--- A chain rooted at `rid`'s (Open) bridge can never reach an object in a different Open region.
-theorem region_reachable_open_ne_absurd {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
-    {rid : RegionId} {region : Region} (hlookup : cfg.heap.lookup rid = some region)
-    {oidTarget : ObjectId} {ridT : RegionId} {regionT : Region}
-    (hlocT : (Reference.OId oidTarget).loc? cfg = some (Location.Rgn ridT))
-    (hlkT : cfg.heap.lookup ridT = some regionT) (hopenT : regionT.status = Status.Open) (hne : ridT ≠ rid)
-    (hrr : RegionReachable cfg rid (Reference.OId oidTarget)) : False := by
-  rcases RegionReachable_oid_confined vcfg hlookup hrr with ⟨_, ridCur, region', heq, hloc', hlk', hcase'⟩ | ⟨_, heq⟩
-  · cases heq
-    obtain rfl : ridT = ridCur := by simpa using hlocT.symm.trans hloc'
-    obtain rfl : regionT = region' := by simpa using hlkT.symm.trans hlk'
-    rcases hcase' with rfl | hc
-    · exact hne rfl
-    · simp [hopenT] at hc
-  · cases heq
 
 -- `objAt?` agrees between `cfg`/`cfg'` unconditionally: `varAsgn` never allocates and never edits an `objMap`.
 private theorem varAsgn_objAt_eq {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
@@ -166,3 +129,53 @@ theorem varAsgn_freshvar_last_mem {cfg cfg' : RuntimeConfig} {xf : VarName} {oid
     ({ lastFrame with varMap := lastFrame.varMap.insert xf (Reference.OId oidY), index := cfg.stack.length - 1 } : FrameWithIndex) ∈ cfg'.stackWithIndex := by
   subst hcfg'
   simp [stackWithIndex_mk_append_singleton]
+
+-- varAsgn preserves the stack length.
+theorem varAsgn_length {cfg cfg' : RuntimeConfig} (h : varAsgn xf y cfg = some cfg') :
+    cfg'.stackWithIndex.length = cfg.stackWithIndex.length := by
+  obtain ⟨A, hA, ⟨-, -, -, -, -, -, -, -, rfl⟩ | ⟨-, -, -, -, rfl⟩⟩ := varAsgn_cases h
+  · rfl
+  · exact stackWithIndex_length_of_replace_last hA rfl
+
+-- Every root after varAsgn is stack-reachable before it: the only new root value is `y`'s resolved object.
+private theorem varAsgn_root_reach {cfg cfg' : RuntimeConfig} (h : varAsgn xf y cfg = some cfg')
+    {fid : Index} {start : Reference} (hs : FrameRoot cfg' fid start) : StackReachable cfg start := by
+  have hR : ∀ fid, FrameRoot cfg fid start → StackReachable cfg start := fun _ hr => StackReachable_of_root hr .refl
+  obtain ⟨A, hA, ⟨oidY, rid, region, hyf, -, -, rfl, hregion, rfl⟩ | ⟨oidY, hyf, -, -, rfl⟩⟩ := varAsgn_cases h
+  · rcases hs with ⟨f, hf, rfl, v, hv⟩ | ⟨f, hf, rfl, r, hr, rfl⟩
+    · exact hR _ (.inl ⟨f, hf, rfl, v, hv⟩)
+    · by_cases he : f.regionId = A.regionId
+      · rw [he, AList.lookup_insert] at hr
+        obtain rfl := Option.some.inj hr
+        exact resolveFA_frameReach hyf
+      · exact hR _ (.inr ⟨f, hf, rfl, r, by simpa [AList.lookup_insert_ne he] using hr, rfl⟩)
+  · have hsw := stackWithIndex_eq_of_getLast? hA
+    have hlastA : ({ A with index := cfg.stack.dropLast.length } : FrameWithIndex) ∈ cfg.stackWithIndex := by
+      simp [hsw]
+    rw [FrameRoot, stackWithIndex_mk_append_singleton] at hs
+    rcases hs with ⟨f, hf, rfl, v, hv⟩ | ⟨f, hf, rfl, r, hr, rfl⟩ <;>
+      rcases List.mem_append.mp hf with hf | hf
+    · exact hR _ (.inl ⟨f, hsw ▸ List.mem_append_left _ hf, rfl, v, hv⟩)
+    · obtain rfl := List.mem_singleton.mp hf
+      by_cases hv' : v = xf
+      · subst hv'
+        simp at hv
+        exact hv ▸ resolveFA_frameReach hyf
+      · exact hR _ (.inl ⟨_, hlastA, rfl, v, by simpa [AList.lookup_insert_ne hv'] using hv⟩)
+    · exact hR _ (.inr ⟨f, hsw ▸ List.mem_append_left _ hf, rfl, r, hr, rfl⟩)
+    · obtain rfl := List.mem_singleton.mp hf
+      exact hR _ (.inr ⟨_, hlastA, rfl, r, hr, rfl⟩)
+
+-- For `oid` in a suspended frame `F`'s region, varAsgn neither creates nor destroys its reachability from `F`.
+theorem varAsgn_suspended_reach {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : varAsgn xf y cfg = some cfg') (hFR3 : FrameReachable_at_later_frame_implies_FrameReachable_at_frame cfg)
+    {F : FrameWithIndex} (hF : F ∈ cfg.stackWithIndex) (hFlt : F.index < cfg.stackWithIndex.length - 1)
+    {oid : ObjectId} (hloc : (Reference.OId oid).loc? cfg = some (Location.Rgn F.regionId)) :
+    F ∈ cfg'.stackWithIndex ∧ (StackReachable cfg (.OId oid) → FrameReachable cfg' F.index (.OId oid)) ∧
+    ∀ fid, FrameReachable cfg' fid (.OId oid) → StackReachable cfg (.OId oid) := by
+  have hFlt' : F.index < cfg.stack.length - 1 := by simpa [RuntimeConfig.stackWithIndex] using hFlt
+  refine ⟨(varAsgn_frame_mem_iff h hFlt').mp hF, fun hs => (varAsgn_frame_reachable_iff vcfg h hF hFlt' _).mp
+    (FrameReachable_of_StackReachable vcfg hFR3 hF hloc hs), fun fid hr => ?_⟩
+  obtain ⟨start, hs, hc⟩ := (FrameReachable_iff_reflTransGen ..).mp hr
+  obtain ⟨S, hS, hSr⟩ := varAsgn_root_reach h hs
+  exact ⟨S, hS, FrameReachable_extend hSr (varAsgn_step_eq vcfg h ▸ hc)⟩

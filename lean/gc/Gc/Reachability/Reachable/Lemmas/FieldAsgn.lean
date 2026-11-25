@@ -6,6 +6,7 @@ public import Gc.Model.Validity
 public import Gc.Model.Mutation.Mutation
 public import Gc.Model.Preservation
 public import Gc.Reachability.Reachable.Semantics
+public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Def
 public import Gc.Reachability.Reachable.Lemmas.Common
 public import Gc.Reachability.Reachable.Lemmas.Enter
 public import Gc.Reachability.Reachable.Lemmas.VarAsgn
@@ -18,16 +19,8 @@ private theorem fieldAsgn_stack_objAt_eq_of_ne {cfg : RuntimeConfig} {frame : Fr
     (hframe : cfg.stackWithIndex.getLast? = some frame) (hobj : frame.objMap.lookup oid = some obj)
     {o : ObjectId} (hne : o ≠ oid) :
     (Reference.OId o).objAt? cfg = (Reference.OId o).objAt? { cfg with stack := cfg.stack.dropLast ++
-      [({ frame with objMap := frame.objMap.insert oid (obj.insert field yRef) } : Frame)] } := by
-  simp only [Reference.objAt?, ← fieldAsgn_corollary_stack_loc_eq hframe hobj o]
-  rcases (Reference.OId o).loc? cfg with _ | _ | fid
-  · rfl
-  · rfl
-  dsimp only
-  rw [stackWithIndex_find_index_eq_getElem, stackWithIndex_find_index_eq_getElem,
-    stackWithIndex_eq_of_getLast? (stack_getLast?_of_stackWithIndex_getLast? hframe), stackWithIndex_mk_append_singleton]
-  simp only [List.getElem?_append, List.getElem?_singleton]
-  split_ifs <;> simp [AList.lookup_insert_ne hne]
+      [({ frame with objMap := frame.objMap.insert oid (obj.insert field yRef) } : Frame)] } :=
+  objAt_last_frame_eq hframe (fieldAsgn_corollary_stack_loc_eq hframe hobj o) (AList.lookup_insert_ne hne)
 
 -- `objAt?` agrees for `o ≠ oid` (REGION branch): only region `rid`'s entry at `oid` changes.
 private theorem fieldAsgn_region_objAt_eq_of_ne {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
@@ -35,15 +28,8 @@ private theorem fieldAsgn_region_objAt_eq_of_ne {cfg : RuntimeConfig} (vcfg : Va
     (hregion : cfg.heap.lookup rid = some region) (hobj : region.objMap.lookup oid = some obj)
     {o : ObjectId} (hne : o ≠ oid) :
     (Reference.OId o).objAt? cfg = (Reference.OId o).objAt?
-      { cfg with heap := cfg.heap.insert rid { region with objMap := region.objMap.insert oid (obj.insert field yRef) } } := by
-  simp only [Reference.objAt?, ← fieldAsgn_corollary_region_loc_eq vcfg hregion hobj o]
-  rcases (Reference.OId o).loc? cfg with _ | ridX | _
-  · rfl
-  · by_cases hridx : ridX = rid
-    · subst hridx
-      simp [hregion, AList.lookup_insert_ne hne]
-    · simp [AList.lookup_insert_ne hridx]
-  · rfl
+      { cfg with heap := cfg.heap.insert rid { region with objMap := region.objMap.insert oid (obj.insert field yRef) } } :=
+  objAt_heap_insert_eq hregion (fieldAsgn_corollary_region_loc_eq vcfg hregion hobj o) (AList.lookup_insert_ne hne)
 
 -- `ReachableStep` agrees between `cfg`/`cfg'` for any source other than the mutated container; returns the container's own id existentially.
 theorem fieldAsgn_step_iff_of_ne {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
@@ -53,21 +39,11 @@ theorem fieldAsgn_step_iff_of_ne {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig 
       ReachableStep cfg a b ↔ ReachableStep cfg' a b := by
   obtain ⟨frame, hframe, ⟨oid, -, obj, hxr, -, -, hobj, rfl⟩ |
     ⟨oid, oid_y, rid, region, obj, hxr, -, -, hregion, hobj, -, hstatus, -, rfl⟩⟩ := fieldAsgn_cases h
-  · refine ⟨oid, hxr, fun a hane b => ?_⟩
-    rcases a with _ | o
-    · rfl
-    · rw [ReachableStep_oid_iff, ReachableStep_oid_iff,
-        fieldAsgn_stack_objAt_eq_of_ne hframe hobj (by rintro rfl; exact hane rfl)]
-  · refine ⟨oid, hxr, fun a hane b => ?_⟩
-    rcases a with r | o
-    · set newRegion : Region := { region with objMap := region.objMap.insert oid (obj.insert xf.field (Reference.OId oid_y)) }
-      by_cases hr : r = rid
-      · subst hr
-        exact iff_of_false (open_rid_no_step hregion hstatus)
-          (open_rid_no_step (region := newRegion) (AList.lookup_insert cfg.heap) hstatus)
-      · simp only [ReachableStep_rid_iff, AList.lookup_insert_ne hr]
-    · rw [ReachableStep_oid_iff, ReachableStep_oid_iff,
-        fieldAsgn_region_objAt_eq_of_ne vcfg hregion hobj (by rintro rfl; exact hane rfl)]
+  · exact ⟨oid, hxr, step_iff_of_ne_of_objAt (fun _ hne => fieldAsgn_stack_objAt_eq_of_ne hframe hobj hne)
+      fun _ _ => Iff.rfl⟩
+  · exact ⟨oid, hxr, step_iff_of_ne_of_objAt (fun _ hne => fieldAsgn_region_objAt_eq_of_ne vcfg hregion hobj hne)
+      (rid_step_iff_of_insert_open hregion hstatus rfl hstatus)⟩
+
 -- `FrameRoot` agrees between `cfg`/`cfg'` unconditionally: fieldAsgn only ever touches an `objMap`, never `varMap`/`regionId`/`bridgeObjectId`.
 theorem fieldAsgn_frame_root_iff {cfg cfg' : RuntimeConfig} (h : fieldAsgn xf y cfg = some cfg')
     (fid : Index) (start : Reference) : FrameRoot cfg fid start ↔ FrameRoot cfg' fid start := by
@@ -184,3 +160,58 @@ theorem reflTransGen_region_open_ne_absurd {cfg : RuntimeConfig} (vcfg : ValidCo
     · exact hne rfl
     · simp [hopenT] at hc
   · cases heq
+
+-- fieldAsgn preserves the stack length, every object's `loc?`, and every frame below the active one.
+theorem fieldAsgn_shape {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : fieldAsgn xf y cfg = some cfg') :
+    cfg'.stackWithIndex.length = cfg.stackWithIndex.length ∧
+    (∀ o, (Reference.OId o).loc? cfg' = (Reference.OId o).loc? cfg) ∧
+    ∀ X : FrameWithIndex, X.index < cfg.stackWithIndex.length - 1 →
+      (X ∈ cfg.stackWithIndex ↔ X ∈ cfg'.stackWithIndex) := by
+  have hmem := fun X (hX : X.index < cfg.stackWithIndex.length - 1) => fieldAsgn_frame_mem_iff h
+    (X := X) (activeIdx := cfg.stack.dropLast.length) (by simpa [RuntimeConfig.stackWithIndex] using hX) rfl
+  obtain ⟨A, hA, ⟨_, _, _, _, _, _, hobj, rfl⟩ | ⟨_, _, _, _, _, _, _, _, hregion, hobj, _, _, _, rfl⟩⟩ :=
+    fieldAsgn_cases h
+  · exact ⟨stackWithIndex_length_of_replace_last (stack_getLast?_of_stackWithIndex_getLast? hA) rfl,
+      fun o => (fieldAsgn_corollary_stack_loc_eq hA hobj o).symm, hmem⟩
+  · exact ⟨rfl, fun o => (fieldAsgn_corollary_region_loc_eq vcfg hregion hobj o).symm, hmem⟩
+
+-- For `oid` in a suspended frame `F`'s region, fieldAsgn neither creates nor destroys its reachability from `F`.
+theorem fieldAsgn_suspended_reach {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : fieldAsgn xf y cfg = some cfg') (hFR3 : FrameReachable_at_later_frame_implies_FrameReachable_at_frame cfg)
+    {F : FrameWithIndex} (hF : F ∈ cfg.stackWithIndex) (hFlt : F.index < cfg.stackWithIndex.length - 1)
+    {oid : ObjectId} (hloc : (Reference.OId oid).loc? cfg = some (Location.Rgn F.regionId)) :
+    F ∈ cfg'.stackWithIndex ∧ (StackReachable cfg (.OId oid) → FrameReachable cfg' F.index (.OId oid)) ∧
+    ∀ fid, FrameReachable cfg' fid (.OId oid) → StackReachable cfg (.OId oid) := by
+  obtain ⟨oidC, hxrC, hne⟩ := fieldAsgn_step_iff_of_ne vcfg h
+  have hroot := fieldAsgn_frame_root_iff h
+  obtain ⟨regionF, hlkF, hopenF⟩ := l2_of_stackWithIndex vcfg hF
+  obtain ⟨A, hA, hcase⟩ := fieldAsgn_cases h
+  have hAmem := List.mem_of_getLast? hA
+  have hFA : F.index < A.index := by
+    have := (stack_eq_of_stackWithIndex_getLast? hA).2
+    simp [RuntimeConfig.stackWithIndex] at hFlt
+    rw [this, List.length_dropLast]
+    omega
+  obtain ⟨hbound, oid_y, hstepC, hesc⟩ : (∀ fid, FrameReachable cfg fid (.OId oidC) → A.index ≤ fid) ∧
+      ∃ oid_y, (∀ c, ReachableStep cfg' (.OId oidC) c → c = .OId oid_y ∨ ReachableStep cfg (.OId oidC) c) ∧
+      (Relation.ReflTransGen (ReachableStep cfg) (.OId oid_y) (.OId oid) → StackReachable cfg (.OId oid)) := by
+    rcases hcase with ⟨oid0, oid_y, obj, hxr0, hyr, hlocC, hobj, hcfg'⟩ |
+        ⟨oid0, oid_y, rid, region, obj, hxr0, hyr, hlocC, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
+    · obtain rfl : oidC = oid0 := by simpa using hxrC.symm.trans hxr0
+      refine ⟨fun _ => stack_container_confined vcfg hlocC, oid_y,
+        fun _ => fieldAsgn_stack_oidC_step_of_ne_oidY hA hlocC hobj hcfg', fun hc => ?_⟩
+      obtain ⟨Y, hY, hrootY⟩ := resolveV_frameRoot hyr
+      exact ⟨Y, hY, (FrameReachable_iff_reflTransGen ..).mpr ⟨_, hrootY, hc⟩⟩
+    · obtain rfl : oidC = oid0 := by simpa using hxrC.symm.trans hxr0
+      refine ⟨fun _ => region_container_confined vcfg hregion hstatus hAmem hfrid.symm hlocC, oid_y,
+        fun _ => fieldAsgn_region_oidC_step_of_ne_oidY vcfg hregion hlocC hobj hcfg', fun hc => ?_⟩
+      exact (reflTransGen_region_open_ne_absurd vcfg hregion hyloc hloc hlkF hopenF (fun he => Nat.ne_of_lt hFA
+        (merge_corollary_regionId_unique_index vcfg.s1 hF hAmem (he.trans hfrid))) hc).elim
+  refine ⟨((fieldAsgn_shape vcfg h).2.2 F hFlt).mp hF, fun hs => ?_, fun fid hr => ?_⟩
+  · exact fieldAsgn_confined_transport hne hroot (fun r hr he => absurd (hbound _ (he ▸ hr)) (Nat.not_le.mpr hFA))
+      (FrameReachable_of_StackReachable vcfg hFR3 hF hloc hs)
+  · obtain ⟨start, hs, hc⟩ := (FrameReachable_iff_reflTransGen ..).mp hr
+    rcases reflTransGen_split (fun a ha b => (hne a ha b).mpr) hstepC hc with hc | hc
+    · exact StackReachable_of_root ((hroot fid start).mpr hs) hc
+    · exact hesc hc

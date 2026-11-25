@@ -6,6 +6,7 @@ public import Gc.Model.Validity
 public import Gc.Model.Mutation.Mutation
 public import Gc.Model.Preservation
 public import Gc.Reachability.Reachable.Semantics
+public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Def
 public import Gc.Reachability.Reachable.Lemmas.Common
 
 @[expose] public section
@@ -315,3 +316,56 @@ theorem merge_frame_reachable_iff {cfg cfg' : RuntimeConfig} {x : VarName} (vcfg
     have hr0 := (hroot start).mpr hr
     exact ⟨start, hr0, merge_chain_transport_down vcfg h hframe hxref hregion hregion' hclosed hopen hcfg'
       (hstartne hr0) hrtg⟩
+
+-- merge preserves the stack length.
+theorem merge_length {cfg cfg' : RuntimeConfig} (h : merge x cfg = some cfg') :
+    cfg'.stackWithIndex.length = cfg.stackWithIndex.length := by
+  obtain ⟨A, -, -, -, hA, -, -, -, -, -, rfl⟩ := merge_cases h
+  exact stackWithIndex_length_of_replace_last hA rfl
+
+-- Anything reachable after merge is stack-reachable before it: only the merged frame's roots change, and `x`'s new value is one hop past `RId rid'`.
+private theorem merge_reach_down {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg) (h : merge x cfg = some cfg')
+    {fid : Index} {oid : ObjectId} (hfr : FrameReachable cfg' fid (.OId oid)) : StackReachable cfg (.OId oid) := by
+  obtain ⟨start, hs, hc⟩ := (FrameReachable_iff_reflTransGen ..).mp hfr
+  obtain ⟨A, rid', region1, region', hA, hxref, hregion1, hregion', hclosed, hopen, hcfg'⟩ := merge_cases h
+  have hsw := stackWithIndex_eq_of_getLast? hA
+  have hlastA : ({ A with index := cfg.stack.dropLast.length } : FrameWithIndex) ∈ cfg.stackWithIndex := by
+    simp [hsw]
+  have hdown := fun hne => merge_chain_transport_down vcfg h hA hxref hregion1 hregion' hclosed hopen hcfg' hne hc
+  have hleft : ∀ G ∈ cfg.stack.dropLast.mapIdx (fun i f => ({ f with index := i } : FrameWithIndex)),
+      FrameReachable cfg' G.index (.OId oid) → StackReachable cfg (.OId oid) := fun G hG hr => by
+    have hGc : G ∈ cfg.stackWithIndex := hsw ▸ List.mem_append_left _ hG
+    obtain ⟨n, hn, rfl⟩ := List.mem_mapIdx.mp hG
+    exact ⟨_, hGc, (merge_frame_reachable_iff vcfg h hGc (by simp at hn ⊢; omega) _).mpr hr⟩
+  rw [hcfg'] at hs
+  rcases hs with ⟨G, hG, rfl, v, hv⟩ | ⟨G, hG, rfl, r, hr, rfl⟩ <;>
+    rw [stackWithIndex_mk_append_singleton] at hG <;> rcases List.mem_append.mp hG with hG | hG
+  · exact hleft G hG hfr
+  · obtain rfl := List.mem_singleton.mp hG
+    by_cases hvx : v = x
+    · subst hvx
+      simp only [AList.lookup_insert, Option.some.injEq] at hv
+      subst hv
+      exact StackReachable_of_root (.inl ⟨_, hlastA, rfl, _, hxref⟩)
+        (.head ⟨region', hregion', hclosed, rfl⟩ (hdown (by simp)))
+    · rw [AList.lookup_insert_ne hvx] at hv
+      exact StackReachable_of_root (.inl ⟨_, hlastA, rfl, v, hv⟩)
+        (hdown fun he => merge_ridPrime_var_unique vcfg (List.mem_of_getLast? hA) hxref hvx (he ▸ hv))
+  · exact hleft G hG hfr
+  · obtain rfl := List.mem_singleton.mp hG
+    simp only [AList.lookup_insert, Option.some.injEq] at hr
+    subst hr
+    exact StackReachable_of_root (.inr ⟨_, hlastA, rfl, region1, hregion1, rfl⟩) (hdown (by simp))
+
+-- For `oid` in a suspended frame `F`'s region, merge neither creates nor destroys its reachability from `F`.
+theorem merge_suspended_reach {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : merge x cfg = some cfg') (hFR3 : FrameReachable_at_later_frame_implies_FrameReachable_at_frame cfg)
+    {F : FrameWithIndex} (hF : F ∈ cfg.stackWithIndex) (hFlt : F.index < cfg.stackWithIndex.length - 1)
+    {oid : ObjectId} (hloc : (Reference.OId oid).loc? cfg = some (Location.Rgn F.regionId)) :
+    F ∈ cfg'.stackWithIndex ∧ (StackReachable cfg (.OId oid) → FrameReachable cfg' F.index (.OId oid)) ∧
+    ∀ fid, FrameReachable cfg' fid (.OId oid) → StackReachable cfg (.OId oid) := by
+  have hFlt' : F.index < cfg.stack.length - 1 := by simpa [RuntimeConfig.stackWithIndex] using hFlt
+  obtain ⟨A, rid', region1, region', hA, hxref, hregion1, hregion', hclosed, hopen, hcfg'⟩ := merge_cases h
+  exact ⟨merge_frame_transport_up hA hxref hregion1 hregion' hclosed hopen hcfg' hF (by simpa using hFlt'),
+    fun hs => (merge_frame_reachable_iff vcfg h hF hFlt' _).mp (FrameReachable_of_StackReachable vcfg hFR3 hF hloc hs),
+    fun _ => merge_reach_down vcfg h⟩

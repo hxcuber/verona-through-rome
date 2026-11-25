@@ -190,3 +190,26 @@ theorem exit_frame_reachable_transport_backward {cfg cfg' : RuntimeConfig} (vcfg
     rw [hcfg'] at hlookupXf
     exact .inr ⟨Xf, hm, hXfidx, region',
       by simpa [AList.lookup_insert_ne (regionId_ne_last_of_suspended vcfg hm hl hlast)] using hlookupXf, hbridge⟩
+
+-- For `oid` in a suspended frame's region, `exit` preserves frame-reachability from every surviving frame.
+theorem exit_suspended_reach {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg) (h : exit cfg = some cfg')
+    {F : FrameWithIndex} (hF : F ∈ cfg.stackWithIndex) (hFlt : F.index < cfg.stack.length - 1) {oid : ObjectId}
+    (hloc' : (Reference.OId oid).loc? cfg' = some (Location.Rgn F.regionId)) :
+    (Reference.OId oid).loc? cfg = some (Location.Rgn F.regionId) ∧
+    ∀ X ∈ cfg.stackWithIndex, X.index < cfg.stack.length - 1 →
+      (FrameReachable cfg X.index (.OId oid) ↔ FrameReachable cfg' X.index (.OId oid)) := by
+  obtain ⟨p, r0, -, hlast, -, -, hcfg'⟩ := exit_cases h
+  obtain ⟨region, hlookup, hopen⟩ := l2_of_stackWithIndex vcfg hF
+  have hlookup' : cfg'.heap.lookup F.regionId = some region := by
+    rw [hcfg']; dsimp only
+    rw [AList.lookup_insert_ne (regionId_ne_last_of_suspended vcfg hF hFlt hlast)]; exact hlookup
+  have hloc : (Reference.OId oid).loc? cfg = some (Location.Rgn F.regionId) := by
+    rw [oid_loc_rgn_iff_in_heap vcfg]
+    rw [oid_loc_rgn_iff_in_heap (exit_valid vcfg h)] at hloc'
+    obtain ⟨r1, hl1, hm1⟩ := hloc'
+    rw [hlookup'] at hl1
+    cases hl1
+    exact ⟨region, hlookup, hm1⟩
+  exact ⟨hloc, fun X hX hXlt => ⟨fun hr => exit_frame_reachable_transport vcfg h hlast hcfg' hlookup hopen hloc hX hXlt hr,
+    fun hr => exit_frame_reachable_transport_backward vcfg h hlast hcfg' hlookup hlookup' hopen hloc'
+      (exit_frame_mem_up h hX hXlt) hr⟩⟩

@@ -6,6 +6,7 @@ public import Gc.Model.Validity
 public import Gc.Model.Mutation.Mutation
 public import Gc.Model.Preservation
 public import Gc.Reachability.Reachable.Semantics
+public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Def
 public import Gc.Reachability.Reachable.Lemmas.Common
 public import Gc.Reachability.Reachable.Lemmas.MakeObjStack
 
@@ -126,3 +127,52 @@ theorem makeObjRegion_frame_reachable_iff {cfg cfg' : RuntimeConfig} {x : VarNam
     {X : FrameWithIndex} (_hXmem : X ∈ cfg.stackWithIndex) (hXlt : X.index < cfg.stack.length - 1)
     (ref : Reference) : FrameReachable cfg X.index ref ↔ FrameReachable cfg' X.index ref := by
   simp only [FrameReachable_iff_reflTransGen, makeObjRegion_step_eq vcfg h, makeObjRegion_root_iff vcfg h hXlt]
+
+-- A `cfg'` frame root is either the fresh object (via `x`) or already a `cfg` root.
+private theorem makeObjRegion_root_down {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : makeObjRegion x cfg = some cfg') {fid : Index} {start : Reference} (hr : FrameRoot cfg' fid start) :
+    start = .OId cfg.freshObjectId ∨ FrameRoot cfg fid start := by
+  have hcases := fun {S} (hS : S ∈ cfg'.stackWithIndex) => makeObjRegion_frame_cases h hS
+  obtain ⟨L, region0, hL, hl0, -, rfl⟩ := makeObjRegion_cases h
+  have hLm := stackWithIndex_getLast_mem hL
+  rcases hr with ⟨S, hS, rfl, v, hv⟩ | ⟨S, hS, rfl, region, hl, rfl⟩ <;>
+    rcases hcases hS with ⟨hS, hSlt⟩ | ⟨L', hL', hrid, -, -, hvm, hi⟩
+  · exact .inr (.inl ⟨S, hS, rfl, v, hv⟩)
+  · obtain rfl : L' = L := Option.some_inj.mp (hL'.symm.trans hL)
+    rw [hvm] at hv
+    by_cases hvx : v = x
+    · subst hvx
+      simp at hv
+      exact .inl hv.symm
+    · rw [AList.lookup_insert_ne hvx] at hv
+      exact .inr (.inl ⟨_, hLm, by simp [hi], v, hv⟩)
+  · rw [AList.lookup_insert_ne (regionId_ne_last_of_suspended vcfg hS hSlt hL)] at hl
+    exact .inr (.inr ⟨S, hS, rfl, region, hl, rfl⟩)
+  · obtain rfl : L' = L := Option.some_inj.mp (hL'.symm.trans hL)
+    rw [hrid, AList.lookup_insert, Option.some_inj] at hl
+    subst hl
+    exact .inr (.inr ⟨_, hLm, by simp [hi], region0, hl0, rfl⟩)
+
+-- Reachability of a non-fresh object from any `cfg'` frame is stack-reachability in `cfg`.
+private theorem makeObjRegion_reach_down {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : makeObjRegion x cfg = some cfg') {oid : ObjectId} (hne : oid ≠ cfg.freshObjectId) {fid : Index}
+    (hr : FrameReachable cfg' fid (.OId oid)) :
+    StackReachable cfg (.OId oid) := by
+  obtain ⟨start, hs, hc⟩ := (FrameReachable_iff_reflTransGen ..).mp hr
+  rw [← makeObjRegion_step_eq vcfg h] at hc
+  rcases makeObjRegion_root_down vcfg h hs with rfl | hs
+  · rcases hc.cases_head with he | ⟨c, ⟨obj, ho, -⟩, -⟩
+    · exact absurd (Reference.OId.inj he).symm hne
+    · simp [freshObjectId_objAt_none] at ho
+  · exact StackReachable_of_root hs hc
+
+-- For `oid` in a suspended frame `F`'s region, makeObjRegion neither creates nor destroys its reachability from `F`.
+theorem makeObjRegion_suspended_reach {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : makeObjRegion x cfg = some cfg') (hFR3 : FrameReachable_at_later_frame_implies_FrameReachable_at_frame cfg)
+    {F : FrameWithIndex} (hF : F ∈ cfg.stackWithIndex) (hFlt : F.index < cfg.stackWithIndex.length - 1)
+    {oid : ObjectId} (hloc : (Reference.OId oid).loc? cfg = some (Location.Rgn F.regionId)) :
+    F ∈ cfg'.stackWithIndex ∧ (StackReachable cfg (.OId oid) → FrameReachable cfg' F.index (.OId oid)) ∧
+    ∀ fid, FrameReachable cfg' fid (.OId oid) → StackReachable cfg (.OId oid) := by
+  have hFlt' : F.index < cfg.stack.length - 1 := by simpa [RuntimeConfig.stackWithIndex] using hFlt
+  exact ⟨makeObjRegion_frame_mem_up h hF hFlt', fun hs => (makeObjRegion_frame_reachable_iff vcfg h hF hFlt' _).mp
+    (FrameReachable_of_StackReachable vcfg hFR3 hF hloc hs), fun _ => makeObjRegion_reach_down vcfg h (fun he => freshObjectId_loc_ne_rgn (he ▸ hloc))⟩
