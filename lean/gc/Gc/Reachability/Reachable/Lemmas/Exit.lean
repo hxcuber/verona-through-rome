@@ -42,22 +42,6 @@ theorem exit_frame_mem_down {cfg cfg' : RuntimeConfig} (h : exit cfg = some cfg'
   rw [hidx, ← List.length_dropLast]
   exact hn
 
--- The popped frame itself, viewed as a `FrameWithIndex` at the last index.
-theorem exit_poppedFrame_mem {cfg : RuntimeConfig} {poppedFrame : Frame}
-    (hlast : cfg.stack.getLast? = some poppedFrame) (hlen : cfg.stack.length ≥ 2) :
-    ∃ f : FrameWithIndex, f ∈ cfg.stackWithIndex ∧ f.toFrame = poppedFrame ∧
-      f.index = cfg.stack.length - 1 := by
-  have hne : cfg.stack ≠ [] := by intro hnil; rw [hnil] at hlen; simp at hlen
-  rw [List.getLast?_eq_getLast_of_ne_nil hne, Option.some_inj] at hlast
-  have hgetElem : cfg.stack[cfg.stack.length - 1] = poppedFrame := by
-    rw [← hlast]
-    exact (List.getLast_eq_getElem hne).symm
-  refine ⟨{ toFrame := poppedFrame, index := cfg.stack.length - 1 }, ?_, rfl, rfl⟩
-  unfold RuntimeConfig.stackWithIndex
-  apply List.mem_mapIdx.mpr
-  refine ⟨cfg.stack.length - 1, by omega, ?_⟩
-  rw [hgetElem]
-
 -- If `a` avoids the popped slot and steps to `c` (both `SafeRef`), so does `c`: region hops stay in-region, stack hops only decrease index (S2).
 theorem exit_avoid_popped_step {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
     {rid : RegionId} {region : Region} (hlookup : cfg.heap.lookup rid = some region)
