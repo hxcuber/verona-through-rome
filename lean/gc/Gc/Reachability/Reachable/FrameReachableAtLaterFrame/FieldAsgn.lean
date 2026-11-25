@@ -12,236 +12,91 @@ public import Gc.Reachability.Reachable.Lemmas
 
 @[expose] public section
 
+-- A `R'`-chain, where `R'` only adds the edge `x → y` to `R`, is an `R`-chain or ends in an `R`-chain from `y`.
+private theorem reflTransGen_split {α : Type*} {R R' : α → α → Prop} {x y : α}
+    (hne : ∀ a, a ≠ x → ∀ b, R' a b → R a b) (hx : ∀ c, R' x c → c = y ∨ R x c)
+    {a b : α} (h : Relation.ReflTransGen R' a b) :
+    Relation.ReflTransGen R a b ∨ Relation.ReflTransGen R y b := by
+  induction h using Relation.ReflTransGen.head_induction_on with
+  | refl => exact .inl .refl
+  | @head p c hstep _ ih =>
+    rcases ih with ih | ih
+    · by_cases hp : p = x
+      · subst hp
+        rcases hx c hstep with rfl | hs
+        · exact .inr ih
+        · exact .inl (.head hs ih)
+      · exact .inl (.head (hne p hp c hstep) ih)
+    · exact .inr ih
+
+-- fieldAsgn preserves the stack length, every object's `loc?`, and every frame below the active one.
+private theorem fieldAsgn_shape {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : fieldAsgn xf y cfg = some cfg') :
+    cfg'.stackWithIndex.length = cfg.stackWithIndex.length ∧
+    (∀ o, (Reference.OId o).loc? cfg' = (Reference.OId o).loc? cfg) ∧
+    ∀ X : FrameWithIndex, X.index < cfg.stackWithIndex.length - 1 →
+      (X ∈ cfg.stackWithIndex ↔ X ∈ cfg'.stackWithIndex) := by
+  have hmem := fun X (hX : X.index < cfg.stackWithIndex.length - 1) => fieldAsgn_frame_mem_iff h
+    (X := X) (activeIdx := cfg.stack.dropLast.length) (by simpa [RuntimeConfig.stackWithIndex] using hX) rfl
+  obtain ⟨A, hA, ⟨_, _, _, _, _, _, hobj, rfl⟩ | ⟨_, _, _, _, _, _, _, _, hregion, hobj, _, _, _, rfl⟩⟩ :=
+    fieldAsgn_cases h
+  · refine ⟨?_, fun o => (fieldAsgn_corollary_stack_loc_eq hA hobj o).symm, hmem⟩
+    have := congrArg List.length (stack_eq_of_stackWithIndex_getLast? hA).1
+    simp [RuntimeConfig.stackWithIndex] at this ⊢
+    omega
+  · exact ⟨rfl, fun o => (fieldAsgn_corollary_region_loc_eq vcfg hregion hobj o).symm, hmem⟩
+
+-- For `oid` in a suspended frame `F`'s region, fieldAsgn neither creates nor destroys its reachability from `F`.
+theorem fieldAsgn_suspended_reach {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : fieldAsgn xf y cfg = some cfg') (hFR3 : FrameReachable_at_later_frame_implies_FrameReachable_at_frame cfg)
+    {F : FrameWithIndex} (hF : F ∈ cfg.stackWithIndex) (hFlt : F.index < cfg.stackWithIndex.length - 1)
+    {oid : ObjectId} (hloc : (Reference.OId oid).loc? cfg = some (Location.Rgn F.regionId)) :
+    F ∈ cfg'.stackWithIndex ∧ (StackReachable cfg (.OId oid) → FrameReachable cfg' F.index (.OId oid)) ∧
+    ∀ fid, FrameReachable cfg' fid (.OId oid) → StackReachable cfg (.OId oid) := by
+  obtain ⟨oidC, hxrC, hne⟩ := fieldAsgn_step_iff_of_ne vcfg h
+  have hroot := fieldAsgn_frame_root_iff h
+  obtain ⟨regionF, hlkF, hopenF⟩ := l2_of_stackWithIndex vcfg hF
+  obtain ⟨A, hA, hcase⟩ := fieldAsgn_cases h
+  have hAmem := List.mem_of_getLast? hA
+  have hFA : F.index < A.index := by
+    have := (stack_eq_of_stackWithIndex_getLast? hA).2
+    simp [RuntimeConfig.stackWithIndex] at hFlt
+    rw [this, List.length_dropLast]
+    omega
+  obtain ⟨hbound, oid_y, hstepC, hesc⟩ : (∀ fid, FrameReachable cfg fid (.OId oidC) → A.index ≤ fid) ∧
+      ∃ oid_y, (∀ c, ReachableStep cfg' (.OId oidC) c → c = .OId oid_y ∨ ReachableStep cfg (.OId oidC) c) ∧
+      (Relation.ReflTransGen (ReachableStep cfg) (.OId oid_y) (.OId oid) → StackReachable cfg (.OId oid)) := by
+    rcases hcase with ⟨oid0, oid_y, obj, hxr0, hyr, hlocC, hobj, hcfg'⟩ |
+        ⟨oid0, oid_y, rid, region, obj, hxr0, hyr, hlocC, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
+    · obtain rfl : oidC = oid0 := by simpa using hxrC.symm.trans hxr0
+      refine ⟨fun _ => stack_container_confined vcfg hlocC, oid_y,
+        fun _ => fieldAsgn_stack_oidC_step_of_ne_oidY hA hlocC hobj hcfg', fun hc => ?_⟩
+      obtain ⟨Y, hY, hrootY⟩ := resolveV_frameRoot hyr
+      exact ⟨Y, hY, (FrameReachable_iff_reflTransGen ..).mpr ⟨_, hrootY, hc⟩⟩
+    · obtain rfl : oidC = oid0 := by simpa using hxrC.symm.trans hxr0
+      refine ⟨fun _ => region_container_confined vcfg hregion hstatus hAmem hfrid.symm hlocC, oid_y,
+        fun _ => fieldAsgn_region_oidC_step_of_ne_oidY vcfg hregion hlocC hobj hcfg', fun hc => ?_⟩
+      exact (reflTransGen_region_open_ne_absurd vcfg hregion hyloc hloc hlkF hopenF (fun he => Nat.ne_of_lt hFA
+        (merge_corollary_regionId_unique_index vcfg.s1 hF hAmem (he.trans hfrid))) hc).elim
+  refine ⟨((fieldAsgn_shape vcfg h).2.2 F hFlt).mp hF, fun ⟨E, hE, hr⟩ => ?_, fun fid hr => ?_⟩
+  · refine fieldAsgn_confined_transport hne hroot (fun r hr he => absurd (hbound _ (he ▸ hr)) (Nat.not_le.mpr hFA)) ?_
+    rcases (region_container_confined vcfg hlkF hopenF hF rfl hloc hr).eq_or_lt with heq | hlt
+    · exact swap_corollary_stackWithIndex_index_inj hE hF heq.symm ▸ hr
+    · exact hFR3 F hF E hE hlt oid hloc hr
+  · obtain ⟨start, hs, hc⟩ := (FrameReachable_iff_reflTransGen ..).mp hr
+    rcases reflTransGen_split (fun a ha b => (hne a ha b).mpr) hstepC hc with hc | hc
+    · have hrc := (hroot fid start).mpr hs
+      have hfr : FrameReachable cfg fid (.OId oid) := (FrameReachable_iff_reflTransGen ..).mpr ⟨start, hrc, hc⟩
+      rcases hrc with ⟨S, hS, rfl, -⟩ | ⟨S, hS, rfl, -⟩ <;> exact ⟨S, hS, hfr⟩
+    · exact hesc hc
+
 theorem frameReachableAtLaterFrame_step_fieldAsgn (xf : FieldAccess) (y : VarName) :
     FrameReachableAtLaterFrame_step (Stmt.fieldAsgn xf y) := by
   intro cfg cfg' vcfg h hFR3 frame hframeMem frame' hframe'Mem hlt oid hloc hreach
   have h' : fieldAsgn xf y cfg = some cfg' := h
-  obtain ⟨oidC, hxrC, hstepIffOfNe⟩ := fieldAsgn_step_iff_of_ne vcfg h'
-  have hframeRootIff := fieldAsgn_frame_root_iff h'
-  have vcfg' : ValidConfig cfg' := fieldAsgn_valid vcfg h'
-  obtain ⟨activeFrame, hactive, hcase⟩ := fieldAsgn_cases h'
-  obtain ⟨stack_eq, hactiveidx⟩ := stack_eq_of_stackWithIndex_getLast? hactive
-  have hlenEq : cfg.stackWithIndex.length = cfg.stack.length := by
-    unfold RuntimeConfig.stackWithIndex; rw [List.length_mapIdx]
-  have hactiveidx' : activeFrame.index = cfg.stackWithIndex.length - 1 := by
-    rw [hactiveidx, hlenEq, List.length_dropLast]
-  have hframeLastA : cfg.stack.getLast? = some activeFrame.toFrame := by rw [stack_eq]; simp
-  have hactivemem : activeFrame ∈ cfg.stackWithIndex := by
-    have hm := stackWithIndex_getLast_mem hframeLastA
-    have hidxeq : cfg.stack.length - 1 = activeFrame.index := by rw [hactiveidx, List.length_dropLast]
-    rw [hidxeq] at hm
-    exact hm
-  have hstackLenEq' : cfg.stackWithIndex.length = cfg'.stackWithIndex.length := by
-    unfold RuntimeConfig.stackWithIndex
-    rw [List.length_mapIdx, List.length_mapIdx]
-    rcases hcase with
-        ⟨oid0, oid_y, obj, hxr0, hyr, hlocC, hobj, hcfg'⟩ |
-        ⟨oid0, oid_y, rid, region, obj, hxr0, hyr, hlocC, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
-    · have hlenA : cfg.stack.length = cfg.stack.dropLast.length + 1 := by
-        conv_lhs => rw [stack_eq]
-        rw [List.length_append, List.length_cons, List.length_nil]
-      rw [hcfg']
-      dsimp only
-      rw [List.length_append, List.length_cons, List.length_nil]
-      omega
-    · rw [hcfg']
-  have hactiveidx'' : activeFrame.index = cfg'.stackWithIndex.length - 1 := by
-    rw [hactiveidx', hstackLenEq']
-  have hOwnerBoundCfg : ∀ fid, FrameReachable cfg fid (Reference.OId oidC) → activeFrame.index ≤ fid := by
-    rcases hcase with
-        ⟨oid0, oid_y, obj, hxr0, hyr, hlocC, hobj, hcfg'⟩ |
-        ⟨oid0, oid_y, rid, region, obj, hxr0, hyr, hlocC, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
-    · have hoideq : oidC = oid0 := by
-        have hcomb := hxrC.symm.trans hxr0
-        injection hcomb with hcomb2
-        injection hcomb2
-      subst hoideq
-      intro fid hreach2
-      exact stack_container_confined vcfg hlocC hreach2
-    · have hoideq : oidC = oid0 := by
-        have hcomb := hxrC.symm.trans hxr0
-        injection hcomb with hcomb2
-        injection hcomb2
-      subst hoideq
-      intro fid hreach2
-      exact region_container_confined vcfg hregion hstatus hactivemem hfrid.symm hlocC hreach2
-  have hOwnerBoundCfg' : ∀ fid, FrameReachable cfg' fid (Reference.OId oidC) → activeFrame.index ≤ fid := by
-    rcases hcase with
-        ⟨oid0, oid_y, obj, hxr0, hyr, hlocC, hobj, hcfg'⟩ |
-        ⟨oid0, oid_y, rid, region, obj, hxr0, hyr, hlocC, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
-    · have hoideq : oidC = oid0 := by
-        have hcomb := hxrC.symm.trans hxr0
-        injection hcomb with hcomb2
-        injection hcomb2
-      subst hoideq
-      have hlocC' : (Reference.OId oidC).loc? cfg' = some (Location.Stk activeFrame.index) := by
-        rw [hcfg', ← fieldAsgn_corollary_stack_loc_eq hactive hobj]
-        exact hlocC
-      intro fid hreach2
-      exact stack_container_confined vcfg' hlocC' hreach2
-    · have hoideq : oidC = oid0 := by
-        have hcomb := hxrC.symm.trans hxr0
-        injection hcomb with hcomb2
-        injection hcomb2
-      subst hoideq
-      have hlocC' : (Reference.OId oidC).loc? cfg' = some (Location.Rgn rid) := by
-        rw [hcfg', ← fieldAsgn_corollary_region_loc_eq vcfg hregion hobj]
-        exact hlocC
-      have hactivemem' : activeFrame ∈ cfg'.stackWithIndex := by
-        have hstackEq : cfg'.stack = cfg.stack := by rw [hcfg']
-        unfold RuntimeConfig.stackWithIndex
-        rw [hstackEq]
-        exact hactivemem
-      have hregion' : cfg'.heap.lookup rid = some
-          ({ region with objMap := region.objMap.insert oidC (obj.insert xf.field (Reference.OId oid_y)) } : Region) := by
-        rw [hcfg']
-        dsimp only
-        rw [AList.lookup_insert]
-      intro fid hreach2
-      exact region_container_confined vcfg' hregion' hstatus hactivemem' hfrid.symm hlocC' hreach2
-  -- `frame` is always strictly before the active frame (something -- `frame'` -- is after it).
-  have hframe'LtLen : frame'.index < cfg'.stackWithIndex.length := by
-    obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hframe'Mem
-    have hidx : frame'.index = n := by rw [← hfeq]
-    unfold RuntimeConfig.stackWithIndex
-    rw [List.length_mapIdx, hidx]
-    exact hn
-  have hframeLt : frame.index < activeFrame.index := by
-    rw [hactiveidx'']
-    exact lt_of_lt_of_le hlt (Nat.le_sub_one_of_lt hframe'LtLen)
-  have hframeMemCfg : frame ∈ cfg.stackWithIndex :=
-    (fieldAsgn_frame_mem_iff h' hframeLt hactiveidx).mpr hframeMem
-  have hloc_cfg : (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId) := by
-    rcases hcase with
-        ⟨oid0, oid_y, obj, hxr0, hyr, hlocC, hobj, hcfg'⟩ |
-        ⟨oid0, oid_y, rid, region, obj, hxr0, hyr, hlocC, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
-    · rw [fieldAsgn_corollary_stack_loc_eq hactive hobj, ← hcfg']; exact hloc
-    · rw [fieldAsgn_corollary_region_loc_eq vcfg hregion hobj, ← hcfg']; exact hloc
-  obtain ⟨regionF, hlkF, hopenF⟩ := l2_of_stackWithIndex vcfg hframeMemCfg
-  -- Collapses a `cfg`-side witness at or beyond `frame`'s index back to `frame`, via confinement plus index-uniqueness or `hFR3`.
-  have finish : ∀ (E : FrameWithIndex), E ∈ cfg.stackWithIndex → FrameReachable cfg E.index (Reference.OId oid) →
-      FrameReachable cfg frame.index (Reference.OId oid) := by
-    intro E hEmem hEreach
-    have hboundE : frame.index ≤ E.index :=
-      region_container_confined vcfg hlkF hopenF hframeMemCfg rfl hloc_cfg hEreach
-    rcases eq_or_lt_of_le hboundE with heqE | hltE
-    · exact (swap_corollary_stackWithIndex_index_inj hEmem hframeMemCfg heqE.symm) ▸ hEreach
-    · exact hFR3 frame hframeMemCfg E hEmem hltE oid hloc_cfg hEreach
-  have transportUp : FrameReachable cfg frame.index (Reference.OId oid) →
-      FrameReachable cfg' frame.index (Reference.OId oid) := by
-    intro hFrameReach
-    have hconfinedFwd : ∀ refX, FrameReachable cfg frame.index refX → refX ≠ Reference.OId oidC := by
-      intro refX hreachX heqX
-      rw [heqX] at hreachX
-      exact absurd (hOwnerBoundCfg frame.index hreachX) (Nat.not_le.mpr hframeLt)
-    exact fieldAsgn_confined_transport hstepIffOfNe hframeRootIff hconfinedFwd hFrameReach
-  by_cases hframe'eq : frame'.index = activeFrame.index
-  · -- frame' IS the active frame: genuine escape needed.
-    apply transportUp
-    rw [FrameReachable_iff_reflTransGen] at hreach
-    obtain ⟨start, hrootG, hrtgG⟩ := hreach
-    have hrootGcfg : FrameRoot cfg frame'.index start := (hframeRootIff frame'.index start).mpr hrootG
-    rw [hframe'eq] at hrootGcfg
-    rcases hcase with
-        ⟨oid0, oid_y, obj, hxr0, hyr, hlocC, hobj, hcfg'⟩ |
-        ⟨oid0, oid_y, rid, region, obj, hxr0, hyr, hlocC, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
-    · -- STACK branch: an escaping chain hops onto `oid_y`, which has its own root via `resolveV_frameRoot`.
-      have hoideq : oidC = oid0 := by
-        have hcomb := hxrC.symm.trans hxr0
-        injection hcomb with hcomb2
-        injection hcomb2
-      subst hoideq
-      have main_claim : ∀ a b : Reference, Relation.ReflTransGen (ReachableStep cfg') a b →
-          Relation.ReflTransGen (ReachableStep cfg) a b ∨
-          ∃ frameE ∈ cfg.stackWithIndex, FrameReachable cfg frameE.index b := by
-        intro a b hrtg2
-        induction hrtg2 using Relation.ReflTransGen.head_induction_on with
-        | refl => left; exact Relation.ReflTransGen.refl
-        | @head p c hstep hrest ih =>
-          rcases ih with hchain | hesc
-          · by_cases hpeq : p = Reference.OId oidC
-            · subst hpeq
-              rcases fieldAsgn_stack_oidC_step_of_ne_oidY hactive hlocC hobj hcfg' hstep with hceq | hstepOld
-              · subst hceq
-                right
-                obtain ⟨frameY, hframeYmem, hrootY⟩ := resolveV_frameRoot hyr
-                refine ⟨frameY, hframeYmem, ?_⟩
-                rw [FrameReachable_iff_reflTransGen]
-                exact ⟨Reference.OId oid_y, hrootY, hchain⟩
-              · left; exact Relation.ReflTransGen.head hstepOld hchain
-            · left
-              exact Relation.ReflTransGen.head ((hstepIffOfNe p hpeq c).mpr hstep) hchain
-          · right; exact hesc
-      rcases hrootGcfg with
-          ⟨frameV, hVmem, hVidx, var, hvar⟩ |
-          ⟨frameV, hVmem, hVidx, regionV, hVlookup, hVbridge⟩
-      · have hVeqActive : frameV = activeFrame := swap_corollary_stackWithIndex_index_inj hVmem hactivemem hVidx
-        rw [hVeqActive] at hvar
-        rcases main_claim start (Reference.OId oid) hrtgG with hchainFull | ⟨frameE, hEmem, hEreach⟩
-        · exact finish activeFrame hactivemem
-            ((FrameReachable_iff_reflTransGen cfg activeFrame.index (Reference.OId oid)).mpr
-              ⟨start, Or.inl ⟨activeFrame, hactivemem, rfl, var, hvar⟩, hchainFull⟩)
-        · exact finish frameE hEmem hEreach
-      · have hVeqActive : frameV = activeFrame := swap_corollary_stackWithIndex_index_inj hVmem hactivemem hVidx
-        rw [hVeqActive] at hVlookup
-        rcases main_claim start (Reference.OId oid) hrtgG with hchainFull | ⟨frameE, hEmem, hEreach⟩
-        · exact finish activeFrame hactivemem
-            ((FrameReachable_iff_reflTransGen cfg activeFrame.index (Reference.OId oid)).mpr
-              ⟨start, Or.inr ⟨activeFrame, hactivemem, rfl, regionV, hVlookup, hVbridge⟩, hchainFull⟩)
-        · exact finish frameE hEmem hEreach
-    · -- REGION branch: the new edge stays inside `rid`; any suffix from `oid_y` is H3-confined to `rid`, so it can never reach `oid` in `frame`'s different Open region.
-      have hridNe : frame.regionId ≠ rid := by
-        intro heq
-        have heq2 : frame.regionId = activeFrame.regionId := heq.trans hfrid
-        have hidxEq := merge_corollary_regionId_unique_index vcfg.s1 hframeMemCfg hactivemem heq2
-        exact absurd hidxEq (Nat.ne_of_lt hframeLt)
-      have hoideq : oidC = oid0 := by
-        have hcomb := hxrC.symm.trans hxr0
-        injection hcomb with hcomb2
-        injection hcomb2
-      subst hoideq
-      have main_claim : ∀ a b : Reference, Relation.ReflTransGen (ReachableStep cfg') a b →
-          Relation.ReflTransGen (ReachableStep cfg) a b ∨
-          Relation.ReflTransGen (ReachableStep cfg) (Reference.OId oid_y) b := by
-        intro a b hrtg2
-        induction hrtg2 using Relation.ReflTransGen.head_induction_on with
-        | refl => left; exact Relation.ReflTransGen.refl
-        | @head p c hstep hrest ih =>
-          rcases ih with hchain | hesc
-          · by_cases hpeq : p = Reference.OId oidC
-            · subst hpeq
-              rcases fieldAsgn_region_oidC_step_of_ne_oidY vcfg hregion hlocC hobj hcfg' hstep with hceq | hstepOld
-              · subst hceq; right; exact hchain
-              · left; exact Relation.ReflTransGen.head hstepOld hchain
-            · left
-              exact Relation.ReflTransGen.head ((hstepIffOfNe p hpeq c).mpr hstep) hchain
-          · right; exact hesc
-      rcases main_claim start (Reference.OId oid) hrtgG with hchainFull | hescChain
-      · rcases hrootGcfg with
-            ⟨frameV, hVmem, hVidx, var, hvar⟩ |
-            ⟨frameV, hVmem, hVidx, regionV, hVlookup, hVbridge⟩
-        · have hVeqActive : frameV = activeFrame := swap_corollary_stackWithIndex_index_inj hVmem hactivemem hVidx
-          rw [hVeqActive] at hvar
-          exact finish activeFrame hactivemem
-            ((FrameReachable_iff_reflTransGen cfg activeFrame.index (Reference.OId oid)).mpr
-              ⟨start, Or.inl ⟨activeFrame, hactivemem, rfl, var, hvar⟩, hchainFull⟩)
-        · have hVeqActive : frameV = activeFrame := swap_corollary_stackWithIndex_index_inj hVmem hactivemem hVidx
-          rw [hVeqActive] at hVlookup
-          exact finish activeFrame hactivemem
-            ((FrameReachable_iff_reflTransGen cfg activeFrame.index (Reference.OId oid)).mpr
-              ⟨start, Or.inr ⟨activeFrame, hactivemem, rfl, regionV, hVlookup, hVbridge⟩, hchainFull⟩)
-      · exfalso
-        exact reflTransGen_region_open_ne_absurd vcfg hregion hyloc hloc_cfg hlkF hopenF hridNe hescChain
-  · -- frame' is not the active frame: unconditional transport both ways.
-    have hframe'LtActive : frame'.index < activeFrame.index :=
-      lt_of_le_of_ne (hactiveidx'' ▸ Nat.le_pred_of_lt hframe'LtLen) hframe'eq
-    have hconfinedG' : ∀ refX, FrameReachable cfg' frame'.index refX → refX ≠ Reference.OId oidC := by
-      intro refX hreachX heqX
-      rw [heqX] at hreachX
-      exact absurd (hOwnerBoundCfg' frame'.index hreachX) (Nat.not_le.mpr hframe'LtActive)
-    have hreach_cfg : FrameReachable cfg frame'.index (Reference.OId oid) :=
-      fieldAsgn_confined_transport (fun a hane b => (hstepIffOfNe a hane b).symm)
-        (fun fid start => (hframeRootIff fid start).symm) hconfinedG' hreach
-    have hframe'MemCfg : frame' ∈ cfg.stackWithIndex :=
-      (fieldAsgn_frame_mem_iff h' hframe'LtActive hactiveidx).mpr hframe'Mem
-    exact transportUp (hFR3 frame hframeMemCfg frame' hframe'MemCfg hlt oid hloc_cfg hreach_cfg)
+  obtain ⟨hlen, hlocEq, hmemIff⟩ := fieldAsgn_shape vcfg h'
+  have hfr : frame.index < cfg.stackWithIndex.length - 1 := Nat.lt_sub_of_add_lt (lt_of_le_of_lt hlt
+    (hlen ▸ (List.getElem?_eq_some_iff.mp (stackWithIndex_mem_getElem_eq hframe'Mem)).1))
+  rw [hlocEq] at hloc
+  have hsr := fieldAsgn_suspended_reach vcfg h' hFR3 ((hmemIff frame hfr).mpr hframeMem) hfr hloc
+  exact hsr.2.1 (hsr.2.2 _ hreach)
