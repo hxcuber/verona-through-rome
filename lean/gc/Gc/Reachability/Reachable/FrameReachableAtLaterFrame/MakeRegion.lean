@@ -12,137 +12,93 @@ public import Gc.Reachability.Reachable.Lemmas
 
 @[expose] public section
 
+-- An on-stack frame's region is never the fresh region id.
+private theorem frame_regionId_ne_fresh {cfg : RuntimeConfig} (vcfg : ValidConfig cfg) {S : FrameWithIndex}
+    (hS : S ∈ cfg.stackWithIndex) : S.regionId ≠ cfg.freshRegionId := fun he => by
+  obtain ⟨_, hl, -⟩ := l2_of_stackWithIndex vcfg hS
+  exact cfg.freshRegionId_not_mem (he ▸ AList.mem_keys_of_lookup_eq_some hl)
+
+-- A `cfg'` frame root is either the fresh region (via `x`) or already a `cfg` root.
+private theorem makeRegion_root_down {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : makeRegion x cfg = some cfg') {fid : Index} {start : Reference} (hr : FrameRoot cfg' fid start) :
+    start = .RId cfg.freshRegionId ∨ FrameRoot cfg fid start := by
+  have hcases := fun {S} (hS : S ∈ cfg'.stackWithIndex) => makeRegion_frame_cases h hS
+  obtain ⟨L, hL, rfl⟩ := makeRegion_cases h
+  have hLm := stackWithIndex_getLast_mem hL
+  rcases hr with ⟨S, hS, rfl, v, hv⟩ | ⟨S, hS, rfl, region, hl, rfl⟩ <;>
+    rcases hcases hS with ⟨hS, -⟩ | ⟨L', hL', hrid, -, -, hvm, hi⟩
+  · exact .inr (.inl ⟨S, hS, rfl, v, hv⟩)
+  · obtain rfl : L' = L := Option.some_inj.mp (hL'.symm.trans hL)
+    rw [hvm] at hv
+    by_cases hvx : v = x
+    · subst hvx
+      simp at hv
+      exact .inl hv.symm
+    · rw [AList.lookup_insert_ne hvx] at hv
+      exact .inr (.inl ⟨_, hLm, by simp [hi], v, hv⟩)
+  · rw [AList.lookup_insert_ne (frame_regionId_ne_fresh vcfg hS)] at hl
+    exact .inr (.inr ⟨S, hS, rfl, region, hl, rfl⟩)
+  · obtain rfl : L' = L := Option.some_inj.mp (hL'.symm.trans hL)
+    rw [hrid, AList.lookup_insert_ne (frame_regionId_ne_fresh vcfg hLm)] at hl
+    exact .inr (.inr ⟨_, hLm, by simp [hi], region, hl, rfl⟩)
+
+-- Reachability of a non-fresh object from any `cfg'` frame already holds in `cfg` from a frame at that index.
+private theorem makeRegion_reach_down {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : makeRegion x cfg = some cfg') {oid : ObjectId} (hne : oid ≠ cfg.freshObjectId) {fid : Index}
+    (hr : FrameReachable cfg' fid (.OId oid)) :
+    ∃ S ∈ cfg.stackWithIndex, S.index = fid ∧ FrameReachable cfg fid (.OId oid) := by
+  obtain ⟨start, hs, hc⟩ := (FrameReachable_iff_reflTransGen ..).mp hr
+  rcases makeRegion_root_down vcfg h hs with rfl | hs
+  · rcases hc.cases_head with he | ⟨c, ⟨region, hl, -, rfl⟩, hc⟩
+    · cases he
+    obtain ⟨L, hL, hcfg'⟩ := makeRegion_cases h
+    rw [hcfg', AList.lookup_insert, Option.some_inj] at hl
+    subst hl
+    rcases hc.cases_head with he | ⟨c, ⟨obj, ho, hco⟩, -⟩
+    · exact absurd (Reference.OId.inj he).symm hne
+    · rw [makeRegion_fresh_objAt_cfg' h, Option.some_inj] at ho
+      subst ho
+      simp [Object.refs] at hco
+  · have hsne : start ≠ .RId cfg.freshRegionId := by
+      rintro rfl
+      rcases hs with ⟨S, hS, -, v, hv⟩ | ⟨_, _, _, _, _, ⟨⟩⟩
+      exact cfg.freshRegionId_not_mem (vcfg.hs2 _ (refs_mem_of_stackWithIndex hS (mem_frame_refs_of_mem_varMap hv)))
+    have hfr := (FrameReachable_iff_reflTransGen ..).mpr
+      ⟨start, hs, (makeRegion_reflTransGen_transport_down vcfg h hsne hc).2⟩
+    rcases hs with ⟨S, hS, rfl, -⟩ | ⟨S, hS, rfl, -⟩ <;> exact ⟨S, hS, rfl, hfr⟩
+
+-- For `oid` in a suspended frame `F`'s region, makeRegion neither creates nor destroys its reachability from `F`.
+theorem makeRegion_suspended_reach {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
+    (h : makeRegion x cfg = some cfg') (hFR3 : FrameReachable_at_later_frame_implies_FrameReachable_at_frame cfg)
+    {F : FrameWithIndex} (hF : F ∈ cfg.stackWithIndex) (hFlt : F.index < cfg.stackWithIndex.length - 1)
+    {oid : ObjectId} (hloc : (Reference.OId oid).loc? cfg = some (Location.Rgn F.regionId)) :
+    F ∈ cfg'.stackWithIndex ∧ (StackReachable cfg (.OId oid) → FrameReachable cfg' F.index (.OId oid)) ∧
+    ∀ fid, FrameReachable cfg' fid (.OId oid) → StackReachable cfg (.OId oid) := by
+  have hFlt' : F.index < cfg.stack.length - 1 := by simpa [RuntimeConfig.stackWithIndex] using hFlt
+  obtain ⟨regionF, hlkF, hopenF⟩ := l2_of_stackWithIndex vcfg hF
+  refine ⟨makeRegion_frame_mem_up h hF hFlt',
+    fun ⟨E, hE, hr⟩ => (makeRegion_frame_reachable_iff vcfg h hF hFlt' _).mp ?_, fun fid hr => ?_⟩
+  · rcases (region_container_confined vcfg hlkF hopenF hF rfl hloc hr).eq_or_lt with heq | hlt
+    · exact swap_corollary_stackWithIndex_index_inj hE hF heq.symm ▸ hr
+    · exact hFR3 F hF E hE hlt oid hloc hr
+  · obtain ⟨S, hS, rfl, hr⟩ :=
+      makeRegion_reach_down vcfg h (fun he => freshObjectId_loc_ne_rgn (he ▸ hloc)) hr
+    exact ⟨S, hS, hr⟩
+
 theorem frameReachableAtLaterFrame_step_makeRegion (x : VarName) :
     FrameReachableAtLaterFrame_step (Stmt.makeRegion x) := by
   intro cfg cfg' vcfg h hFR3 frame hframeMem frame' hframe'Mem hlt oid hloc hreach
   have h' : makeRegion x cfg = some cfg' := h
-  have vcfg' : ValidConfig cfg' := makeRegion_valid vcfg h'
-  obtain ⟨lastFrame, hlast, hcfg'⟩ := makeRegion_cases h'
-  obtain ⟨region0, hlookupRid0, hopen0⟩ := l2_of_stackWithIndex vcfg (stackWithIndex_getLast_mem hlast)
-  have hLf : ({ lastFrame with index := cfg.stack.length - 1 } : FrameWithIndex) ∈ cfg.stackWithIndex :=
-    stackWithIndex_getLast_mem hlast
-  have hne' : cfg.stack ≠ [] := by intro hnil; rw [hnil] at hlast; simp at hlast
-  have hlen1 : 1 ≤ cfg.stack.length := List.length_pos_of_ne_nil hne'
-  have hcfg'len : cfg'.stack.length = cfg.stack.length := by
-    rw [hcfg']; dsimp only; rw [List.length_append, List.length_dropLast, List.length_singleton]; omega
-  rcases makeRegion_frame_cases h' hframeMem with
-    ⟨hframeMemCfg, hframeLt⟩ | ⟨lf, hlf, -, -, -, -, hframeIdx⟩
-  swap
-  · exfalso
-    obtain ⟨n, hn, hfeq⟩ := List.mem_mapIdx.mp hframe'Mem
-    have hframe'idx : frame'.index = n := by rw [← hfeq]
-    rw [hcfg'len] at hn
-    have hcontra : cfg.stack.length - 1 < n := by
-      have heq1 : cfg.stack.length - 1 = frame.index := by rw [hframeIdx, List.length_dropLast]
-      rw [heq1, ← hframe'idx]; exact hlt
-    omega
-  have hframeRidNe : frame.regionId ≠ cfg.freshRegionId := by
-    obtain ⟨region1, hlookup1, -⟩ := l2_of_stackWithIndex vcfg hframeMemCfg
-    intro heq
-    apply RuntimeConfig.freshRegionId_not_mem cfg
-    rw [← AList.mem_keys, ← AList.lookup_isSome, ← heq, hlookup1]
-    simp
-  have hidNe : oid ≠ cfg.freshObjectId := by
-    intro heq
-    subst heq
-    obtain ⟨region1, hlookup1, hmem1⟩ := (oid_loc_rgn_iff_in_heap vcfg').mp hloc
-    have hlookup1' : cfg.heap.lookup frame.regionId = some region1 := by
-      rw [hcfg'] at hlookup1; dsimp only at hlookup1
-      rw [AList.lookup_insert_ne hframeRidNe] at hlookup1
-      exact hlookup1
-    apply cfg.freshObjectId_not_mem
-    unfold RuntimeConfig.objectIds
-    rw [List.mem_append]
-    right
-    unfold Heap.objectIds
-    rw [List.mem_flatten]
-    exact ⟨region1.objectIds, List.mem_map_of_mem (AList.lookup_mem_entries hlookup1'), hmem1⟩
-  have hloc_cfg : (Reference.OId oid).loc? cfg = some (Location.Rgn frame.regionId) := by
-    rw [makeRegion_corollary_loc_eq vcfg h' oid hidNe]; exact hloc
-  rcases makeRegion_frame_cases h' hframe'Mem with
-    ⟨hframe'MemCfg, hframe'Lt⟩ | ⟨lf', hlf', hframe'RegionId, -, -, hframe'VarMap, hframe'Idx⟩
-  · -- frame' is also not the last frame: unconditional iff transport both ways.
-    have hreach_cfg : FrameReachable cfg frame'.index (Reference.OId oid) :=
-      (makeRegion_frame_reachable_iff vcfg h' hframe'MemCfg hframe'Lt (Reference.OId oid)).mpr hreach
-    have hresult_cfg : FrameReachable cfg frame.index (Reference.OId oid) :=
-      hFR3 frame hframeMemCfg frame' hframe'MemCfg hlt oid hloc_cfg hreach_cfg
-    exact (makeRegion_frame_reachable_iff vcfg h' hframeMemCfg hframeLt (Reference.OId oid)).mp hresult_cfg
-  · -- frame' IS the last (mutated) frame.
-    rw [hlast] at hlf'
-    injection hlf' with hlf'
-    subst hlf'
-    rw [FrameReachable_iff_reflTransGen] at hreach
-    obtain ⟨start, hroot, hrtg⟩ := hreach
-    have hframe'Idx' : frame'.index = cfg.stack.length - 1 := by rw [hframe'Idx, List.length_dropLast]
-    have hLfReach : FrameReachable cfg (cfg.stack.length - 1) (Reference.OId oid) := by
-      rcases hroot with ⟨Xf, hXfmem, hXfidx, var, hvar⟩ | ⟨Xf, hXfmem, hXfidx, regionX, hlookupX, hbridge⟩
-      · have hXfeq : Xf = frame' := swap_corollary_stackWithIndex_index_inj hXfmem hframe'Mem hXfidx
-        rw [hXfeq, hframe'VarMap] at hvar
-        by_cases hveq : var = x
-        · subst hveq
-          rw [AList.lookup_insert] at hvar
-          injection hvar with hstart
-          exfalso
-          rw [← hstart] at hrtg
-          rcases hrtg.cases_head with heqStart | ⟨c, hstep, hrest⟩
-          · cases heqStart
-          · rw [ReachableStep_rid_iff] at hstep
-            obtain ⟨region2, hlookup2, -, hbeq⟩ := hstep
-            have hlookup2' : cfg'.heap.lookup cfg.freshRegionId = some ({ bridgeObjectId := cfg.freshObjectId, objMap := (∅ : ObjMap).insert cfg.freshObjectId ∅, status := Status.Closed } : Region) := by
-              rw [hcfg']; dsimp only; rw [AList.lookup_insert]
-            rw [hlookup2'] at hlookup2
-            injection hlookup2 with hlookup2eq
-            rw [← hlookup2eq] at hbeq
-            dsimp only at hbeq
-            rw [hbeq] at hrest
-            rcases hrest.cases_head with heq2 | ⟨c2, hstep2, -⟩
-            · injection heq2 with heq2
-              rw [← heq2, makeRegion_corollary_loc_fresh h'] at hloc
-              injection hloc with hloc
-              injection hloc with hloc
-              exact hframeRidNe hloc.symm
-            · rw [ReachableStep_oid_iff, makeRegion_fresh_objAt_cfg' h'] at hstep2
-              obtain ⟨obj, hobjEq, hcontains⟩ := hstep2
-              injection hobjEq with hobjEq
-              rw [← hobjEq] at hcontains
-              simp [Object.refs] at hcontains
-        · rw [AList.lookup_insert_ne hveq] at hvar
-          have hstackEq : cfg.stack = cfg.stack.dropLast ++ [lastFrame] :=
-            (List.dropLast_append_getLast? lastFrame hlast).symm
-          have hmemLast : lastFrame ∈ cfg.stack :=
-            hstackEq ▸ List.mem_append_right _ (List.mem_singleton_self lastFrame)
-          have hstartne : start ≠ Reference.RId cfg.freshRegionId := by
-            intro heq
-            rw [heq] at hvar
-            have hmemrefs : Reference.RId cfg.freshRegionId ∈ lastFrame.refs :=
-              mem_frame_refs_of_mem_varMap hvar
-            have hmemStack : Reference.RId cfg.freshRegionId ∈ cfg.stack.refs := by
-              rw [stack_refs_eq_flatMap, List.mem_flatMap]
-              exact ⟨lastFrame, hmemLast, hmemrefs⟩
-            have hmemCfg : Reference.RId cfg.freshRegionId ∈ cfg.refs := List.mem_append_left _ hmemStack
-            exact RuntimeConfig.freshRegionId_not_mem cfg (vcfg.hs2 cfg.freshRegionId hmemCfg)
-          obtain ⟨-, hrtgCfg⟩ := makeRegion_reflTransGen_transport_down vcfg h' hstartne hrtg
-          exact (FrameReachable_iff_reflTransGen cfg (cfg.stack.length - 1) (Reference.OId oid)).mpr
-            ⟨start, Or.inl ⟨{ lastFrame with index := cfg.stack.length - 1 }, hLf, rfl, var, hvar⟩, hrtgCfg⟩
-      · have hXfeq : Xf = frame' := swap_corollary_stackWithIndex_index_inj hXfmem hframe'Mem hXfidx
-        have hXfridEq : Xf.regionId = lastFrame.regionId := by rw [hXfeq]; exact hframe'RegionId
-        have hne : Xf.regionId ≠ cfg.freshRegionId := by
-          rw [hXfridEq]
-          intro heq
-          apply RuntimeConfig.freshRegionId_not_mem cfg
-          rw [← AList.mem_keys, ← AList.lookup_isSome, ← heq, hlookupRid0]
-          simp
-        have hlookup' : cfg'.heap.lookup Xf.regionId = cfg.heap.lookup Xf.regionId := by
-          rw [hcfg']; dsimp only; rw [AList.lookup_insert_ne hne]
-        rw [hlookup', hXfridEq] at hlookupX
-        have hstartne : start ≠ Reference.RId cfg.freshRegionId := by rw [hbridge]; simp
-        obtain ⟨-, hrtgCfg⟩ := makeRegion_reflTransGen_transport_down vcfg h' hstartne hrtg
-        exact (FrameReachable_iff_reflTransGen cfg (cfg.stack.length - 1) (Reference.OId oid)).mpr
-          ⟨start, Or.inr ⟨{ lastFrame with index := cfg.stack.length - 1 }, hLf, rfl, regionX, hlookupX, hbridge⟩,
-            hrtgCfg⟩
-    have hlt' : frame.index < ({ lastFrame with index := cfg.stack.length - 1 } : FrameWithIndex).index := by
-      show frame.index < cfg.stack.length - 1
-      rw [← hframe'Idx']; exact hlt
-    have hresult_cfg : FrameReachable cfg frame.index (Reference.OId oid) :=
-      hFR3 frame hframeMemCfg _ hLf hlt' oid hloc_cfg hLfReach
-    exact (makeRegion_frame_reachable_iff vcfg h' hframeMemCfg hframeLt (Reference.OId oid)).mp hresult_cfg
+  have hle : frame'.index ≤ cfg.stack.length - 1 := by
+    rcases makeRegion_frame_cases h' hframe'Mem with ⟨-, h1⟩ | ⟨-, -, -, -, -, -, h1⟩
+    · exact h1.le
+    · simp [h1]
+  obtain ⟨hF, hFlt⟩ := (makeRegion_frame_cases h' hframeMem).resolve_right
+    fun ⟨_, _, _, _, _, _, h1⟩ => by simp at h1; exact absurd hle (Nat.not_le.mpr (h1 ▸ hlt))
+  have hne : oid ≠ cfg.freshObjectId := by
+    rintro rfl
+    simp only [makeRegion_corollary_loc_fresh h', Option.some_inj, Location.Rgn.injEq] at hloc
+    exact frame_regionId_ne_fresh vcfg hF hloc.symm
+  rw [← makeRegion_corollary_loc_eq vcfg h' oid hne] at hloc
+  have hsr := makeRegion_suspended_reach vcfg h' hFR3 hF (by simpa [RuntimeConfig.stackWithIndex] using hFlt) hloc
+  exact hsr.2.1 (hsr.2.2 _ hreach)
