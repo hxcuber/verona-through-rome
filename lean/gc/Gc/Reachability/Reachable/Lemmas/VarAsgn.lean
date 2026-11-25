@@ -44,14 +44,11 @@ theorem RegionReachable_oid_confined {cfg : RuntimeConfig} (vcfg : ValidConfig c
     (∃ oid ridCur region', ref = Reference.OId oid ∧ (Reference.OId oid).loc? cfg = some (Location.Rgn ridCur) ∧
        cfg.heap.lookup ridCur = some region' ∧ (ridCur = rid ∨ region'.status = Status.Closed)) ∨
     (∃ ridR, ref = Reference.RId ridR) := by
-  have hbl : ∀ {r : RegionId} {g : Region}, cfg.heap.lookup r = some g →
-      (Reference.OId g.bridgeObjectId).loc? cfg = some (Location.Rgn r) := fun hlk =>
-    (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨_, hlk, vcfg.h1 _ (List.mem_map_of_mem (AList.lookup_mem_entries hlk))⟩
   clear _hlookup
   induction hrr with
-  | bridge hlk hbridge => exact .inl ⟨_, _, _, rfl, hbridge ▸ hbl hlk, hlk, .inl rfl⟩
+  | bridge hlk hbridge => exact .inl ⟨_, _, _, rfl, hbridge ▸ bridge_loc vcfg hlk, hlk, .inl rfl⟩
   | step hstep _ ih =>
-    rcases ih vcfg hbl with ⟨oidA, ridCur, region', rfl, hlocA, hlkA, hcaseA⟩ | ⟨ridA, rfl⟩
+    rcases ih vcfg with ⟨oidA, ridCur, region', rfl, hlocA, hlkA, hcaseA⟩ | ⟨ridA, rfl⟩
     · obtain ⟨obj, hobjAt, hcontains⟩ := hstep
       simp only [Reference.objAt?, hlocA, hlkA, Option.bind_some] at hobjAt
       have hmemB := mem_region_refs_of_mem_objMap hobjAt (List.contains_iff_mem.mp hcontains)
@@ -60,7 +57,7 @@ theorem RegionReachable_oid_confined {cfg : RuntimeConfig} (vcfg : ValidConfig c
       · exact .inr ⟨ridB, rfl⟩
       · exact .inl ⟨oidB, ridCur, region', rfl, vcfg.h3 ridCur oidB region' hlkA hmemB, hlkA, hcaseA⟩
     · obtain ⟨regionR, hlkR, hclosedR, rfl⟩ := hstep
-      exact .inl ⟨_, ridA, regionR, rfl, hbl hlkR, hlkR, .inr hclosedR⟩
+      exact .inl ⟨_, ridA, regionR, rfl, bridge_loc vcfg hlkR, hlkR, .inr hclosedR⟩
 
 -- A chain rooted at `rid`'s (Open) bridge can never reach an object in a different Open region.
 theorem region_reachable_open_ne_absurd {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)

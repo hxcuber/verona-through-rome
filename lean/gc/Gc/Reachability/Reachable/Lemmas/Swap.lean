@@ -14,20 +14,6 @@ public import Gc.Reachability.Reachable.Lemmas.Merge
 
 @[expose] public section
 
--- The last stack frame, written as a `getLast?` fact on the underlying stack.
-private theorem swap_stack_last {cfg : RuntimeConfig} {frame : FrameWithIndex}
-    (hframe : cfg.stackWithIndex.getLast? = some frame) : cfg.stack.getLast? = some frame.toFrame := by
-  rw [(stack_eq_of_stackWithIndex_getLast? hframe).1]; simp
-
--- `objAt?` of an object located in the last stack frame is that frame's own `objMap` lookup.
-private theorem objAt_of_loc_last {cfg : RuntimeConfig} {frame : Frame} {o : ObjectId}
-    (hlast : cfg.stack.getLast? = some frame)
-    (hloc : (Reference.OId o).loc? cfg = some (Location.Stk cfg.stack.dropLast.length)) :
-    (Reference.OId o).objAt? cfg = frame.objMap.lookup o := by
-  simp only [Reference.objAt?, hloc]
-  rw [stackWithIndex_find_index_eq_getElem, stackWithIndex_eq_of_getLast? hlast]
-  simp
-
 -- Replacing the last frame by `g` leaves `objAt? o` unchanged when `loc? o` and `g`'s entry at `o` agree.
 private theorem objAt_last_frame_eq {cfg : RuntimeConfig} {frame : FrameWithIndex} {g : Frame} {o : ObjectId}
     (hframe : cfg.stackWithIndex.getLast? = some frame)
@@ -40,7 +26,7 @@ private theorem objAt_last_frame_eq {cfg : RuntimeConfig} {frame : FrameWithInde
   · rfl
   dsimp only
   rw [stackWithIndex_find_index_eq_getElem, stackWithIndex_find_index_eq_getElem,
-    stackWithIndex_eq_of_getLast? (swap_stack_last hframe), stackWithIndex_mk_append_singleton]
+    stackWithIndex_eq_of_getLast? (stack_getLast?_of_stackWithIndex_getLast? hframe), stackWithIndex_mk_append_singleton]
   simp only [List.getElem?_append, List.getElem?_singleton]
   split_ifs <;> simp [hlk]
 
@@ -213,7 +199,7 @@ private theorem frame_root_iff_of_lt {cfg cfg' : RuntimeConfig} (vcfg : ValidCon
       rintro f rfl
       dsimp only at hfr
       exact hG.ne (hfr ▸ hidx).symm
-    rw [stackWithIndex_eq_of_getLast? (swap_stack_last hframe0), RuntimeConfig.stackWithIndex, hstack,
+    rw [stackWithIndex_eq_of_getLast? (stack_getLast?_of_stackWithIndex_getLast? hframe0), RuntimeConfig.stackWithIndex, hstack,
       List.mapIdx_concat]
     simp only [List.mem_append, List.mem_singleton, or_iff_left (hne _)]
   have hlk : ∀ fr ∈ cfg.stackWithIndex, fr.index = G → cfg'.heap.lookup fr.regionId = cfg.heap.lookup fr.regionId :=
@@ -280,18 +266,6 @@ theorem swap_frame_reachable_iff_of_lt {cfg cfg' : RuntimeConfig} (vcfg : ValidC
   · exact swap_bridge_step_iff_of_ne vcfg hregion hobj hstatus rfl
   · exact ⟨_, (stack_eq_of_stackWithIndex_getLast? hframe0).1⟩
 
--- A step out of the mutated container in `cfg'` either follows the newly-written field or an edge it already had in `cfg`.
-private theorem oidC_step {cfg cfg' : RuntimeConfig} {oid : ObjectId} {obj : Object} {field : FieldName}
-    {newVal : Reference} (hobjAt : (Reference.OId oid).objAt? cfg = some obj)
-    (hobjAtC : (Reference.OId oid).objAt? cfg' = some (obj.insert field newVal))
-    {c : Reference} (hstep : ReachableStep cfg' (Reference.OId oid) c) :
-    c = newVal ∨ ReachableStep cfg (Reference.OId oid) c := by
-  obtain ⟨_, h1, h2⟩ := hstep
-  rw [hobjAtC, Option.some_inj] at h1
-  subst h1
-  exact (object_insert_refs_mem (List.contains_iff_mem.mp h2)).imp_right
-    fun hm => ⟨obj, hobjAt, List.contains_iff_mem.mpr hm⟩
-
 -- The mutated container's own step, restricted to `c ≠ newVal` (STACK branch): new refs are old refs plus possibly `newVal`.
 theorem swap_stack_yoid_step_of_ne {cfg cfg' : RuntimeConfig} {frame0 : FrameWithIndex}
     {yoid : ObjectId} {obj : Object} {field : FieldName} {newVal : Reference} {newVarMap : VarMap}
@@ -304,7 +278,7 @@ theorem swap_stack_yoid_step_of_ne {cfg cfg' : RuntimeConfig} {frame0 : FrameWit
     {c : Reference} (hstep : ReachableStep cfg' (Reference.OId yoid) c) :
     c = newVal ∨ ReachableStep cfg (Reference.OId yoid) c := by
   rw [(stack_eq_of_stackWithIndex_getLast? hframe0).2] at hlocm
-  refine oidC_step (field := field) ((objAt_of_loc_last (swap_stack_last hframe0) hlocm).trans hobj) ?_ hstep
+  refine objAt_insert_step (field := field) ((objAt_of_loc_last (stack_getLast?_of_stackWithIndex_getLast? hframe0) hlocm).trans hobj) ?_ hstep
   subst hcfg'
   simp [objAt_of_loc_last List.getLast?_concat
     ((swap_corollary_stack_loc_eq hframe0 hobj yoid).symm.trans (hlocm.trans (by simp)))]
@@ -318,7 +292,7 @@ theorem swap_region_stack_yoid_step_of_ne {cfg : RuntimeConfig} (vcfg : ValidCon
     (hlocm : (Reference.OId yoid).loc? cfg = some (Location.Rgn rid))
     {c : Reference} (hstep : ReachableStep ({ stack := cfg.stack.dropLast ++ [({ frame0 with varMap := newVarMap } : Frame)], heap := cfg.heap.insert rid ({ region with objMap := region.objMap.insert yoid (obj.insert field newVal) } : Region) } : RuntimeConfig) (Reference.OId yoid) c) :
     c = newVal ∨ ReachableStep cfg (Reference.OId yoid) c :=
-  oidC_step (by simp [Reference.objAt?, hlocm, hregion, hobj])
+  objAt_insert_step (by simp [Reference.objAt?, hlocm, hregion, hobj])
     ((swap_varmap_objAt_eq (cfg := { cfg with heap := cfg.heap.insert rid { region with objMap := region.objMap.insert yoid (obj.insert field newVal) } }) hframe0 yoid).symm.trans
       (swap_region_objAt_mutated (newBridge := region.bridgeObjectId) vcfg hregion hobj hlocm)) hstep
 
@@ -330,4 +304,4 @@ theorem swap_bridge_yoid_step_of_ne {cfg : RuntimeConfig} (vcfg : ValidConfig cf
     (hlocm : (Reference.OId yoid).loc? cfg = some (Location.Rgn rid))
     {c : Reference} (hstep : ReachableStep ({ cfg with heap := cfg.heap.insert rid ({ region with bridgeObjectId := newBridge, objMap := region.objMap.insert yoid (obj.insert field newVal) } : Region) }) (Reference.OId yoid) c) :
     c = newVal ∨ ReachableStep cfg (Reference.OId yoid) c :=
-  oidC_step (by simp [Reference.objAt?, hlocm, hregion, hobj]) (swap_region_objAt_mutated vcfg hregion hobj hlocm) hstep
+  objAt_insert_step (by simp [Reference.objAt?, hlocm, hregion, hobj]) (swap_region_objAt_mutated vcfg hregion hobj hlocm) hstep

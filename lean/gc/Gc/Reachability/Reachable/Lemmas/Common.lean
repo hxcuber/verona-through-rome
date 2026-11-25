@@ -363,3 +363,29 @@ theorem regionId_ne_last_of_suspended {cfg : RuntimeConfig} (vcfg : ValidConfig 
   have := merge_corollary_regionId_unique_index vcfg.s1 hf (stackWithIndex_getLast_mem hlast) heq
   simp only at this
   exact lt_irrefl _ (this ▸ hflt)
+
+-- The last stack frame, written as a `getLast?` fact on the underlying stack.
+theorem stack_getLast?_of_stackWithIndex_getLast? {cfg : RuntimeConfig} {frame : FrameWithIndex}
+    (hframe : cfg.stackWithIndex.getLast? = some frame) : cfg.stack.getLast? = some frame.toFrame := by
+  rw [(stack_eq_of_stackWithIndex_getLast? hframe).1]; simp
+
+-- `objAt?` of an object located in the last stack frame is that frame's own `objMap` lookup.
+theorem objAt_of_loc_last {cfg : RuntimeConfig} {frame : Frame} {o : ObjectId}
+    (hlast : cfg.stack.getLast? = some frame)
+    (hloc : (Reference.OId o).loc? cfg = some (Location.Stk cfg.stack.dropLast.length)) :
+    (Reference.OId o).objAt? cfg = frame.objMap.lookup o := by
+  simp only [Reference.objAt?, hloc]
+  rw [stackWithIndex_find_index_eq_getElem, stackWithIndex_eq_of_getLast? hlast]
+  simp
+
+-- A step out of the mutated container in `cfg'` either follows the newly-written field or an edge it already had in `cfg`.
+theorem objAt_insert_step {cfg cfg' : RuntimeConfig} {oid : ObjectId} {obj : Object} {field : FieldName}
+    {newVal : Reference} (hobjAt : (Reference.OId oid).objAt? cfg = some obj)
+    (hobjAtC : (Reference.OId oid).objAt? cfg' = some (obj.insert field newVal))
+    {c : Reference} (hstep : ReachableStep cfg' (Reference.OId oid) c) :
+    c = newVal ∨ ReachableStep cfg (Reference.OId oid) c := by
+  obtain ⟨_, h1, h2⟩ := hstep
+  rw [hobjAtC, Option.some_inj] at h1
+  subst h1
+  exact (object_insert_refs_mem (List.contains_iff_mem.mp h2)).imp_right
+    fun hm => ⟨obj, hobjAt, List.contains_iff_mem.mpr hm⟩
