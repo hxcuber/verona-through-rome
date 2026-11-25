@@ -1,21 +1,25 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Mutation.Mutation
-import Gc.Model.Mutation.Stmt
-import Gc.Model.Preservation
-import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Def
-import Gc.Reachability.Reachable.Lemmas
-import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Enter
-import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Exit
-import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.MakeObjStack
-import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.MakeObjRegion
-import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.MakeRegion
-import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Merge
-import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.VarAsgn
-import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.FieldAsgn
-import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Swap
+module
+
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Mutation.Mutation
+public import Gc.Model.Mutation.Stmt
+public import Gc.Model.Preservation
+public import Gc.Reachability.Reachable.Semantics
+public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Def
+public import Gc.Reachability.Reachable.Lemmas
+public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Enter
+public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Exit
+public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.MakeObjStack
+public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.MakeObjRegion
+public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.MakeRegion
+public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Merge
+public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.VarAsgn
+public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.FieldAsgn
+public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Swap
+
+@[expose] public section
 
 theorem frameReachableAtLaterFrame_step_all (cmd : Stmt) :
     FrameReachableAtLaterFrame_step cmd := by

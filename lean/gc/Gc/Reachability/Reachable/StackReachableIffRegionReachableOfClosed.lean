@@ -1,4 +1,8 @@
-import Gc.Reachability.Reachable.Lemmas.Common
+module
+
+public import Gc.Reachability.Reachable.Lemmas.Common
+
+@[expose] public section
 
 -- report.pdf CR6: given the Closed region `rid` itself is stack-reachable, stack-reachability of an object inside it is exactly region-reachability within it.
 theorem StackReachable_iff_RegionReachable_of_closed (cfg : RuntimeConfig) (vcfg : ValidConfig cfg)

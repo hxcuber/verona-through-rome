@@ -1,34 +1,15 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Theorems
-import Gc.Model.Mutation.Exit
-import Gc.Model.Preservation.Common
+module
 
-import Mathlib.Data.List.Infix
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Theorems
+public import Gc.Model.Mutation.Exit
+public import Gc.Model.Preservation.Common
 
-theorem heap_oid_unique_key :
-  ValidConfig cfg →
-  (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region1.objMap.keys →
-  (⟨rid2, region2⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region2.objMap.keys →
-  rid1 = rid2 := by
-  intro vcfg mem1 in1 mem2 in2
-  by_contra hne
-  have l1 := vcfg.l1
-  unfold L1 RuntimeConfig.objectIds at l1
-  obtain ⟨_, heap_nodup, _⟩ := List.nodup_append.mp l1
-  unfold Heap.objectIds at heap_nodup
-  rw [List.nodup_flatten, List.pairwise_map] at heap_nodup
-  obtain ⟨_, pairwise_disjoint⟩ := heap_nodup
-  have hneq : (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ≠ ⟨rid2, region2⟩ := by
-    intro heq
-    exact hne (congrArg Sigma.fst heq)
-  haveI : Std.Symm (fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds) := ⟨fun _ _ hd => List.disjoint_symm hd⟩
-  have disj := List.Pairwise.forall
-    (R := fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds)
-    pairwise_disjoint mem1 mem2 hneq
-  unfold Region.objectIds at disj
-  exact disj in1 in2
+public import Mathlib.Data.List.Infix
+
+@[expose] public section
 
 theorem heap_status_update_find_none_iff {heap : Heap} {rid : RegionId} {region : Region}
     {status : Status} {oid : ObjectId} (hlookup : heap.lookup rid = some region) :
@@ -229,7 +210,7 @@ theorem exit_corollary_1 :
                   dsimp
                   intro hcontra
                   exact rid_eq_frame'_regionId
-                    (heap_oid_unique_key vcfg region_mem region_contains_oid
+                    (heap_region_unique vcfg.l1 region_mem region_contains_oid
                       (AList.lookup_mem_entries heapLookup) (List.contains_iff_mem.mp hcontra))
                 obtain ⟨b, l1, l2, _, entries_eq, kerase_eq⟩ :=
                   List.exists_of_kerase (a := frame'.regionId) (l := cfg.heap.entries)
@@ -351,7 +332,7 @@ theorem exit_corollary_1 :
                 apply List.find?_eq_some_of_unique region_mem pe
                 intro x xmem px
                 obtain ⟨rx, regx⟩ := x
-                have key_eq := heap_oid_unique_key vcfg xmem (List.contains_iff_mem.mp px) region_mem region_contains_oid
+                have key_eq := heap_region_unique vcfg.l1 xmem (List.contains_iff_mem.mp px) region_mem region_contains_oid
                 subst key_eq
                 have regx_eq := List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys xmem region_mem
                 rw [regx_eq]

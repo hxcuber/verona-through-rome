@@ -1,11 +1,15 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Mutation.Mutation
-import Gc.Model.Preservation
-import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.Lemmas.Common
-import Gc.Reachability.Reachable.Lemmas.MakeObjStack
+module
+
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Mutation.Mutation
+public import Gc.Model.Preservation
+public import Gc.Reachability.Reachable.Semantics
+public import Gc.Reachability.Reachable.Lemmas.Common
+public import Gc.Reachability.Reachable.Lemmas.MakeObjStack
+
+@[expose] public section
 
 -- ===== varAsgn =====
 
@@ -318,20 +322,7 @@ theorem varAsgn_frame_mem_iff {cfg cfg' : RuntimeConfig}
         rw [hXeq, List.length_dropLast] at hXlt
         exact absurd hXlt (lt_irrefl _)
 
--- A frame strictly before the last one has a different regionId from the last frame's own (S1: regionId is injective across the stack).
-theorem varAsgn_regionId_ne {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
-    {f : FrameWithIndex} (hf : f ∈ cfg.stackWithIndex) (hflt : f.index < cfg.stack.length - 1)
-    {lastFrame : Frame} (hlast : cfg.stack.getLast? = some lastFrame) :
-    f.regionId ≠ lastFrame.regionId := by
-  intro heq
-  have hlastMem := stackWithIndex_getLast_mem hlast
-  have hidxEq : f.index = ({ lastFrame with index := cfg.stack.length - 1 } : FrameWithIndex).index :=
-    merge_corollary_regionId_unique_index vcfg.s1 hf hlastMem heq
-  dsimp only at hidxEq
-  rw [hidxEq] at hflt
-  exact absurd hflt (lt_irrefl _)
-
--- `FrameReachable` agrees below the last frame: combines `varAsgn_step_eq`, `varAsgn_frame_mem_iff`, and `varAsgn_regionId_ne` (S1-based, since the mutated region's key isn't fresh).
+-- `FrameReachable` agrees below the last frame: combines `varAsgn_step_eq`, `varAsgn_frame_mem_iff`, and `regionId_ne_last_of_suspended` (S1-based, since the mutated region's key isn't fresh).
 theorem varAsgn_frame_reachable_iff {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
     (h : varAsgn xf y cfg = some cfg')
     {X : FrameWithIndex} (hXmem : X ∈ cfg.stackWithIndex) (hXlt : X.index < cfg.stack.length - 1)
@@ -346,7 +337,7 @@ theorem varAsgn_frame_reachable_iff {cfg cfg' : RuntimeConfig} (vcfg : ValidConf
     · have hXfmem' : Xf ∈ cfg'.stackWithIndex := (varAsgn_frame_mem_iff h (hXfidx ▸ hXlt)).mp hXfmem
       exact Or.inl ⟨Xf, hXfmem', hXfidx, var, hvar⟩
     · rcases hcase with ⟨oid, rid, region, hyf, hxb, hloc, hridEq, hregion, hcfg'⟩ | ⟨oid, hyf, hxb, hresolve, hcfg'⟩
-      · have hXfne : Xf.regionId ≠ rid := hridEq ▸ varAsgn_regionId_ne vcfg hXfmem (hXfidx ▸ hXlt) hlast
+      · have hXfne : Xf.regionId ≠ rid := hridEq ▸ regionId_ne_last_of_suspended vcfg hXfmem (hXfidx ▸ hXlt) hlast
         have hlookup' : cfg'.heap.lookup Xf.regionId = some regionX := by
           rw [hcfg']; dsimp only; rw [AList.lookup_insert_ne hXfne]; exact hlookup
         have hXfmem' : Xf ∈ cfg'.stackWithIndex := (varAsgn_frame_mem_iff h (hXfidx ▸ hXlt)).mp hXfmem
@@ -361,7 +352,7 @@ theorem varAsgn_frame_reachable_iff {cfg cfg' : RuntimeConfig} (vcfg : ValidConf
       exact Or.inl ⟨Xf, hXfmem2, hXfidx, var, hvar⟩
     · have hXfmem2 : Xf ∈ cfg.stackWithIndex := (varAsgn_frame_mem_iff h (hXfidx ▸ hXlt)).mpr hXfmem
       rcases hcase with ⟨oid, rid, region, hyf, hxb, hloc, hridEq, hregion, hcfg'⟩ | ⟨oid, hyf, hxb, hresolve, hcfg'⟩
-      · have hXfne : Xf.regionId ≠ rid := hridEq ▸ varAsgn_regionId_ne vcfg hXfmem2 (hXfidx ▸ hXlt) hlast
+      · have hXfne : Xf.regionId ≠ rid := hridEq ▸ regionId_ne_last_of_suspended vcfg hXfmem2 (hXfidx ▸ hXlt) hlast
         have hlookup' : cfg.heap.lookup Xf.regionId = some regionX := by
           rw [hcfg'] at hlookup; dsimp only at hlookup
           rw [AList.lookup_insert_ne hXfne] at hlookup; exact hlookup

@@ -1,11 +1,15 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Theorems
-import Gc.Model.Mutation.Merge
-import Gc.Model.Preservation.Common
+module
 
-import Mathlib.Data.List.Infix
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Theorems
+public import Gc.Model.Mutation.Merge
+public import Gc.Model.Preservation.Common
+
+public import Mathlib.Data.List.Infix
+
+@[expose] public section
 
 
 -- `region`/`region'` can't be the same heap entry: the operation's own precondition requires
@@ -21,64 +25,14 @@ theorem merge_corollary_rid_ne_regionId {cfg : RuntimeConfig} {frame : Frame} {r
   rw [hregion'] at hopen
   exact absurd (hopen.symm.trans hclosed) (by decide)
 
--- Generic AList fact: a successful `lookup` means the key is already present.
-theorem merge_corollary_mem_keys_of_lookup {α : Type*} {β : α → Type*} [DecidableEq α]
-    {l : AList β} {k : α} {v : β k} (hv : l.lookup k = some v) : k ∈ l.keys :=
-  AList.mem_keys.mp (AList.lookup_isSome.mp (by rw [hv]; rfl))
-
--- Generic fact: replacing the value at an already-present `AList` key changes the refs-count by
--- exactly the delta of the one changed entry -- stated additively (rather than with subtraction) so
--- it holds unconditionally regardless of what the old/new values actually are.
-theorem merge_corollary_alist_insert_count_eq {α : Type*} [DecidableEq α] {l : AList (fun _ : α => Reference)}
-    {k : α} {v_old v_new t : Reference} (hlookup : l.lookup k = some v_old) :
-    ((l.insert k v_new).entries.map (·.2)).count t + (if (v_old == t) = true then 1 else 0) =
-    (l.entries.map (·.2)).count t + (if (v_new == t) = true then 1 else 0) := by
-  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase (merge_corollary_mem_keys_of_lookup hlookup)
-  have v0_eq : v0 = v_old := by
-    have hmem_v0 : (⟨k, v0⟩ : Sigma (fun _ : α => Reference)) ∈ l.entries :=
-      heq ▸ List.mem_append_right _ List.mem_cons_self
-    have hmem_vold : (⟨k, v_old⟩ : Sigma (fun _ : α => Reference)) ∈ l.entries :=
-      AList.mem_lookup_iff.mp (by rw [hlookup]; rfl)
-    exact List.NodupKeys.eq_of_mk_mem (β := fun _ : α => Reference) l.nodupKeys hmem_v0 hmem_vold
-  have hnew : (l.insert k v_new).entries.map (·.2) = v_new :: (l1e ++ l2e).map (·.2) := by
-    rw [AList.entries_insert, hkerase, List.map_cons]
-  have hold : l.entries.map (·.2) = l1e.map (·.2) ++ v_old :: l2e.map (·.2) := by
-    rw [heq, v0_eq, List.map_append, List.map_cons]
-  rw [hnew, hold, List.count_cons, List.map_append, List.count_append, List.count_append, List.count_cons]
-  omega
-
--- An object id can belong to at most one heap region's `objMap` (from `L1`'s global uniqueness).
-theorem merge_corollary_region_unique
-    {cfg : RuntimeConfig} {rid1 rid2 : RegionId} {region1 region2 : Region} {oid : ObjectId} :
-  L1 cfg →
-  (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region1.objMap.keys →
-  (⟨rid2, region2⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region2.objMap.keys →
-  rid1 = rid2 := by
-  intro l1 mem1 in1 mem2 in2
-  by_contra hne
-  unfold L1 RuntimeConfig.objectIds at l1
-  obtain ⟨_, heap_nodup, _⟩ := List.nodup_append.mp l1
-  unfold Heap.objectIds at heap_nodup
-  rw [List.nodup_flatten, List.pairwise_map] at heap_nodup
-  obtain ⟨_, pairwise_disjoint⟩ := heap_nodup
-  have hneq : (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ≠ ⟨rid2, region2⟩ := by
-    intro heq
-    exact hne (congrArg Sigma.fst heq)
-  haveI : Std.Symm (fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds) := ⟨fun _ _ hd => List.disjoint_symm hd⟩
-  have disj := List.Pairwise.forall
-    (R := fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds)
-    pairwise_disjoint mem1 mem2 hneq
-  unfold Region.objectIds at disj
-  exact disj in1 in2
-
 -- `region`'s and `region'`'s object ids are disjoint: both are distinct heap entries (via
--- `merge_corollary_rid_ne_regionId`), so `merge_corollary_region_unique` rules out any shared oid.
+-- `merge_corollary_rid_ne_regionId`), so `heap_region_unique` rules out any shared oid.
 theorem merge_corollary_disjoint_keys {cfg : RuntimeConfig} {frame : Frame} {rid' : RegionId}
     {region region' : Region} (l1 : L1 cfg) (hregion : cfg.heap.lookup frame.regionId = some region)
     (hregion' : cfg.heap.lookup rid' = some region') (hne : rid' ≠ frame.regionId) :
     ∀ oid ∈ region.objMap.keys, oid ∉ region'.objMap.keys := by
   intro oid hoid hoid'
-  exact hne.symm (merge_corollary_region_unique l1 (AList.lookup_mem_entries hregion) hoid
+  exact hne.symm (heap_region_unique l1 (AList.lookup_mem_entries hregion) hoid
     (AList.lookup_mem_entries hregion') hoid')
 
 -- Since `region`/`region'`'s objMap keys are disjoint, unioning them is a plain append at the
@@ -292,7 +246,7 @@ theorem merge_H2 : ValidConfig cfg →
   have hOId_ne : (Reference.OId region'.bridgeObjectId == Reference.RId rid) = false := rfl
   have varmap_le : ((frame.varMap.insert x (Reference.OId region'.bridgeObjectId)).entries.map (·.2)).count
       (Reference.RId rid) ≤ (frame.varMap.entries.map (·.2)).count (Reference.RId rid) := by
-    have hcount := merge_corollary_alist_insert_count_eq
+    have hcount := alist_insert_count_eq
       (v_old := Reference.RId rid') (v_new := Reference.OId region'.bridgeObjectId) (t := Reference.RId rid) hxref
     rw [hOId_ne] at hcount
     simp only [Bool.false_eq_true, ite_false, Nat.add_zero] at hcount
@@ -347,7 +301,7 @@ theorem merge_corollary_entries_perm_mem {cfg : RuntimeConfig} {frame : Frame} {
 -- At most one entry of `cfg'.heap` contains a given `oid` in its `objMap`. Every `cfg'.heap` entry is
 -- either the merged head (`⟨frame.regionId, mergedRegion⟩`) or comes from the common "rest" tail
 -- (which embeds into `cfg.heap.entries` via `merge_corollary_heap_entries_perm`, so `L1`'s
--- `merge_corollary_region_unique` on `cfg` settles clashes among/against it).
+-- `heap_region_unique` on `cfg` settles clashes among/against it).
 theorem merge_corollary_heap'_unique {cfg : RuntimeConfig} {frame : Frame} {rid' : RegionId}
     {region region' : Region} (l1 : L1 cfg) (hregion : cfg.heap.lookup frame.regionId = some region)
     (hregion' : cfg.heap.lookup rid' = some region') (hne : rid' ≠ frame.regionId)
@@ -381,11 +335,11 @@ theorem merge_corollary_heap'_unique {cfg : RuntimeConfig} {frame : Frame} {rid'
     obtain ⟨hrid1, hr1⟩ := heq1
     rw [eq_of_heq hr1] at hoid1
     rcases merged_cases rfl hoid1 with hcase | hcase
-    · exact absurd (merge_corollary_region_unique l1 (AList.lookup_mem_entries hregion) hcase
+    · exact absurd (heap_region_unique l1 (AList.lookup_mem_entries hregion) hcase
         (merge_corollary_entries_perm_mem hregion hregion' hne hmem2) hoid2) (by
           intro heq; apply hrest_notmem.1; subst heq
           exact List.mem_map_of_mem (f := Sigma.fst) hmem2)
-    · exact absurd (merge_corollary_region_unique l1 (AList.lookup_mem_entries hregion') hcase
+    · exact absurd (heap_region_unique l1 (AList.lookup_mem_entries hregion') hcase
         (merge_corollary_entries_perm_mem hregion hregion' hne hmem2) hoid2) (by
           intro heq; apply hrest_notmem.2; subst heq
           exact List.mem_map_of_mem (f := Sigma.fst) hmem2)
@@ -394,15 +348,15 @@ theorem merge_corollary_heap'_unique {cfg : RuntimeConfig} {frame : Frame} {rid'
     obtain ⟨hrid2, hr2⟩ := heq2
     rw [eq_of_heq hr2] at hoid2
     rcases merged_cases rfl hoid2 with hcase | hcase
-    · exact absurd (merge_corollary_region_unique l1 (merge_corollary_entries_perm_mem hregion hregion' hne hmem1) hoid1
+    · exact absurd (heap_region_unique l1 (merge_corollary_entries_perm_mem hregion hregion' hne hmem1) hoid1
         (AList.lookup_mem_entries hregion) hcase) (by
           intro heq; apply hrest_notmem.1; subst heq
           exact List.mem_map_of_mem (f := Sigma.fst) hmem1)
-    · exact absurd (merge_corollary_region_unique l1 (merge_corollary_entries_perm_mem hregion hregion' hne hmem1) hoid1
+    · exact absurd (heap_region_unique l1 (merge_corollary_entries_perm_mem hregion hregion' hne hmem1) hoid1
         (AList.lookup_mem_entries hregion') hcase) (by
           intro heq; apply hrest_notmem.2; subst heq
           exact List.mem_map_of_mem (f := Sigma.fst) hmem1)
-  · exact merge_corollary_region_unique l1 (merge_corollary_entries_perm_mem hregion hregion' hne hmem1) hoid1
+  · exact heap_region_unique l1 (merge_corollary_entries_perm_mem hregion hregion' hne hmem1) hoid1
       (merge_corollary_entries_perm_mem hregion hregion' hne hmem2) hoid2
 
 -- `Reference.loc?`'s stack-side search only ever reads a frame's `objMap`, never its `varMap` -- so
@@ -1105,7 +1059,7 @@ theorem merge_HS2 : ValidConfig cfg →
   -- x's own varMap entry was the unique occurrence of `RId rid'` anywhere in cfg.refs (via H2), so
   -- it no longer appears anywhere in cfg'.refs once that entry is overwritten.
   have hOId_ne : (Reference.OId region'.bridgeObjectId == Reference.RId rid') = false := rfl
-  have hcount := merge_corollary_alist_insert_count_eq
+  have hcount := alist_insert_count_eq
     (v_old := Reference.RId rid') (v_new := Reference.OId region'.bridgeObjectId) (t := Reference.RId rid') hxref
   rw [hOId_ne] at hcount
   simp only [beq_self_eq_true, ite_true, Bool.false_eq_true, ite_false] at hcount

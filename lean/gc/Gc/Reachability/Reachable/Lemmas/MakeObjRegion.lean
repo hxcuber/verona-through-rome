@@ -1,11 +1,15 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Mutation.Mutation
-import Gc.Model.Preservation
-import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.Lemmas.Common
-import Gc.Reachability.Reachable.Lemmas.MakeObjStack
+module
+
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Mutation.Mutation
+public import Gc.Model.Preservation
+public import Gc.Reachability.Reachable.Semantics
+public import Gc.Reachability.Reachable.Lemmas.Common
+public import Gc.Reachability.Reachable.Lemmas.MakeObjStack
+
+@[expose] public section
 
 -- ===== makeObjRegion =====
 
@@ -181,19 +185,6 @@ theorem makeObjRegion_frame_mem_up {cfg cfg' : RuntimeConfig} {x : VarName}
   · rw [List.getElem_append_left hnlt, List.getElem_dropLast hnlt]
     exact hfeq
 
--- A frame strictly before the last one has a different regionId from the last frame's own (S1: regionId is injective across the stack).
-theorem makeObjRegion_regionId_ne {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
-    {f : FrameWithIndex} (hf : f ∈ cfg.stackWithIndex) (hflt : f.index < cfg.stack.length - 1)
-    {lastFrame : Frame} (hlast : cfg.stack.getLast? = some lastFrame) :
-    f.regionId ≠ lastFrame.regionId := by
-  intro heq
-  have hlastMem := stackWithIndex_getLast_mem hlast
-  have hidxEq : f.index = ({ lastFrame with index := cfg.stack.length - 1 } : FrameWithIndex).index :=
-    merge_corollary_regionId_unique_index vcfg.s1 hf hlastMem heq
-  dsimp only at hidxEq
-  rw [hidxEq] at hflt
-  exact absurd hflt (lt_irrefl _)
-
 -- `FrameReachable` agrees below the last frame; the new wrinkle vs. `makeObjStack` is transporting a `FrameRoot`'s bridge-object heap lookup via the regionId-disjointness fact above.
 theorem makeObjRegion_frame_reachable_iff {cfg cfg' : RuntimeConfig} {x : VarName} (vcfg : ValidConfig cfg)
     (h : makeObjRegion x cfg = some cfg')
@@ -207,7 +198,7 @@ theorem makeObjRegion_frame_reachable_iff {cfg cfg' : RuntimeConfig} {x : VarNam
     rcases hroot with ⟨Xf, hXfmem, hXfidx, var, hvar⟩ | ⟨Xf, hXfmem, hXfidx, regionX, hlookup, hbridge⟩
     · exact Or.inl ⟨Xf, makeObjRegion_frame_mem_up h hXfmem (hXfidx ▸ hXlt), hXfidx, var, hvar⟩
     · have hXfne : Xf.regionId ≠ lastFrame.regionId :=
-        makeObjRegion_regionId_ne vcfg hXfmem (hXfidx ▸ hXlt) hlast
+        regionId_ne_last_of_suspended vcfg hXfmem (hXfidx ▸ hXlt) hlast
       have hlookup' : cfg'.heap.lookup Xf.regionId = some regionX := by
         rw [hcfg']; dsimp only; rw [AList.lookup_insert_ne hXfne]; exact hlookup
       exact Or.inr ⟨Xf, makeObjRegion_frame_mem_up h hXfmem (hXfidx ▸ hXlt), hXfidx, regionX, hlookup', hbridge⟩
@@ -225,7 +216,7 @@ theorem makeObjRegion_frame_reachable_iff {cfg cfg' : RuntimeConfig} {x : VarNam
         exact absurd hXlt (lt_irrefl _)
     · rcases makeObjRegion_frame_cases h hXfmem with ⟨hXfmemcfg, hXflt⟩ | ⟨lf, hlf, -, -, -, -, hXfidx2⟩
       · have hXfne : Xf.regionId ≠ lastFrame.regionId :=
-          makeObjRegion_regionId_ne vcfg hXfmemcfg hXflt hlast
+          regionId_ne_last_of_suspended vcfg hXfmemcfg hXflt hlast
         have hlookupcfg : cfg.heap.lookup Xf.regionId = some regionX := by
           rw [hcfg'] at hlookup; dsimp only at hlookup
           rw [AList.lookup_insert_ne hXfne] at hlookup; exact hlookup

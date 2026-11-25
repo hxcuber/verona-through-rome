@@ -1,12 +1,16 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Mutation.Mutation
-import Gc.Model.Mutation.Stmt
-import Gc.Model.Preservation
-import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.StackReachableInvariant.Def
-import Gc.Reachability.Reachable.Lemmas
+module
+
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Mutation.Mutation
+public import Gc.Model.Mutation.Stmt
+public import Gc.Model.Preservation
+public import Gc.Reachability.Reachable.Semantics
+public import Gc.Reachability.Reachable.StackReachableInvariant.Def
+public import Gc.Reachability.Reachable.Lemmas
+
+@[expose] public section
 
 theorem stackReachable_invariant_swap (x : VarName) (yf : FieldAccess) :
     StackReachable_invariant_for_suspended_region_objects (Stmt.swap x yf) := by
@@ -15,7 +19,7 @@ theorem stackReachable_invariant_swap (x : VarName) (yf : FieldAccess) :
   have vcfg' : ValidConfig cfg' := swap_valid vcfg h'
   obtain ⟨frame0, hframe0, yRef, hyr, yRefLoc, hyrl, yfRef, hyf, yfRefLoc, hyfl, hcase⟩ := swap_cases h'
   have hframe0_mem : frame0 ∈ cfg.stackWithIndex := List.mem_of_getLast? hframe0
-  obtain ⟨stack_eq0, hidx00⟩ := swap_corollary_stack_eq hframe0
+  obtain ⟨stack_eq0, hidx00⟩ := stack_eq_of_stackWithIndex_getLast? hframe0
   have hlenEq : cfg.stackWithIndex.length = cfg.stack.length := by
     unfold RuntimeConfig.stackWithIndex; rw [List.length_mapIdx]
   have hframeSusp' : frame.index < cfg.stack.dropLast.length := by

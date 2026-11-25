@@ -1,9 +1,13 @@
-import Gc.Model.Mutation.Enter
-import Gc.Model.Mutation.Exit
-import Gc.Model.Mutation.FieldAsgn
-import Gc.Model.Mutation.MakeObjRegion
-import Gc.Model.Mutation.MakeObjStack
-import Gc.Model.Mutation.MakeRegion
-import Gc.Model.Mutation.Merge
-import Gc.Model.Mutation.Swap
-import Gc.Model.Mutation.VarAsgn
+module
+
+public import Gc.Model.Mutation.Enter
+public import Gc.Model.Mutation.Exit
+public import Gc.Model.Mutation.FieldAsgn
+public import Gc.Model.Mutation.MakeObjRegion
+public import Gc.Model.Mutation.MakeObjStack
+public import Gc.Model.Mutation.MakeRegion
+public import Gc.Model.Mutation.Merge
+public import Gc.Model.Mutation.Swap
+public import Gc.Model.Mutation.VarAsgn
+
+@[expose] public section

@@ -1,12 +1,16 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Mutation.Mutation
-import Gc.Model.Mutation.Stmt
-import Gc.Model.Preservation
-import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.StackReachableInvariant.Def
-import Gc.Reachability.Reachable.Lemmas
+module
+
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Mutation.Mutation
+public import Gc.Model.Mutation.Stmt
+public import Gc.Model.Preservation
+public import Gc.Reachability.Reachable.Semantics
+public import Gc.Reachability.Reachable.StackReachableInvariant.Def
+public import Gc.Reachability.Reachable.Lemmas
+
+@[expose] public section
 
 theorem stackReachable_invariant_fieldAsgn (xf : FieldAccess) (y : VarName) :
     StackReachable_invariant_for_suspended_region_objects (Stmt.fieldAsgn xf y) := by
@@ -16,7 +20,7 @@ theorem stackReachable_invariant_fieldAsgn (xf : FieldAccess) (y : VarName) :
   have hframeRootIff := fieldAsgn_frame_root_iff h'
   have vcfg' : ValidConfig cfg' := fieldAsgn_valid vcfg h'
   obtain ⟨activeFrame, hactive, hcase⟩ := fieldAsgn_cases h'
-  obtain ⟨stack_eq, hactiveidx⟩ := fieldAsgn_corollary_stack_eq hactive
+  obtain ⟨stack_eq, hactiveidx⟩ := stack_eq_of_stackWithIndex_getLast? hactive
   have hlenEq : cfg.stackWithIndex.length = cfg.stack.length := by
     unfold RuntimeConfig.stackWithIndex; rw [List.length_mapIdx]
   have hactiveidx' : activeFrame.index = cfg.stackWithIndex.length - 1 := by

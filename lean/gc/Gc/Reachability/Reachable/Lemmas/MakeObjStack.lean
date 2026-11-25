@@ -1,10 +1,14 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Mutation.Mutation
-import Gc.Model.Preservation
-import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.Lemmas.Common
+module
+
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Mutation.Mutation
+public import Gc.Model.Preservation
+public import Gc.Reachability.Reachable.Semantics
+public import Gc.Reachability.Reachable.Lemmas.Common
+
+@[expose] public section
 
 -- The freshly-allocated object id is never already present in the last frame's own objMap.
 theorem makeObjStack_fresh_not_in_last {cfg : RuntimeConfig} {lastFrame : Frame}
@@ -137,7 +141,7 @@ theorem makeObjStack_objAt_eq_of_ne {cfg cfg' : RuntimeConfig} (h : makeObjStack
           rw [hcfg']; dsimp only
           rw [List.getElem?_append_left hfid]
         rw [h1, h2]
-      · push_neg at hfid
+      · push Not at hfid
         set newLastFrame : Frame := { regionId := lastFrame.regionId, bridgeVar := lastFrame.bridgeVar, objMap := lastFrame.objMap.insert cfg.freshObjectId ∅, varMap := lastFrame.varMap.insert x (Reference.OId cfg.freshObjectId) } with hnewLastFrame_def
         have h1 : cfg.stack[fid0]? = [lastFrame][fid0 - cfg.stack.dropLast.length]? := by
           conv_lhs => rw [hstackEq]
@@ -160,7 +164,7 @@ theorem freshObjectId_loc_none {cfg : RuntimeConfig} :
   have hnotmem := cfg.freshObjectId_not_mem
   unfold RuntimeConfig.objectIds at hnotmem
   rw [List.mem_append] at hnotmem
-  push_neg at hnotmem
+  push Not at hnotmem
   obtain ⟨hnotStack, hnotHeap⟩ := hnotmem
   unfold Reference.loc?
   dsimp only
@@ -207,7 +211,7 @@ theorem makeObjStack_fresh_objAt_cfg' {cfg cfg' : RuntimeConfig} (h : makeObjSta
   have hnotmem := cfg.freshObjectId_not_mem
   unfold RuntimeConfig.objectIds at hnotmem
   rw [List.mem_append] at hnotmem
-  push_neg at hnotmem
+  push Not at hnotmem
   obtain ⟨-, hnotHeap⟩ := hnotmem
   have hne' : cfg.stack ≠ [] := by intro hnil; rw [hnil] at hlast; simp at hlast
   have hstackEq : cfg.stack = cfg.stack.dropLast ++ [lastFrame] := by
@@ -391,17 +395,3 @@ theorem freshObjectId_loc_ne_rgn {cfg : RuntimeConfig} {rid : RegionId} :
     (Reference.OId cfg.freshObjectId).loc? cfg ≠ some (Location.Rgn rid) := by
   rw [freshObjectId_loc_none]
   simp
-
--- The stack's own last frame, reindexed as a `FrameWithIndex`, is a member of `stackWithIndex`.
-theorem stackWithIndex_getLast_mem {cfg : RuntimeConfig} {lastFrame : Frame}
-    (hlast : cfg.stack.getLast? = some lastFrame) :
-    ({ lastFrame with index := cfg.stack.length - 1 } : FrameWithIndex) ∈ cfg.stackWithIndex := by
-  have hne : cfg.stack ≠ [] := by intro hnil; rw [hnil] at hlast; simp at hlast
-  have hlen1 : 1 ≤ cfg.stack.length := List.length_pos_of_ne_nil hne
-  have hget : cfg.stack[cfg.stack.length - 1] = lastFrame := by
-    rw [List.getLast?_eq_getLast_of_ne_nil hne, Option.some_inj] at hlast
-    rw [← hlast, List.getLast_eq_getElem hne]
-  unfold RuntimeConfig.stackWithIndex
-  apply List.mem_mapIdx.mpr
-  refine ⟨cfg.stack.length - 1, by omega, ?_⟩
-  rw [hget]

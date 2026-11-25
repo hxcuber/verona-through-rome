@@ -1,10 +1,15 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Theorems
-import Gc.Model.Mutation.MakeRegion
+module
 
-import Mathlib.Data.List.Infix
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Theorems
+public import Gc.Model.Mutation.MakeRegion
+public import Gc.Model.Preservation.Common
+
+public import Mathlib.Data.List.Infix
+
+@[expose] public section
 
 theorem makeRegion_L1 : ValidConfig cfg →
   makeRegion x cfg = some cfg' →
@@ -256,18 +261,6 @@ theorem makeRegion_H2 : ValidConfig cfg →
       rw [stack_count_eq rid] at h2rid
       omega
 
-theorem makeRegion_corollary_loc_match_eq (o1 : Option FrameWithIndex)
-    (o2 : Option (Sigma (fun _ : RegionId => Region))) :
-    (match o1, o2 with
-      | some f, none => some (Location.Stk f.index)
-      | none, some ⟨rid, _⟩ => some (Location.Rgn rid)
-      | _, _ => none) =
-    (match o1.map FrameWithIndex.index, o2.map Sigma.fst with
-      | some n, none => some (Location.Stk n)
-      | none, some r => some (Location.Rgn r)
-      | _, _ => none) := by
-  cases o1 <;> cases o2 <;> rfl
-
 theorem makeRegion_corollary_loc_eq : ValidConfig cfg →
   makeRegion x cfg = some cfg' →
   ∀ oid, oid ≠ cfg.freshObjectId →
@@ -364,10 +357,10 @@ theorem makeRegion_corollary_loc_eq : ValidConfig cfg →
       exact find_eq.symm
     unfold Reference.loc?
     dsimp
-    have step1 := makeRegion_corollary_loc_match_eq
+    have step1 := loc_match_eq
       (cfg.stackWithIndex.findRev? (fun f => (AList.keys f.objMap).contains oid))
       (cfg.heap.entries.find? (fun p => (AList.keys p.snd.objMap).contains oid))
-    have step2 := makeRegion_corollary_loc_match_eq
+    have step2 := loc_match_eq
       (cfgLit.stackWithIndex.findRev? (fun f => (AList.keys f.objMap).contains oid))
       (cfgLit.heap.entries.find? (fun p => (AList.keys p.snd.objMap).contains oid))
     have heap_h2_map_eq :

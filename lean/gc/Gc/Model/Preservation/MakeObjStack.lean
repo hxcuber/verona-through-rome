@@ -1,10 +1,15 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Theorems
-import Gc.Model.Mutation.MakeObjStack
+module
 
-import Mathlib.Data.List.Infix
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Theorems
+public import Gc.Model.Mutation.MakeObjStack
+public import Gc.Model.Preservation.Common
+
+public import Mathlib.Data.List.Infix
+
+@[expose] public section
 
 -- heap objects keep their region location (both directions: heap is untouched by makeObjStack).
 theorem makeObjStack_corollary_1 : ValidConfig cfg →

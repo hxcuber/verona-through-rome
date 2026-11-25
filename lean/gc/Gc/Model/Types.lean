@@ -1,4 +1,8 @@
-import Mathlib.Data.List.AList
+module
+
+public import Mathlib.Data.List.AList
+
+@[expose] public section
 
 abbrev RegionId := Nat
 abbrev ObjectId := Nat

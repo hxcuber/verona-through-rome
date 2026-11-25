@@ -1,7 +1,11 @@
-import Gc.Model.Helpers
-import Gc.Model.Types
+module
 
-import Mathlib.Data.List.Infix
+public import Gc.Model.Helpers
+public import Gc.Model.Types
+
+public import Mathlib.Data.List.Infix
+
+@[expose] public section
 
 def swap (x : VarName) (yf : FieldAccess) (cfg : RuntimeConfig) : Option (RuntimeConfig) := do
   let frame ← cfg.stackWithIndex.getLast?

@@ -1,9 +1,13 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Mutation.Mutation
-import Gc.Model.Preservation
-import Gc.Reachability.Reachable.Semantics
+module
+
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Mutation.Mutation
+public import Gc.Model.Preservation
+public import Gc.Reachability.Reachable.Semantics
+
+@[expose] public section
 
 -- Generic, non-operation-specific helper lemmas shared across `Lemmas/<Op>.lean`.
 
@@ -566,3 +570,30 @@ theorem FrameReachable_rid_of_closed_container {cfg : RuntimeConfig} (vcfg : Val
       · rw [haeq] at hprev
         exact (FrameReachable_iff_reflTransGen cfg fid (Reference.RId rid)).mpr ⟨start, hroot, hprev⟩
   exact hback _ hrtg oid rfl hloc
+
+-- The stack's own last frame, reindexed as a `FrameWithIndex`, is a member of `stackWithIndex`.
+theorem stackWithIndex_getLast_mem {cfg : RuntimeConfig} {lastFrame : Frame}
+    (hlast : cfg.stack.getLast? = some lastFrame) :
+    ({ lastFrame with index := cfg.stack.length - 1 } : FrameWithIndex) ∈ cfg.stackWithIndex := by
+  have hne : cfg.stack ≠ [] := by intro hnil; rw [hnil] at hlast; simp at hlast
+  have hlen1 : 1 ≤ cfg.stack.length := List.length_pos_of_ne_nil hne
+  have hget : cfg.stack[cfg.stack.length - 1] = lastFrame := by
+    rw [List.getLast?_eq_getLast_of_ne_nil hne, Option.some_inj] at hlast
+    rw [← hlast, List.getLast_eq_getElem hne]
+  unfold RuntimeConfig.stackWithIndex
+  apply List.mem_mapIdx.mpr
+  refine ⟨cfg.stack.length - 1, by omega, ?_⟩
+  rw [hget]
+
+-- A frame strictly before the last one has a different regionId from the last frame's own (S1: regionId is injective across the stack).
+theorem regionId_ne_last_of_suspended {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
+    {f : FrameWithIndex} (hf : f ∈ cfg.stackWithIndex) (hflt : f.index < cfg.stack.length - 1)
+    {lastFrame : Frame} (hlast : cfg.stack.getLast? = some lastFrame) :
+    f.regionId ≠ lastFrame.regionId := by
+  intro heq
+  have hlastMem := stackWithIndex_getLast_mem hlast
+  have hidxEq : f.index = ({ lastFrame with index := cfg.stack.length - 1 } : FrameWithIndex).index :=
+    merge_corollary_regionId_unique_index vcfg.s1 hf hlastMem heq
+  dsimp only at hidxEq
+  rw [hidxEq] at hflt
+  exact absurd hflt (lt_irrefl _)

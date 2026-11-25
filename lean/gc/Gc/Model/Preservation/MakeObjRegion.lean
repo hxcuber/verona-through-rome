@@ -1,10 +1,15 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Theorems
-import Gc.Model.Mutation.MakeObjRegion
+module
 
-import Mathlib.Data.List.Infix
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Theorems
+public import Gc.Model.Mutation.MakeObjRegion
+public import Gc.Model.Preservation.Common
+
+public import Mathlib.Data.List.Infix
+
+@[expose] public section
 
 -- freshObjectId can't already be sitting inside some region's objMap.
 theorem makeObjRegion_corollary_fresh_not_in_region {cfg : RuntimeConfig} {rid : RegionId} {region : Region} :
@@ -332,45 +337,6 @@ theorem makeObjRegion_H2 : ValidConfig cfg →
           exact Nat.add_le_add_left newFrame_refs_le _
         exact Nat.le_trans (Nat.add_le_add_right stack_refs_le _) h2
 
--- An oid can be found in at most one region's objMap (stated over bare L1, so it's usable on cfg
--- before cfg''s own validity is established).
-theorem makeObjRegion_corollary_region_unique
-    {cfg : RuntimeConfig} {rid1 rid2 : RegionId} {region1 region2 : Region} {oid : ObjectId} :
-  L1 cfg →
-  (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region1.objMap.keys →
-  (⟨rid2, region2⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region2.objMap.keys →
-  rid1 = rid2 := by
-  intro l1 mem1 in1 mem2 in2
-  by_contra hne
-  unfold L1 RuntimeConfig.objectIds at l1
-  obtain ⟨_, heap_nodup, _⟩ := List.nodup_append.mp l1
-  unfold Heap.objectIds at heap_nodup
-  rw [List.nodup_flatten, List.pairwise_map] at heap_nodup
-  obtain ⟨_, pairwise_disjoint⟩ := heap_nodup
-  have hneq : (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ≠ ⟨rid2, region2⟩ := by
-    intro heq
-    exact hne (congrArg Sigma.fst heq)
-  haveI : Std.Symm (fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds) := ⟨fun _ _ hd => List.disjoint_symm hd⟩
-  have disj := List.Pairwise.forall
-    (R := fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds)
-    pairwise_disjoint mem1 mem2 hneq
-  unfold Region.objectIds at disj
-  exact disj in1 in2
-
--- Reference.loc?'s (h1, h2)-match for OId factors through Option.map, so equal cfg's need only
--- agree on the *projected* index/rid, not the full FrameWithIndex/heap-entry value.
-theorem makeObjRegion_corollary_loc_match_eq (o1 : Option FrameWithIndex)
-    (o2 : Option (Sigma (fun _ : RegionId => Region))) :
-    (match o1, o2 with
-      | some f, none => some (Location.Stk f.index)
-      | none, some ⟨rid, _⟩ => some (Location.Rgn rid)
-      | _, _ => none) =
-    (match o1.map FrameWithIndex.index, o2.map Sigma.fst with
-      | some n, none => some (Location.Stk n)
-      | none, some r => some (Location.Rgn r)
-      | _, _ => none) := by
-  cases o1 <;> cases o2 <;> rfl
-
 -- The heart of H3/S2/S3: for any oid other than the freshly-allocated one, an OId reference
 -- resolves to the exact same Location before and after makeObjRegion. The stack side is
 -- unconditionally unaffected (only the last frame's varMap changes, never any objMap), so it
@@ -509,7 +475,7 @@ theorem makeObjRegion_corollary_loc_eq : ValidConfig cfg →
               intro y hy hpy
               obtain ⟨rid_y, region_y⟩ := y
               have rid_y_eq : rid_y = frame.regionId :=
-                makeObjRegion_corollary_region_unique l1 hy (List.contains_iff_mem.mp hpy)
+                heap_region_unique l1 hy (List.contains_iff_mem.mp hpy)
                   region_mem_cfg (List.contains_iff_mem.mp hb2)
               subst rid_y_eq
               have region_y_eq : region_y = region :=
@@ -560,10 +526,10 @@ theorem makeObjRegion_corollary_loc_eq : ValidConfig cfg →
             rw [find_eqL]
         unfold Reference.loc?
         dsimp
-        have step1 := makeObjRegion_corollary_loc_match_eq
+        have step1 := loc_match_eq
           (cfg.stackWithIndex.findRev? (fun f => (AList.keys f.objMap).contains oid))
           (cfg.heap.entries.find? (fun p => (AList.keys p.snd.objMap).contains oid))
-        have step2 := makeObjRegion_corollary_loc_match_eq
+        have step2 := loc_match_eq
           (cfgLit.stackWithIndex.findRev? (fun f => (AList.keys f.objMap).contains oid))
           (cfgLit.heap.entries.find? (fun p => (AList.keys p.snd.objMap).contains oid))
         rw [stack_h1_map_eq, heap_h2_map_eq] at step1

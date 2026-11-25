@@ -1,12 +1,16 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Mutation.Mutation
-import Gc.Model.Mutation.Stmt
-import Gc.Model.Preservation
-import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Def
-import Gc.Reachability.Reachable.Lemmas
+module
+
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Mutation.Mutation
+public import Gc.Model.Mutation.Stmt
+public import Gc.Model.Preservation
+public import Gc.Reachability.Reachable.Semantics
+public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Def
+public import Gc.Reachability.Reachable.Lemmas
+
+@[expose] public section
 
 theorem frameReachableAtLaterFrame_step_enter (xf : FieldAccess) (bridgeVar : VarName) :
     FrameReachableAtLaterFrame_step (Stmt.enter xf bridgeVar) := by

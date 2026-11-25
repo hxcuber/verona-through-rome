@@ -1,5 +1,9 @@
-import Gc.Model.Types
-import Gc.Model.Mutation.Mutation
+module
+
+public import Gc.Model.Types
+public import Gc.Model.Mutation.Mutation
+
+@[expose] public section
 
 -- A single `Mutation.lean` operation, reified as data so "every operation" claims can quantify over it.
 inductive Stmt where

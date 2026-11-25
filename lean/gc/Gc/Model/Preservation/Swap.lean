@@ -1,38 +1,16 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Theorems
-import Gc.Model.Mutation.Swap
-import Gc.Model.Preservation.Common
+module
 
-import Mathlib.Data.List.Infix
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Theorems
+public import Gc.Model.Mutation.Swap
+public import Gc.Model.Preservation.Common
 
+public import Mathlib.Data.List.Infix
 
--- Relates the `stackWithIndex.getLast?` frame used by `swap_cases` back to `cfg.stack`'s own
--- decomposition, mirroring fieldAsgn_corollary_stack_eq/VarAsgn.lean's stack_eq construction.
-theorem swap_corollary_stack_eq {cfg : RuntimeConfig} {frame : FrameWithIndex}
-    (hframe : cfg.stackWithIndex.getLast? = some frame) :
-    cfg.stack = cfg.stack.dropLast ++ [frame.toFrame] ∧ frame.index = cfg.stack.dropLast.length := by
-  cases hlast : cfg.stack.getLast? with
-  | none =>
-    exfalso
-    have hnil : cfg.stack = [] := List.getLast?_eq_none_iff.mp hlast
-    unfold RuntimeConfig.stackWithIndex at hframe
-    rw [hnil] at hframe
-    simp at hframe
-  | some lastF =>
-    have stack_eq : cfg.stack = cfg.stack.dropLast ++ [lastF] :=
-      (List.dropLast_append_getLast? lastF hlast).symm
-    have stackWithIndex_eq :
-        cfg.stackWithIndex =
-          cfg.stack.dropLast.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) ++
-            [({ lastF with index := cfg.stack.dropLast.length } : FrameWithIndex)] := by
-      unfold RuntimeConfig.stackWithIndex
-      conv_lhs => rw [stack_eq]
-      rw [List.mapIdx_concat]
-    rw [stackWithIndex_eq, List.getLast?_concat, Option.some_inj] at hframe
-    subst hframe
-    exact ⟨stack_eq, rfl⟩
+@[expose] public section
+
 
 theorem swap_S1 : ValidConfig cfg →
   swap x yf cfg = some cfg' →
@@ -41,7 +19,7 @@ theorem swap_S1 : ValidConfig cfg →
   have s1 := vcfg.s1
   obtain ⟨frame, hframe, yRef, hyr, yRefLoc, hyrl, yfRef, hyf, yfRefLoc, hyfl, hcase⟩ := swap_cases h
   unfold S1
-  obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+  obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
   have s1' : (cfg.stack.dropLast.map (fun frame => frame.regionId) ++ [frame.regionId]).Nodup := by
     have := s1
     unfold S1 at this
@@ -68,56 +46,6 @@ theorem swap_S1 : ValidConfig cfg →
     dsimp
     exact s1
 
--- Generic AList fact (no domain dependency): replacing the value at an already-present key
--- reorders `entries` but only *permutes* `.keys`, never changes the key set. Used at both
--- nesting levels in this file (frame.objMap/region.objMap insert at the already-present `yoid`,
--- and the analogous facts for varMap-level operations aren't needed since swap never allocates).
-theorem swap_corollary_insert_keys_perm {α : Type*} {β : α → Type*} [DecidableEq α]
-    {l : AList β} {k : α} {v : β k} (hk : k ∈ l.keys) :
-    (l.insert k v).keys.Perm l.keys := by
-  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase hk
-  unfold AList.keys
-  rw [AList.entries_insert, hkerase]
-  conv_rhs => rw [heq]
-  rw [List.keys_cons, List.keys_append, List.keys_append, List.keys_cons]
-  exact List.perm_middle.symm
-
--- Generic AList fact: a successful `lookup` means the key is already present.
-theorem swap_corollary_mem_keys_of_lookup {α : Type*} {β : α → Type*} [DecidableEq α]
-    {l : AList β} {k : α} {v : β k} (hv : l.lookup k = some v) : k ∈ l.keys :=
-  AList.mem_keys.mp (AList.lookup_isSome.mp (by rw [hv]; rfl))
-
--- The region-touching branches' `heap.insert` at an already-present key, where the newly-inserted
--- region's objMap key set is only known up to a `Perm` of the old region's (the region's objMap
--- genuinely changes, not just a scalar field) -- composes the outer heap-entries reorder with the
--- inner region-level permutation. Mirrors fieldAsgn_corollary_region_heap_objectIds_perm.
-theorem swap_corollary_region_heap_objectIds_perm {cfg : RuntimeConfig} {rid : RegionId}
-    {region newRegion : Region} (hregion : cfg.heap.lookup rid = some region)
-    (hperm : newRegion.objMap.keys.Perm region.objMap.keys) :
-    (Heap.objectIds (cfg.heap.insert rid newRegion)).Perm cfg.heap.objectIds := by
-  obtain ⟨region2, l1e, l2e, hnotmem, heq, hkerase⟩ :=
-    List.exists_of_kerase (swap_corollary_mem_keys_of_lookup hregion)
-  have region2_eq : region2 = region :=
-    List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys
-      (heq ▸ List.mem_append_right _ List.mem_cons_self) (AList.mem_lookup_iff.mp (by rw [hregion]; rfl))
-  have cfg_eq : Heap.objectIds cfg.heap =
-      List.flatten (l1e.map (fun e => e.2.objectIds)) ++
-        (region.objectIds ++ List.flatten (l2e.map (fun e => e.2.objectIds))) := by
-    unfold Heap.objectIds
-    rw [heq, ← region2_eq, List.map_append, List.map_cons, List.flatten_append, List.flatten_cons]
-  have cfg'_eq : Heap.objectIds (cfg.heap.insert rid newRegion) =
-      newRegion.objectIds ++
-        (List.flatten (l1e.map (fun e => e.2.objectIds)) ++ List.flatten (l2e.map (fun e => e.2.objectIds))) := by
-    unfold Heap.objectIds
-    rw [AList.entries_insert, hkerase, List.map_cons, List.flatten_cons, List.map_append, List.flatten_append]
-  rw [cfg_eq, cfg'_eq]
-  set LA := List.flatten (l1e.map (fun e => e.2.objectIds))
-  set LB := List.flatten (l2e.map (fun e => e.2.objectIds))
-  have swap_perm : (region.objectIds ++ (LA ++ LB)).Perm (LA ++ (region.objectIds ++ LB)) := by
-    rw [← List.append_assoc, ← List.append_assoc]
-    exact (List.perm_append_comm).append_right LB
-  exact (hperm.append_right (LA ++ LB)).trans swap_perm
-
 -- Generic fact used for the stack-mutation branches: `Stack.objectIds` distributes over `++ [f]`.
 theorem swap_corollary_stack_objectIds_append (l : Stack) (f : Frame) :
     Stack.objectIds (l ++ [f]) = Stack.objectIds l ++ f.objectIds := by
@@ -139,9 +67,9 @@ theorem swap_L1 : ValidConfig cfg →
     ⟨yoid, rid, region, obj, xrid, hxb, hyoid, hyrloc, hrid, hregion, hobj, hxr, hstatus, hcfg'⟩ |
     ⟨yoid, yrid, yfoid, yfrid, region, obj, hxb, hyoid, hyrloc, hyfoid, hyfrloc, hyrid, hyfrid, hregion, hobj, hcfg'⟩
   · subst hcfg'
-    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
-    have hoidmem : yoid ∈ frame.objMap.keys := swap_corollary_mem_keys_of_lookup hobj
-    have frame_perm := swap_corollary_insert_keys_perm (l := frame.objMap) (v := obj.insert yf.field xRef) hoidmem
+    obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
+    have hoidmem : yoid ∈ frame.objMap.keys := AList.mem_keys_of_lookup_eq_some hobj
+    have frame_perm := AList.keys_insert_perm_of_mem (l := frame.objMap) (v := obj.insert yf.field xRef) hoidmem
     unfold RuntimeConfig.objectIds
     dsimp
     rw [swap_corollary_stack_objectIds_append]
@@ -154,10 +82,10 @@ theorem swap_L1 : ValidConfig cfg →
     rw [← cfg_stack_eq] at perm2
     exact l1.perm perm2.symm
   · subst hcfg'
-    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
-    have hoidmem : yoid ∈ region.objMap.keys := swap_corollary_mem_keys_of_lookup hobj
-    have region_perm := swap_corollary_insert_keys_perm (l := region.objMap) (v := obj.insert yf.field (Reference.OId xoid)) hoidmem
-    have heap_perm := swap_corollary_region_heap_objectIds_perm
+    obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
+    have hoidmem : yoid ∈ region.objMap.keys := AList.mem_keys_of_lookup_eq_some hobj
+    have region_perm := AList.keys_insert_perm_of_mem (l := region.objMap) (v := obj.insert yf.field (Reference.OId xoid)) hoidmem
+    have heap_perm := heap_insert_objectIds_perm
       (newRegion := { region with objMap := AList.insert yoid (obj.insert yf.field (Reference.OId xoid)) region.objMap })
       hregion region_perm
     unfold RuntimeConfig.objectIds
@@ -172,10 +100,10 @@ theorem swap_L1 : ValidConfig cfg →
     rw [cfg'_stack_eq]
     exact l1.perm (List.Perm.append_left cfg.stack.objectIds heap_perm).symm
   · subst hcfg'
-    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
-    have hoidmem : yoid ∈ region.objMap.keys := swap_corollary_mem_keys_of_lookup hobj
-    have region_perm := swap_corollary_insert_keys_perm (l := region.objMap) (v := obj.insert yf.field (Reference.RId xrid)) hoidmem
-    have heap_perm := swap_corollary_region_heap_objectIds_perm
+    obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
+    have hoidmem : yoid ∈ region.objMap.keys := AList.mem_keys_of_lookup_eq_some hobj
+    have region_perm := AList.keys_insert_perm_of_mem (l := region.objMap) (v := obj.insert yf.field (Reference.RId xrid)) hoidmem
+    have heap_perm := heap_insert_objectIds_perm
       (newRegion := { region with objMap := AList.insert yoid (obj.insert yf.field (Reference.RId xrid)) region.objMap })
       hregion region_perm
     unfold RuntimeConfig.objectIds
@@ -190,10 +118,10 @@ theorem swap_L1 : ValidConfig cfg →
     rw [cfg'_stack_eq]
     exact l1.perm (List.Perm.append_left cfg.stack.objectIds heap_perm).symm
   · subst hcfg'
-    have hoidmem : yoid ∈ region.objMap.keys := swap_corollary_mem_keys_of_lookup hobj
-    have region_perm := swap_corollary_insert_keys_perm
+    have hoidmem : yoid ∈ region.objMap.keys := AList.mem_keys_of_lookup_eq_some hobj
+    have region_perm := AList.keys_insert_perm_of_mem
       (l := region.objMap) (v := obj.insert yf.field (Reference.OId region.bridgeObjectId)) hoidmem
-    have heap_perm := swap_corollary_region_heap_objectIds_perm
+    have heap_perm := heap_insert_objectIds_perm
       (newRegion := { region with
         bridgeObjectId := yfoid,
         objMap := AList.insert yoid (obj.insert yf.field (Reference.OId region.bridgeObjectId)) region.objMap })
@@ -215,7 +143,7 @@ theorem swap_L2 : ValidConfig cfg →
     ⟨yoid, rid, region, obj, xrid, hxb, hyoid, hyrloc, hrid, hregion, hobj, hxr, hstatus, hcfg'⟩ |
     ⟨yoid, yrid, yfoid, yfrid, region, obj, hxb, hyoid, hyrloc, hyfoid, hyfrloc, hyrid, hyfrid, hregion, hobj, hcfg'⟩
   · subst hcfg'
-    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
     have frame_mem : frame.toFrame ∈ cfg.stack :=
       stack_eq ▸ List.mem_append_right _ (List.mem_singleton_self _)
     dsimp
@@ -225,7 +153,7 @@ theorem swap_L2 : ValidConfig cfg →
     | inl hdrop => exact l2 frame'' (List.mem_of_mem_dropLast hdrop)
     | inr heqframe => subst heqframe; exact l2 frame.toFrame frame_mem
   · subst hcfg'
-    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
     have frame_mem : frame.toFrame ∈ cfg.stack :=
       stack_eq ▸ List.mem_append_right _ (List.mem_singleton_self _)
     dsimp
@@ -247,7 +175,7 @@ theorem swap_L2 : ValidConfig cfg →
       rw [AList.lookup_insert_ne heq]
       exact hlookup0
   · subst hcfg'
-    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
     have frame_mem : frame.toFrame ∈ cfg.stack :=
       stack_eq ▸ List.mem_append_right _ (List.mem_singleton_self _)
     dsimp
@@ -420,62 +348,6 @@ theorem swap_corollary_alist_insert_refs_mem {α : Type*} [DecidableEq α] {l : 
     dsimp only at hr
     tauto
 
--- Once an object is already stored at some key of an ObjMap, its own refs already contribute to
--- the ObjMap-level bind-refs.
-theorem swap_corollary_objMap_bind_refs_mem_of_lookup {m : ObjMap} {oid : ObjectId} {obj : Object}
-    {r : Reference} (hobj : m.lookup oid = some obj) (hr : r ∈ Object.refs obj) :
-    r ∈ (m.entries.map (·.2) >>= Object.refs) := by
-  have hmem : (⟨oid, obj⟩ : Sigma (fun _ : ObjectId => Object)) ∈ m.entries :=
-    AList.mem_lookup_iff.mp (by rw [hobj]; rfl)
-  rw [List.bind_eq_flatMap, List.mem_flatMap]
-  exact ⟨obj, List.mem_map_of_mem (f := (·.2)) hmem, hr⟩
-
--- Membership after inserting at an ObjMap key: either from the newly-written object, or already present.
-theorem swap_corollary_objMap_insert_bind_refs_mem {m : ObjMap} {oid : ObjectId} {v : Object} {r : Reference}
-    (hr : r ∈ ((m.insert oid v).entries.map (·.2) >>= Object.refs)) :
-    r ∈ Object.refs v ∨ r ∈ (m.entries.map (·.2) >>= Object.refs) := by
-  by_cases hoid : oid ∈ m
-  · obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase (AList.mem_keys.mp hoid)
-    rw [AList.entries_insert, hkerase, List.map_cons, List.bind_eq_flatMap, List.flatMap_cons,
-      ← List.bind_eq_flatMap, List.mem_append, List.map_append, List.bind_eq_flatMap, List.flatMap_append,
-      ← List.bind_eq_flatMap, List.mem_append] at hr
-    rw [heq, List.map_append, List.map_cons, List.bind_eq_flatMap, List.flatMap_append, List.flatMap_cons,
-      ← List.bind_eq_flatMap, ← List.bind_eq_flatMap, List.mem_append, List.mem_append]
-    tauto
-  · rw [AList.entries_insert_of_notMem hoid, List.map_cons, List.bind_eq_flatMap, List.flatMap_cons,
-      ← List.bind_eq_flatMap, List.mem_append] at hr
-    tauto
-
--- Once a region is already stored at some key of a heap, its own refs already contribute to Heap.refs.
-theorem swap_corollary_heap_refs_mem_of_lookup {cfg : RuntimeConfig} {rid : RegionId} {region : Region}
-    {r : Reference} (hregion : cfg.heap.lookup rid = some region) (hr : r ∈ Region.refs region) :
-    r ∈ Heap.refs cfg.heap := by
-  have hmem : (⟨rid, region⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries :=
-    AList.mem_lookup_iff.mp (by rw [hregion]; rfl)
-  unfold Heap.refs
-  rw [List.bind_eq_flatMap, List.mem_flatMap]
-  exact ⟨region, List.mem_map_of_mem (f := (·.2)) hmem, hr⟩
-
--- Membership after inserting at a heap key: either from the newly-written region, or already present.
-theorem swap_corollary_heap_insert_refs_mem {cfg : RuntimeConfig} {rid : RegionId} {newRegion : Region}
-    {r : Reference} (hrid : rid ∈ cfg.heap.keys) (hr : r ∈ Heap.refs (cfg.heap.insert rid newRegion)) :
-    r ∈ Region.refs newRegion ∨ r ∈ Heap.refs cfg.heap := by
-  unfold Heap.refs at hr ⊢
-  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase hrid
-  rw [AList.entries_insert, hkerase, List.map_cons, List.bind_eq_flatMap, List.flatMap_cons,
-    ← List.bind_eq_flatMap, List.mem_append, List.map_append, List.bind_eq_flatMap, List.flatMap_append,
-    ← List.bind_eq_flatMap, List.mem_append] at hr
-  rw [heq, List.map_append, List.map_cons, List.bind_eq_flatMap, List.flatMap_append, List.flatMap_cons,
-    ← List.bind_eq_flatMap, ← List.bind_eq_flatMap, List.mem_append, List.mem_append]
-  tauto
-
--- Heap key set is unchanged by inserting at an already-present key.
-theorem swap_corollary_heap_insert_keys_mem {cfg : RuntimeConfig} {rid : RegionId} {newRegion : Region}
-    (hridmem : rid ∈ cfg.heap.keys) (rid' : RegionId) :
-    rid' ∈ (cfg.heap.insert rid newRegion).keys ↔ rid' ∈ cfg.heap.keys := by
-  rw [← AList.mem_keys, AList.mem_insert, AList.mem_keys]
-  exact or_iff_right_of_imp (fun heq => heq ▸ hridmem)
-
 -- Generic fact used for the stack-mutation branches: `Stack.refs` distributes over `++ [f]`.
 theorem swap_corollary_stack_refs_append (l : Stack) (f : Frame) :
     Stack.refs (l ++ [f]) = Stack.refs l ++ f.refs := by
@@ -491,29 +363,6 @@ theorem swap_corollary_frame_refs_mem_stack {stack : Stack} {frame : Frame} {r :
   rw [List.bind_eq_flatMap, List.flatMap_id, List.mem_flatten]
   exact ⟨Frame.refs frame, List.mem_map_of_mem hmem, hr⟩
 
--- Generic AList fact (Reference-valued): replacing the value at an already-present key changes
--- the count of any target `t` by exactly (v_new==t?1:0) - (v_old==t?1:0), captured additively (to
--- avoid Nat subtraction) as an equation relating the two counts via the two `==` conditions. This
--- is what makes `swap` provably an *exchange* rather than a plain overwrite: applying this once
--- for each of the two slots being swapped, the two `if`-terms cancel out exactly when combined.
-theorem swap_corollary_alist_insert_count_eq {α : Type*} [DecidableEq α] {l : AList (fun _ : α => Reference)}
-    {k : α} {v_old v_new t : Reference} (hlookup : l.lookup k = some v_old) :
-    ((l.insert k v_new).entries.map (·.2)).count t + (if (v_old == t) = true then 1 else 0) =
-    (l.entries.map (·.2)).count t + (if (v_new == t) = true then 1 else 0) := by
-  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase (swap_corollary_mem_keys_of_lookup hlookup)
-  have v0_eq : v0 = v_old := by
-    have hmem_v0 : (⟨k, v0⟩ : Sigma (fun _ : α => Reference)) ∈ l.entries :=
-      heq ▸ List.mem_append_right _ List.mem_cons_self
-    have hmem_vold : (⟨k, v_old⟩ : Sigma (fun _ : α => Reference)) ∈ l.entries :=
-      AList.mem_lookup_iff.mp (by rw [hlookup]; rfl)
-    exact List.NodupKeys.eq_of_mk_mem (β := fun _ : α => Reference) l.nodupKeys hmem_v0 hmem_vold
-  have hnew : (l.insert k v_new).entries.map (·.2) = v_new :: (l1e ++ l2e).map (·.2) := by
-    rw [AList.entries_insert, hkerase, List.map_cons]
-  have hold : l.entries.map (·.2) = l1e.map (·.2) ++ v_old :: l2e.map (·.2) := by
-    rw [heq, v0_eq, List.map_append, List.map_cons]
-  rw [hnew, hold, List.count_cons, List.map_append, List.count_append, List.count_append, List.count_cons]
-  omega
-
 -- Container-level analogue, one level up: replacing the value at an already-present ObjMap key
 -- changes the whole bind-refs count by exactly the delta of the object's own count -- a genuine
 -- identity for *any* replacement value (not just ones related to the old one), since both sides
@@ -522,7 +371,7 @@ theorem swap_corollary_objMap_insert_bind_count_eq {m : ObjMap} {oid : ObjectId}
     (hobj : m.lookup oid = some obj) :
     ((m.insert oid v).entries.map (·.2) >>= Object.refs).count t + (Object.refs obj).count t =
     (m.entries.map (·.2) >>= Object.refs).count t + (Object.refs v).count t := by
-  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase (swap_corollary_mem_keys_of_lookup hobj)
+  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase (AList.mem_keys_of_lookup_eq_some hobj)
   have v0_eq : v0 = obj := by
     have hmem_v0 : (⟨oid, v0⟩ : Sigma (fun _ : ObjectId => Object)) ∈ m.entries :=
       heq ▸ List.mem_append_right _ List.mem_cons_self
@@ -550,7 +399,7 @@ theorem swap_corollary_heap_insert_bind_count_eq {cfg : RuntimeConfig} {rid : Re
     (Heap.refs (cfg.heap.insert rid newRegion)).count t + (Region.refs region).count t =
     (Heap.refs cfg.heap).count t + (Region.refs newRegion).count t := by
   obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ :=
-    List.exists_of_kerase (swap_corollary_mem_keys_of_lookup hregion)
+    List.exists_of_kerase (AList.mem_keys_of_lookup_eq_some hregion)
   have v0_eq : v0 = region := by
     have hmem_v0 : (⟨rid, v0⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries :=
       heq ▸ List.mem_append_right _ List.mem_cons_self
@@ -589,7 +438,7 @@ theorem swap_H2 : ValidConfig cfg →
     subst hcfg'
     have hfield : obj.lookup yf.field = some yfRef :=
       swap_corollary_stack_field_eq_yfRef frame_mem (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hobj hyf
-    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
     set newFrame : Frame := { frame with
         varMap := frame.varMap.insert x yfRef,
         objMap := frame.objMap.insert yoid (obj.insert yf.field xRef) } with newFrame_def
@@ -597,11 +446,11 @@ theorem swap_H2 : ValidConfig cfg →
       intro t
       have eq_inner : (Object.refs (obj.insert yf.field xRef)).count t + (if (yfRef == t) = true then 1 else 0) =
           (Object.refs obj).count t + (if (xRef == t) = true then 1 else 0) :=
-        swap_corollary_alist_insert_count_eq (l := obj) (k := yf.field) (v_old := yfRef)
+        alist_insert_count_eq (l := obj) (k := yf.field) (v_old := yfRef)
           (v_new := xRef) (t := t) hfield
       have eq_outer := swap_corollary_objMap_insert_bind_count_eq (m := frame.objMap) (oid := yoid)
         (obj := obj) (v := obj.insert yf.field xRef) (t := t) hobj
-      have eq_var := swap_corollary_alist_insert_count_eq (l := frame.varMap) (k := x) (v_old := xRef)
+      have eq_var := alist_insert_count_eq (l := frame.varMap) (k := x) (v_old := xRef)
         (v_new := yfRef) (t := t) hxr
       have hgoal : (Frame.refs newFrame).count t =
           ((frame.objMap.insert yoid (obj.insert yf.field xRef)).entries.map (·.2) >>= Object.refs).count t +
@@ -629,7 +478,7 @@ theorem swap_H2 : ValidConfig cfg →
     subst hcfg'
     have hfield : obj.lookup yf.field = some yfRef :=
       swap_corollary_region_field_eq_yfRef (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hregion hobj hyf
-    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
     set newFrame : Frame := { frame with varMap := frame.varMap.insert x yfRef } with newFrame_def
     set newRegion : Region := { region with
         objMap := AList.insert yoid (obj.insert yf.field (Reference.OId xoid)) region.objMap } with newRegion_def
@@ -640,7 +489,7 @@ theorem swap_H2 : ValidConfig cfg →
       have eq_inner : (Object.refs (obj.insert yf.field (Reference.OId xoid))).count t +
             (if (yfRef == t) = true then 1 else 0) =
           (Object.refs obj).count t + (if ((Reference.OId xoid) == t) = true then 1 else 0) :=
-        swap_corollary_alist_insert_count_eq (l := obj) (k := yf.field) (v_old := yfRef)
+        alist_insert_count_eq (l := obj) (k := yf.field) (v_old := yfRef)
           (v_new := Reference.OId xoid) (t := t) hfield
       have eq_region : (Region.refs newRegion).count t + (Object.refs obj).count t =
           (Region.refs region).count t + (Object.refs (obj.insert yf.field (Reference.OId xoid))).count t :=
@@ -648,7 +497,7 @@ theorem swap_H2 : ValidConfig cfg →
           (obj := obj) (v := obj.insert yf.field (Reference.OId xoid)) (t := t) hobj
       have eq_heap := swap_corollary_heap_insert_bind_count_eq (cfg := cfg) (rid := rid) (region := region)
         (newRegion := newRegion) (t := t) hregion
-      have eq_var := swap_corollary_alist_insert_count_eq (l := frame.varMap) (k := x)
+      have eq_var := alist_insert_count_eq (l := frame.varMap) (k := x)
         (v_old := Reference.OId xoid) (v_new := yfRef) (t := t) hxr
       have hframecount : (Frame.refs newFrame).count t =
           (frame.objMap.entries.map (·.2) >>= Object.refs).count t +
@@ -677,7 +526,7 @@ theorem swap_H2 : ValidConfig cfg →
     subst hcfg'
     have hfield : obj.lookup yf.field = some yfRef :=
       swap_corollary_region_field_eq_yfRef (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hregion hobj hyf
-    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
     set newFrame : Frame := { frame with varMap := frame.varMap.insert x yfRef } with newFrame_def
     set newRegion : Region := { region with
         objMap := AList.insert yoid (obj.insert yf.field (Reference.RId xrid)) region.objMap } with newRegion_def
@@ -688,7 +537,7 @@ theorem swap_H2 : ValidConfig cfg →
       have eq_inner : (Object.refs (obj.insert yf.field (Reference.RId xrid))).count t +
             (if (yfRef == t) = true then 1 else 0) =
           (Object.refs obj).count t + (if ((Reference.RId xrid) == t) = true then 1 else 0) :=
-        swap_corollary_alist_insert_count_eq (l := obj) (k := yf.field) (v_old := yfRef)
+        alist_insert_count_eq (l := obj) (k := yf.field) (v_old := yfRef)
           (v_new := Reference.RId xrid) (t := t) hfield
       have eq_region : (Region.refs newRegion).count t + (Object.refs obj).count t =
           (Region.refs region).count t + (Object.refs (obj.insert yf.field (Reference.RId xrid))).count t :=
@@ -696,7 +545,7 @@ theorem swap_H2 : ValidConfig cfg →
           (obj := obj) (v := obj.insert yf.field (Reference.RId xrid)) (t := t) hobj
       have eq_heap := swap_corollary_heap_insert_bind_count_eq (cfg := cfg) (rid := rid) (region := region)
         (newRegion := newRegion) (t := t) hregion
-      have eq_var := swap_corollary_alist_insert_count_eq (l := frame.varMap) (k := x)
+      have eq_var := alist_insert_count_eq (l := frame.varMap) (k := x)
         (v_old := Reference.RId xrid) (v_new := yfRef) (t := t) hxr
       have hframecount : (Frame.refs newFrame).count t =
           (frame.objMap.entries.map (·.2) >>= Object.refs).count t +
@@ -740,7 +589,7 @@ theorem swap_H2 : ValidConfig cfg →
               (Reference.RId rid') + (if (yfRef == Reference.RId rid') = true then 1 else 0) =
           (Object.refs obj).count (Reference.RId rid') +
           (if ((Reference.OId region.bridgeObjectId) == Reference.RId rid') = true then 1 else 0) :=
-        swap_corollary_alist_insert_count_eq (l := obj) (k := yf.field) (v_old := yfRef)
+        alist_insert_count_eq (l := obj) (k := yf.field) (v_old := yfRef)
           (v_new := Reference.OId region.bridgeObjectId) (t := Reference.RId rid') hfield
       have eq_region : (Region.refs newRegion).count (Reference.RId rid') + (Object.refs obj).count (Reference.RId rid') =
           (Region.refs region).count (Reference.RId rid') +
@@ -756,12 +605,6 @@ theorem swap_H2 : ValidConfig cfg →
     rw [hheap_eq]
     exact h2'
 
--- A List.Perm doesn't change what `.contains` reports (order-independent).
-theorem swap_corollary_perm_contains_eq {α : Type*} [BEq α] [LawfulBEq α] {l l' : List α}
-    (hperm : l.Perm l') (a : α) : l.contains a = l'.contains a := by
-  rw [Bool.eq_iff_iff, List.contains_iff_mem, List.contains_iff_mem]
-  exact hperm.mem_iff
-
 -- swap never changes any frame's or region's objMap *key set* (only replaces values at
 -- already-present keys, and varMap changes are irrelevant since Reference.loc? never reads
 -- varMap at all) -- so `Reference.loc?` transports unconditionally across the mutation for every
@@ -776,16 +619,16 @@ theorem swap_corollary_stack_loc_eq {cfg : RuntimeConfig} {frame : FrameWithInde
       (Reference.OId oid').loc? { cfg with stack := cfg.stack.dropLast ++
         [({ frame with varMap := newVarMap, objMap := frame.objMap.insert yoid (obj.insert field newVal) } :
           Frame)] } := by
-  obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+  obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
   set newFrame : Frame :=
     { frame with varMap := newVarMap, objMap := frame.objMap.insert yoid (obj.insert field newVal) } with newFrame_def
   have keys_perm : newFrame.objMap.keys.Perm frame.objMap.keys :=
-    swap_corollary_insert_keys_perm (swap_corollary_mem_keys_of_lookup hobj)
+    AList.keys_insert_perm_of_mem (AList.mem_keys_of_lookup_eq_some hobj)
   unfold Reference.loc?
   dsimp
   by_cases hb : frame.objMap.keys.contains oid'
   · have hb' : newFrame.objMap.keys.contains oid' := by
-      rw [swap_corollary_perm_contains_eq keys_perm]; exact hb
+      rw [List.Perm.contains_eq keys_perm]; exact hb
     have h1_cfg : cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid') =
         some ({ frame with index := cfg.stack.dropLast.length } : FrameWithIndex) := by
       unfold RuntimeConfig.stackWithIndex
@@ -807,7 +650,7 @@ theorem swap_corollary_stack_loc_eq {cfg : RuntimeConfig} {frame : FrameWithInde
     | none => rfl
     | some _ => rfl
   · have hb' : ¬ newFrame.objMap.keys.contains oid' := by
-      rw [swap_corollary_perm_contains_eq keys_perm]; exact hb
+      rw [List.Perm.contains_eq keys_perm]; exact hb
     have h1_eq : cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid') =
         (RuntimeConfig.stackWithIndex { stack := cfg.stack.dropLast ++ [newFrame], heap := cfg.heap }).findRev?
           (fun f => f.objMap.keys.contains oid') := by
@@ -838,45 +681,6 @@ theorem swap_corollary_stack_loc_eq {cfg : RuntimeConfig} {frame : FrameWithInde
       rw [find_eqL, find_eqR]
     rw [h1_eq]
 
--- An oid can be found in at most one region's objMap (stated over bare L1, so it's usable on cfg
--- before cfg''s own validity is established). Mirrors fieldAsgn_corollary_region_unique.
-theorem swap_corollary_region_unique
-    {cfg : RuntimeConfig} {rid1 rid2 : RegionId} {region1 region2 : Region} {oid : ObjectId} :
-  L1 cfg →
-  (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region1.objMap.keys →
-  (⟨rid2, region2⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region2.objMap.keys →
-  rid1 = rid2 := by
-  intro l1 mem1 in1 mem2 in2
-  by_contra hne
-  unfold L1 RuntimeConfig.objectIds at l1
-  obtain ⟨_, heap_nodup, _⟩ := List.nodup_append.mp l1
-  unfold Heap.objectIds at heap_nodup
-  rw [List.nodup_flatten, List.pairwise_map] at heap_nodup
-  obtain ⟨_, pairwise_disjoint⟩ := heap_nodup
-  have hneq : (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ≠ ⟨rid2, region2⟩ := by
-    intro heq
-    exact hne (congrArg Sigma.fst heq)
-  haveI : Std.Symm (fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds) := ⟨fun _ _ hd => List.disjoint_symm hd⟩
-  have disj := List.Pairwise.forall
-    (R := fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds)
-    pairwise_disjoint mem1 mem2 hneq
-  unfold Region.objectIds at disj
-  exact disj in1 in2
-
--- Reference.loc?'s (h1, h2)-match for OId factors through Option.map, so equal cfg's need only
--- agree on the *projected* index/rid, not the full FrameWithIndex/heap-entry value.
-theorem swap_corollary_loc_match_eq (o1 : Option FrameWithIndex)
-    (o2 : Option (Sigma (fun _ : RegionId => Region))) :
-    (match o1, o2 with
-      | some f, none => some (Location.Stk f.index)
-      | none, some ⟨rid, _⟩ => some (Location.Rgn rid)
-      | _, _ => none) =
-    (match o1.map FrameWithIndex.index, o2.map Sigma.fst with
-      | some n, none => some (Location.Stk n)
-      | none, some r => some (Location.Rgn r)
-      | _, _ => none) := by
-  cases o1 <;> cases o2 <;> rfl
-
 -- The region-touching branches' `heap.insert` at an already-present key `rid` reorders `entries`;
 -- the mutated region's own key set is only Perm-related to the original (`newRegion`'s objMap is
 -- an insert at the already-present `yoid`, whatever else about `newRegion` differs -- e.g.
@@ -891,7 +695,7 @@ theorem swap_corollary_region_loc_eq {cfg : RuntimeConfig} {rid yoid : ObjectId}
   have l1 := vcfg.l1
   have keys_perm : newRegion.objMap.keys.Perm region.objMap.keys := by
     rw [hnewRegion]
-    exact swap_corollary_insert_keys_perm (swap_corollary_mem_keys_of_lookup hobj)
+    exact AList.keys_insert_perm_of_mem (AList.mem_keys_of_lookup_eq_some hobj)
   unfold Reference.loc?
   dsimp
   have heap_h2_map_eq :
@@ -899,7 +703,7 @@ theorem swap_corollary_region_loc_eq {cfg : RuntimeConfig} {rid yoid : ObjectId}
       ((AList.insert rid newRegion cfg.heap).entries.find?
         (fun p => p.snd.objMap.keys.contains oid')).map Sigma.fst := by
     obtain ⟨region2, l1e, l2e, hnotmem, heq, hkerase⟩ :=
-      List.exists_of_kerase (swap_corollary_mem_keys_of_lookup hregion)
+      List.exists_of_kerase (AList.mem_keys_of_lookup_eq_some hregion)
     have region2_eq : region2 = region :=
       List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys
         (heq ▸ List.mem_append_right _ List.mem_cons_self) (AList.mem_lookup_iff.mp (by rw [hregion]; rfl))
@@ -909,7 +713,7 @@ theorem swap_corollary_region_loc_eq {cfg : RuntimeConfig} {rid yoid : ObjectId}
       heq ▸ List.mem_append_right _ List.mem_cons_self
     by_cases hb2 : region.objMap.keys.contains oid'
     · have hb2' : newRegion.objMap.keys.contains oid' := by
-        rw [swap_corollary_perm_contains_eq keys_perm]; exact hb2
+        rw [List.Perm.contains_eq keys_perm]; exact hb2
       have find_eqR2 :
           List.find? (fun p => p.snd.objMap.keys.contains oid')
             ((⟨rid, newRegion⟩ : Sigma (fun _ : RegionId => Region)) :: (l1e ++ l2e)) =
@@ -923,7 +727,7 @@ theorem swap_corollary_region_loc_eq {cfg : RuntimeConfig} {rid yoid : ObjectId}
         intro y hy hpy
         obtain ⟨rid_y, region_y⟩ := y
         have rid_y_eq : rid_y = rid :=
-          swap_corollary_region_unique l1 hy (List.contains_iff_mem.mp hpy)
+          heap_region_unique l1 hy (List.contains_iff_mem.mp hpy)
             region_mem_cfg (List.contains_iff_mem.mp hb2)
         subst rid_y_eq
         have region_y_eq : region_y = region :=
@@ -932,7 +736,7 @@ theorem swap_corollary_region_loc_eq {cfg : RuntimeConfig} {rid yoid : ObjectId}
       rw [find_eqL]
       rfl
     · have hb2' : ¬ newRegion.objMap.keys.contains oid' := by
-        rw [swap_corollary_perm_contains_eq keys_perm]; exact hb2
+        rw [List.Perm.contains_eq keys_perm]; exact hb2
       have find_eqR2 :
           List.find? (fun p => p.snd.objMap.keys.contains oid')
             ((⟨rid, newRegion⟩ : Sigma (fun _ : RegionId => Region)) :: (l1e ++ l2e)) =
@@ -972,10 +776,10 @@ theorem swap_corollary_region_loc_eq {cfg : RuntimeConfig} {rid yoid : ObjectId}
             rw [find_eqA, find_eqB]
             exact ih
       rw [find_eqL]
-  have step1 := swap_corollary_loc_match_eq
+  have step1 := loc_match_eq
     (cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid'))
     (cfg.heap.entries.find? (fun p => p.snd.objMap.keys.contains oid'))
-  have step2 := swap_corollary_loc_match_eq
+  have step2 := loc_match_eq
     (cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid'))
     ((AList.insert rid newRegion cfg.heap).entries.find? (fun p => p.snd.objMap.keys.contains oid'))
   rw [heap_h2_map_eq] at step1
@@ -991,7 +795,7 @@ theorem swap_corollary_stack_varmap_loc_eq {cfg : RuntimeConfig} {frame : FrameW
     (Reference.OId oid').loc? cfg =
       (Reference.OId oid').loc? { cfg with stack := cfg.stack.dropLast ++
         [({ frame with varMap := newVarMap } : Frame)] } := by
-  obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+  obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
   set newFrame : Frame := { frame with varMap := newVarMap } with newFrame_def
   have hobjMap_eq : newFrame.objMap = frame.objMap := by rw [newFrame_def]
   unfold Reference.loc?
@@ -1089,7 +893,7 @@ theorem swap_H3 : ValidConfig cfg →
     · subst hrideq
       rw [AList.lookup_insert, Option.some_inj] at hlookup0
       subst hlookup0
-      rcases swap_corollary_objMap_insert_bind_refs_mem
+      rcases objMap_insert_bind_refs_mem
         (show Reference.OId oid0 ∈ (region.objMap.insert yoid (obj.insert yf.field (Reference.OId xoid))).entries.map (·.2) >>= Object.refs from href0)
         with heq | horig
       · rcases swap_corollary_alist_insert_refs_mem
@@ -1100,7 +904,7 @@ theorem swap_H3 : ValidConfig cfg →
           rw [← hxrid.trans hrid.symm]
           exact hxrl
         · have h3fact := h3 rid0 oid0 region hregion
-            (swap_corollary_objMap_bind_refs_mem_of_lookup hobj horig2)
+            (objMap_bind_refs_mem_of_lookup hobj horig2)
           rw [← loc_eq]
           exact h3fact
       · have h3fact := h3 rid0 oid0 region hregion horig
@@ -1130,7 +934,7 @@ theorem swap_H3 : ValidConfig cfg →
     · subst hrideq
       rw [AList.lookup_insert, Option.some_inj] at hlookup0
       subst hlookup0
-      rcases swap_corollary_objMap_insert_bind_refs_mem
+      rcases objMap_insert_bind_refs_mem
         (show Reference.OId oid0 ∈ (region.objMap.insert yoid (obj.insert yf.field (Reference.RId xrid))).entries.map (·.2) >>= Object.refs from href0)
         with heq | horig
       · rcases swap_corollary_alist_insert_refs_mem
@@ -1138,7 +942,7 @@ theorem swap_H3 : ValidConfig cfg →
           with heq2 | horig2
         · exact absurd heq2 (by simp)
         · have h3fact := h3 rid0 oid0 region hregion
-            (swap_corollary_objMap_bind_refs_mem_of_lookup hobj horig2)
+            (objMap_bind_refs_mem_of_lookup hobj horig2)
           rw [← loc_eq]
           exact h3fact
       · have h3fact := h3 rid0 oid0 region hregion horig
@@ -1166,7 +970,7 @@ theorem swap_H3 : ValidConfig cfg →
     · subst hrideq
       rw [AList.lookup_insert, Option.some_inj] at hlookup0
       subst hlookup0
-      rcases swap_corollary_objMap_insert_bind_refs_mem
+      rcases objMap_insert_bind_refs_mem
         (show Reference.OId oid0 ∈
           (region.objMap.insert yoid (obj.insert yf.field (Reference.OId region.bridgeObjectId))).entries.map (·.2) >>=
             Object.refs from href0)
@@ -1179,7 +983,7 @@ theorem swap_H3 : ValidConfig cfg →
           rw [heq2, ← loc_eq]
           exact (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region, hregion, hbridge_mem⟩
         · have h3fact := h3 rid0 oid0 region hregion
-            (swap_corollary_objMap_bind_refs_mem_of_lookup hobj horig2)
+            (objMap_bind_refs_mem_of_lookup hobj horig2)
           rw [← loc_eq]
           exact h3fact
       · have h3fact := h3 rid0 oid0 region hregion horig
@@ -1207,7 +1011,7 @@ theorem swap_S2 : ValidConfig cfg →
     subst hcfg'
     have hfield : obj.lookup yf.field = some yfRef :=
       swap_corollary_stack_field_eq_yfRef frame_mem (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hobj hyf
-    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
     set newFrame : Frame := { frame with
         varMap := frame.varMap.insert x yfRef,
         objMap := frame.objMap.insert yoid (obj.insert yf.field xRef) } with newFrame_def
@@ -1260,12 +1064,12 @@ theorem swap_S2 : ValidConfig cfg →
       dsimp at href
       rw [List.mem_append] at href
       rcases href with href | href
-      · rcases swap_corollary_objMap_insert_bind_refs_mem href with heq | horig
+      · rcases objMap_insert_bind_refs_mem href with heq | horig
         · rcases swap_corollary_alist_insert_refs_mem heq with heq2 | horig2
           · exact hnewindex_bound fid' oid0 hlocEq_cfg
           · have horig' : Reference.OId oid0 ∈ frame.refs := by
               unfold Frame.refs
-              exact List.mem_append_left _ (swap_corollary_objMap_bind_refs_mem_of_lookup hobj horig2)
+              exact List.mem_append_left _ (objMap_bind_refs_mem_of_lookup hobj horig2)
             exact s2 _ hframe_mem_cfg (Reference.OId oid0) horig' fid' oid0 rfl hlocEq_cfg
         · have horig' : Reference.OId oid0 ∈ frame.refs := by
             unfold Frame.refs
@@ -1281,7 +1085,7 @@ theorem swap_S2 : ValidConfig cfg →
     subst hcfg'
     have hfield : obj.lookup yf.field = some yfRef :=
       swap_corollary_region_field_eq_yfRef (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hregion hobj hyf
-    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
     set newRegion : Region :=
       { region with objMap := AList.insert yoid (obj.insert yf.field (Reference.OId xoid)) region.objMap }
       with newRegion_def
@@ -1358,7 +1162,7 @@ theorem swap_S2 : ValidConfig cfg →
     subst hcfg'
     have hfield : obj.lookup yf.field = some yfRef :=
       swap_corollary_region_field_eq_yfRef (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hregion hobj hyf
-    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
     set newRegion : Region :=
       { region with objMap := AList.insert yoid (obj.insert yf.field (Reference.RId xrid)) region.objMap }
       with newRegion_def
@@ -1465,7 +1269,7 @@ theorem swap_S3 : ValidConfig cfg →
     subst hcfg'
     have hfield : obj.lookup yf.field = some yfRef :=
       swap_corollary_stack_field_eq_yfRef frame_mem (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hobj hyf
-    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
     set newFrame : Frame := { frame with
         varMap := frame.varMap.insert x yfRef,
         objMap := frame.objMap.insert yoid (obj.insert yf.field xRef) } with newFrame_def
@@ -1500,7 +1304,7 @@ theorem swap_S3 : ValidConfig cfg →
     have hyfRef_mem_frame : yfRef ∈ frame.refs := by
       unfold Frame.refs
       apply List.mem_append_left
-      exact swap_corollary_objMap_bind_refs_mem_of_lookup hobj
+      exact objMap_bind_refs_mem_of_lookup hobj
         (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hfield))
     intro frame' hframe' ref href rid' oid0 hrefeq hlocEq
     subst hrefeq
@@ -1523,11 +1327,11 @@ theorem swap_S3 : ValidConfig cfg →
         dsimp at href
         rw [List.mem_append] at href
         rcases href with href | href
-        · rcases swap_corollary_objMap_insert_bind_refs_mem href with heq | horig
+        · rcases objMap_insert_bind_refs_mem href with heq | horig
           · rcases swap_corollary_alist_insert_refs_mem heq with heq2 | horig2
             · exact heq2 ▸ hxRef_mem_frame
             · unfold Frame.refs
-              exact List.mem_append_left _ (swap_corollary_objMap_bind_refs_mem_of_lookup hobj horig2)
+              exact List.mem_append_left _ (objMap_bind_refs_mem_of_lookup hobj horig2)
           · unfold Frame.refs
             exact List.mem_append_left _ horig
         · rcases swap_corollary_alist_insert_refs_mem href with heq | horig
@@ -1537,7 +1341,7 @@ theorem swap_S3 : ValidConfig cfg →
       obtain ⟨anc, hanc_mem, hanc_rid, hanc_idx⟩ :=
         s3 frame frame_mem (Reference.OId oid0) href' rid' oid0 rfl hlocEq_cfg
       obtain ⟨anc', hanc'_mem, hanc'_rid, hanc'_idx⟩ := transport anc hanc_mem
-      have hframe_idx : frame.index = cfg.stack.dropLast.length := (swap_corollary_stack_eq hframe).2
+      have hframe_idx : frame.index = cfg.stack.dropLast.length := (stack_eq_of_stackWithIndex_getLast? hframe).2
       refine ⟨anc', hanc'_mem, hanc'_rid.trans hanc_rid, ?_⟩
       dsimp
       rw [hanc'_idx, ← hframe_idx]
@@ -1550,9 +1354,9 @@ theorem swap_S3 : ValidConfig cfg →
     have hfield : obj.lookup yf.field = some yfRef :=
       swap_corollary_region_field_eq_yfRef (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hregion hobj hyf
     have hyfRef_mem_region : yfRef ∈ region.refs :=
-      swap_corollary_objMap_bind_refs_mem_of_lookup hobj
+      objMap_bind_refs_mem_of_lookup hobj
         (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hfield))
-    obtain ⟨stack_eq, hframe_idx⟩ := swap_corollary_stack_eq hframe
+    obtain ⟨stack_eq, hframe_idx⟩ := stack_eq_of_stackWithIndex_getLast? hframe
     set newRegion : Region :=
       { region with objMap := AList.insert yoid (obj.insert yf.field (Reference.OId xoid)) region.objMap }
       with newRegion_def
@@ -1654,9 +1458,9 @@ theorem swap_S3 : ValidConfig cfg →
     have hfield : obj.lookup yf.field = some yfRef :=
       swap_corollary_region_field_eq_yfRef (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hregion hobj hyf
     have hyfRef_mem_region : yfRef ∈ region.refs :=
-      swap_corollary_objMap_bind_refs_mem_of_lookup hobj
+      objMap_bind_refs_mem_of_lookup hobj
         (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hfield))
-    obtain ⟨stack_eq, hframe_idx⟩ := swap_corollary_stack_eq hframe
+    obtain ⟨stack_eq, hframe_idx⟩ := stack_eq_of_stackWithIndex_getLast? hframe
     set newRegion : Region :=
       { region with objMap := AList.insert yoid (obj.insert yf.field (Reference.RId xrid)) region.objMap }
       with newRegion_def
@@ -1786,7 +1590,7 @@ theorem swap_HS1 : ValidConfig cfg →
     subst hcfg'
     have hfield : obj.lookup yf.field = some yfRef :=
       swap_corollary_stack_field_eq_yfRef frame_mem (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hobj hyf
-    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
     have frame_toFrame_mem : frame.toFrame ∈ cfg.stack :=
       stack_eq ▸ List.mem_append_right _ (List.mem_singleton_self _)
     have hxRef_mem : xRef ∈ cfg.refs := List.mem_append_left _
@@ -1794,7 +1598,7 @@ theorem swap_HS1 : ValidConfig cfg →
         (List.mem_append_right _ (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hxr))))
     have hyfRef_mem : yfRef ∈ cfg.refs := List.mem_append_left _
       (swap_corollary_frame_refs_mem_stack frame_toFrame_mem
-        (List.mem_append_left _ (swap_corollary_objMap_bind_refs_mem_of_lookup hobj
+        (List.mem_append_left _ (objMap_bind_refs_mem_of_lookup hobj
           (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hfield)))))
     have hdrop_refs : ∀ r, r ∈ Stack.refs cfg.stack.dropLast → r ∈ cfg.refs := by
       intro r hr
@@ -1838,11 +1642,11 @@ theorem swap_HS1 : ValidConfig cfg →
       dsimp at hr
       rw [List.mem_append] at hr
       rcases hr with hr | hr
-      · rcases swap_corollary_objMap_insert_bind_refs_mem hr with hr' | hr'
+      · rcases objMap_insert_bind_refs_mem hr with hr' | hr'
         · rcases swap_corollary_alist_insert_refs_mem hr' with hr'' | hr''
           · exact hobjIds_of_old oid0 (hs1 oid0 (hr'' ▸ hxRef_mem))
           · exact hobjIds_of_old oid0 (hs1 oid0 (hframe_refs _ (List.mem_append_left _
-              (swap_corollary_objMap_bind_refs_mem_of_lookup hobj hr''))))
+              (objMap_bind_refs_mem_of_lookup hobj hr''))))
         · exact hobjIds_of_old oid0 (hs1 oid0 (hframe_refs _ (List.mem_append_left _ hr')))
       · rcases swap_corollary_alist_insert_refs_mem hr with hr' | hr'
         · exact hobjIds_of_old oid0 (hs1 oid0 (hr' ▸ hyfRef_mem))
@@ -1852,15 +1656,15 @@ theorem swap_HS1 : ValidConfig cfg →
     subst hcfg'
     have hfield : obj.lookup yf.field = some yfRef :=
       swap_corollary_region_field_eq_yfRef (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hregion hobj hyf
-    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
     have frame_toFrame_mem : frame.toFrame ∈ cfg.stack :=
       stack_eq ▸ List.mem_append_right _ (List.mem_singleton_self _)
     have hxoidRef_mem : Reference.OId xoid ∈ cfg.refs := List.mem_append_left _
       (swap_corollary_frame_refs_mem_stack frame_toFrame_mem
         (List.mem_append_right _ (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hxr))))
     have hyfRef_mem : yfRef ∈ cfg.refs := List.mem_append_right _
-      (swap_corollary_heap_refs_mem_of_lookup hregion
-        (swap_corollary_objMap_bind_refs_mem_of_lookup hobj
+      (heap_refs_mem_of_lookup hregion
+        (objMap_bind_refs_mem_of_lookup hobj
           (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hfield))))
     have hdrop_refs : ∀ r, r ∈ Stack.refs cfg.stack.dropLast → r ∈ cfg.refs := by
       intro r hr
@@ -1875,9 +1679,9 @@ theorem swap_HS1 : ValidConfig cfg →
     set newFrame : Frame := { frame with varMap := frame.varMap.insert x yfRef } with newFrame_def
     set newRegion : Region := { region with
         objMap := AList.insert yoid (obj.insert yf.field (Reference.OId xoid)) region.objMap } with newRegion_def
-    have region_perm := swap_corollary_insert_keys_perm (l := region.objMap)
-      (v := obj.insert yf.field (Reference.OId xoid)) (swap_corollary_mem_keys_of_lookup hobj)
-    have heap_perm := swap_corollary_region_heap_objectIds_perm (newRegion := newRegion) hregion region_perm
+    have region_perm := AList.keys_insert_perm_of_mem (l := region.objMap)
+      (v := obj.insert yf.field (Reference.OId xoid)) (AList.mem_keys_of_lookup_eq_some hobj)
+    have heap_perm := heap_insert_objectIds_perm (newRegion := newRegion) hregion region_perm
     have hstack_eq : Stack.objectIds (cfg.stack.dropLast ++ [newFrame]) = Stack.objectIds cfg.stack := by
       rw [swap_corollary_stack_objectIds_append]
       conv_rhs => rw [stack_eq]
@@ -1907,31 +1711,31 @@ theorem swap_HS1 : ValidConfig cfg →
       · rcases swap_corollary_alist_insert_refs_mem hr with hr' | hr'
         · exact hobjIds_of_old oid0 (hs1 oid0 (hr' ▸ hyfRef_mem))
         · exact hobjIds_of_old oid0 (hs1 oid0 (hframe_refs _ (List.mem_append_right _ hr')))
-    · rcases swap_corollary_heap_insert_refs_mem (swap_corollary_mem_keys_of_lookup hregion) hr with hr' | hr'
+    · rcases heap_insert_refs_mem (AList.mem_keys_of_lookup_eq_some hregion) hr with hr' | hr'
       · unfold Region.refs at hr'
         dsimp at hr'
-        rcases swap_corollary_objMap_insert_bind_refs_mem hr' with hr'' | hr''
+        rcases objMap_insert_bind_refs_mem hr' with hr'' | hr''
         · rcases swap_corollary_alist_insert_refs_mem hr'' with hr''' | hr'''
           · exact hobjIds_of_old oid0 (hs1 oid0 (hr''' ▸ hxoidRef_mem))
           · exact hobjIds_of_old oid0 (hs1 oid0 (List.mem_append_right _
-              (swap_corollary_heap_refs_mem_of_lookup hregion
-                (swap_corollary_objMap_bind_refs_mem_of_lookup hobj hr'''))))
+              (heap_refs_mem_of_lookup hregion
+                (objMap_bind_refs_mem_of_lookup hobj hr'''))))
         · exact hobjIds_of_old oid0 (hs1 oid0 (List.mem_append_right _
-            (swap_corollary_heap_refs_mem_of_lookup hregion hr'')))
+            (heap_refs_mem_of_lookup hregion hr'')))
       · exact hobjIds_of_old oid0 (hs1 oid0 (List.mem_append_right _ hr'))
   · -- SWAP-REGION-REGION
     subst hcfg'
     have hfield : obj.lookup yf.field = some yfRef :=
       swap_corollary_region_field_eq_yfRef (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hregion hobj hyf
-    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
     have frame_toFrame_mem : frame.toFrame ∈ cfg.stack :=
       stack_eq ▸ List.mem_append_right _ (List.mem_singleton_self _)
     have hxridRef_mem : Reference.RId xrid ∈ cfg.refs := List.mem_append_left _
       (swap_corollary_frame_refs_mem_stack frame_toFrame_mem
         (List.mem_append_right _ (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hxr))))
     have hyfRef_mem : yfRef ∈ cfg.refs := List.mem_append_right _
-      (swap_corollary_heap_refs_mem_of_lookup hregion
-        (swap_corollary_objMap_bind_refs_mem_of_lookup hobj
+      (heap_refs_mem_of_lookup hregion
+        (objMap_bind_refs_mem_of_lookup hobj
           (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hfield))))
     have hdrop_refs : ∀ r, r ∈ Stack.refs cfg.stack.dropLast → r ∈ cfg.refs := by
       intro r hr
@@ -1946,9 +1750,9 @@ theorem swap_HS1 : ValidConfig cfg →
     set newFrame : Frame := { frame with varMap := frame.varMap.insert x yfRef } with newFrame_def
     set newRegion : Region := { region with
         objMap := AList.insert yoid (obj.insert yf.field (Reference.RId xrid)) region.objMap } with newRegion_def
-    have region_perm := swap_corollary_insert_keys_perm (l := region.objMap)
-      (v := obj.insert yf.field (Reference.RId xrid)) (swap_corollary_mem_keys_of_lookup hobj)
-    have heap_perm := swap_corollary_region_heap_objectIds_perm (newRegion := newRegion) hregion region_perm
+    have region_perm := AList.keys_insert_perm_of_mem (l := region.objMap)
+      (v := obj.insert yf.field (Reference.RId xrid)) (AList.mem_keys_of_lookup_eq_some hobj)
+    have heap_perm := heap_insert_objectIds_perm (newRegion := newRegion) hregion region_perm
     have hstack_eq : Stack.objectIds (cfg.stack.dropLast ++ [newFrame]) = Stack.objectIds cfg.stack := by
       rw [swap_corollary_stack_objectIds_append]
       conv_rhs => rw [stack_eq]
@@ -1978,17 +1782,17 @@ theorem swap_HS1 : ValidConfig cfg →
       · rcases swap_corollary_alist_insert_refs_mem hr with hr' | hr'
         · exact hobjIds_of_old oid0 (hs1 oid0 (hr' ▸ hyfRef_mem))
         · exact hobjIds_of_old oid0 (hs1 oid0 (hframe_refs _ (List.mem_append_right _ hr')))
-    · rcases swap_corollary_heap_insert_refs_mem (swap_corollary_mem_keys_of_lookup hregion) hr with hr' | hr'
+    · rcases heap_insert_refs_mem (AList.mem_keys_of_lookup_eq_some hregion) hr with hr' | hr'
       · unfold Region.refs at hr'
         dsimp at hr'
-        rcases swap_corollary_objMap_insert_bind_refs_mem hr' with hr'' | hr''
+        rcases objMap_insert_bind_refs_mem hr' with hr'' | hr''
         · rcases swap_corollary_alist_insert_refs_mem hr'' with hr''' | hr'''
           · exact hobjIds_of_old oid0 (hs1 oid0 (hr''' ▸ hxridRef_mem))
           · exact hobjIds_of_old oid0 (hs1 oid0 (List.mem_append_right _
-              (swap_corollary_heap_refs_mem_of_lookup hregion
-                (swap_corollary_objMap_bind_refs_mem_of_lookup hobj hr'''))))
+              (heap_refs_mem_of_lookup hregion
+                (objMap_bind_refs_mem_of_lookup hobj hr'''))))
         · exact hobjIds_of_old oid0 (hs1 oid0 (List.mem_append_right _
-            (swap_corollary_heap_refs_mem_of_lookup hregion hr'')))
+            (heap_refs_mem_of_lookup hregion hr'')))
       · exact hobjIds_of_old oid0 (hs1 oid0 (List.mem_append_right _ hr'))
   · -- SWAP-REGION-BRIDGE: the one branch that writes a genuinely "new" ref value (the old
     -- bridgeObjectId, now wrapped as a field value) -- handled via H1 instead of HS1/refs-tracing,
@@ -2004,10 +1808,10 @@ theorem swap_HS1 : ValidConfig cfg →
         bridgeObjectId := yfoid,
         objMap := AList.insert yoid (obj.insert yf.field (Reference.OId region.bridgeObjectId)) region.objMap
       } with newRegion_def
-    have region_perm := swap_corollary_insert_keys_perm (l := region.objMap)
+    have region_perm := AList.keys_insert_perm_of_mem (l := region.objMap)
       (v := obj.insert yf.field (Reference.OId region.bridgeObjectId))
-      (swap_corollary_mem_keys_of_lookup hobj)
-    have heap_perm := swap_corollary_region_heap_objectIds_perm (newRegion := newRegion) hregion region_perm
+      (AList.mem_keys_of_lookup_eq_some hobj)
+    have heap_perm := heap_insert_objectIds_perm (newRegion := newRegion) hregion region_perm
     have hobjIds_of_old : ∀ oid0, oid0 ∈ cfg.objectIds → oid0 ∈
         RuntimeConfig.objectIds { stack := cfg.stack, heap := cfg.heap.insert yrid newRegion } := by
       intro oid0 hoid0
@@ -2033,18 +1837,18 @@ theorem swap_HS1 : ValidConfig cfg →
     rw [List.mem_append] at hr
     rcases hr with hr | hr
     · exact hobjIds_of_old oid0 (hs1 oid0 (List.mem_append_left _ hr))
-    · rcases swap_corollary_heap_insert_refs_mem (swap_corollary_mem_keys_of_lookup hregion) hr with hr' | hr'
+    · rcases heap_insert_refs_mem (AList.mem_keys_of_lookup_eq_some hregion) hr with hr' | hr'
       · unfold Region.refs at hr'
         dsimp at hr'
-        rcases swap_corollary_objMap_insert_bind_refs_mem hr' with hr'' | hr''
+        rcases objMap_insert_bind_refs_mem hr' with hr'' | hr''
         · rcases swap_corollary_alist_insert_refs_mem hr'' with hr''' | hr'''
           · rw [Reference.OId.injEq] at hr'''
             exact hr''' ▸ hbridge_objIds
           · exact hobjIds_of_old oid0 (hs1 oid0 (List.mem_append_right _
-              (swap_corollary_heap_refs_mem_of_lookup hregion
-                (swap_corollary_objMap_bind_refs_mem_of_lookup hobj hr'''))))
+              (heap_refs_mem_of_lookup hregion
+                (objMap_bind_refs_mem_of_lookup hobj hr'''))))
         · exact hobjIds_of_old oid0 (hs1 oid0 (List.mem_append_right _
-            (swap_corollary_heap_refs_mem_of_lookup hregion hr'')))
+            (heap_refs_mem_of_lookup hregion hr'')))
       · exact hobjIds_of_old oid0 (hs1 oid0 (List.mem_append_right _ hr'))
 
 theorem swap_HS2 : ValidConfig cfg →
@@ -2064,7 +1868,7 @@ theorem swap_HS2 : ValidConfig cfg →
     subst hcfg'
     have hfield : obj.lookup yf.field = some yfRef :=
       swap_corollary_stack_field_eq_yfRef frame_mem (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hobj hyf
-    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
     have frame_toFrame_mem : frame.toFrame ∈ cfg.stack :=
       stack_eq ▸ List.mem_append_right _ (List.mem_singleton_self _)
     have hxRef_mem : xRef ∈ cfg.refs := List.mem_append_left _
@@ -2072,7 +1876,7 @@ theorem swap_HS2 : ValidConfig cfg →
         (List.mem_append_right _ (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hxr))))
     have hyfRef_mem : yfRef ∈ cfg.refs := List.mem_append_left _
       (swap_corollary_frame_refs_mem_stack frame_toFrame_mem
-        (List.mem_append_left _ (swap_corollary_objMap_bind_refs_mem_of_lookup hobj
+        (List.mem_append_left _ (objMap_bind_refs_mem_of_lookup hobj
           (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hfield)))))
     have hdrop_refs : ∀ r, r ∈ Stack.refs cfg.stack.dropLast → r ∈ cfg.refs := by
       intro r hr
@@ -2095,11 +1899,11 @@ theorem swap_HS2 : ValidConfig cfg →
       dsimp at hr
       rw [List.mem_append] at hr
       rcases hr with hr | hr
-      · rcases swap_corollary_objMap_insert_bind_refs_mem hr with hr' | hr'
+      · rcases objMap_insert_bind_refs_mem hr with hr' | hr'
         · rcases swap_corollary_alist_insert_refs_mem hr' with hr'' | hr''
           · exact hs2 rid' (hr'' ▸ hxRef_mem)
           · exact hs2 rid' (hframe_refs _ (List.mem_append_left _
-              (swap_corollary_objMap_bind_refs_mem_of_lookup hobj hr'')))
+              (objMap_bind_refs_mem_of_lookup hobj hr'')))
         · exact hs2 rid' (hframe_refs _ (List.mem_append_left _ hr'))
       · rcases swap_corollary_alist_insert_refs_mem hr with hr' | hr'
         · exact hs2 rid' (hr' ▸ hyfRef_mem)
@@ -2109,16 +1913,16 @@ theorem swap_HS2 : ValidConfig cfg →
     subst hcfg'
     have hfield : obj.lookup yf.field = some yfRef :=
       swap_corollary_region_field_eq_yfRef (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hregion hobj hyf
-    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
     have frame_toFrame_mem : frame.toFrame ∈ cfg.stack :=
       stack_eq ▸ List.mem_append_right _ (List.mem_singleton_self _)
-    have hridmem : rid ∈ cfg.heap.keys := swap_corollary_mem_keys_of_lookup hregion
+    have hridmem : rid ∈ cfg.heap.keys := AList.mem_keys_of_lookup_eq_some hregion
     have hxoidRef_mem : Reference.OId xoid ∈ cfg.refs := List.mem_append_left _
       (swap_corollary_frame_refs_mem_stack frame_toFrame_mem
         (List.mem_append_right _ (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hxr))))
     have hyfRef_mem : yfRef ∈ cfg.refs := List.mem_append_right _
-      (swap_corollary_heap_refs_mem_of_lookup hregion
-        (swap_corollary_objMap_bind_refs_mem_of_lookup hobj
+      (heap_refs_mem_of_lookup hregion
+        (objMap_bind_refs_mem_of_lookup hobj
           (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hfield))))
     have hdrop_refs : ∀ r, r ∈ Stack.refs cfg.stack.dropLast → r ∈ cfg.refs := by
       intro r hr
@@ -2132,7 +1936,7 @@ theorem swap_HS2 : ValidConfig cfg →
       exact List.mem_append_right _ hr
     intro rid' hr
     dsimp at hr ⊢
-    rw [swap_corollary_heap_insert_keys_mem hridmem]
+    rw [heap_insert_keys_mem hridmem]
     unfold RuntimeConfig.refs at hr
     dsimp at hr
     rw [swap_corollary_stack_refs_append, List.mem_append, List.mem_append] at hr
@@ -2146,31 +1950,31 @@ theorem swap_HS2 : ValidConfig cfg →
       · rcases swap_corollary_alist_insert_refs_mem hr with hr' | hr'
         · exact hs2 rid' (hr' ▸ hyfRef_mem)
         · exact hs2 rid' (hframe_refs _ (List.mem_append_right _ hr'))
-    · rcases swap_corollary_heap_insert_refs_mem hridmem hr with hr' | hr'
+    · rcases heap_insert_refs_mem hridmem hr with hr' | hr'
       · unfold Region.refs at hr'
         dsimp at hr'
-        rcases swap_corollary_objMap_insert_bind_refs_mem hr' with hr'' | hr''
+        rcases objMap_insert_bind_refs_mem hr' with hr'' | hr''
         · rcases swap_corollary_alist_insert_refs_mem hr'' with hr''' | hr'''
           · exact hs2 rid' (hr''' ▸ hxoidRef_mem)
           · exact hs2 rid' (List.mem_append_right _
-              (swap_corollary_heap_refs_mem_of_lookup hregion
-                (swap_corollary_objMap_bind_refs_mem_of_lookup hobj hr''')))
-        · exact hs2 rid' (List.mem_append_right _ (swap_corollary_heap_refs_mem_of_lookup hregion hr''))
+              (heap_refs_mem_of_lookup hregion
+                (objMap_bind_refs_mem_of_lookup hobj hr''')))
+        · exact hs2 rid' (List.mem_append_right _ (heap_refs_mem_of_lookup hregion hr''))
       · exact hs2 rid' (List.mem_append_right _ hr')
   · -- SWAP-REGION-REGION
     subst hcfg'
     have hfield : obj.lookup yf.field = some yfRef :=
       swap_corollary_region_field_eq_yfRef (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hregion hobj hyf
-    obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+    obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
     have frame_toFrame_mem : frame.toFrame ∈ cfg.stack :=
       stack_eq ▸ List.mem_append_right _ (List.mem_singleton_self _)
-    have hridmem : rid ∈ cfg.heap.keys := swap_corollary_mem_keys_of_lookup hregion
+    have hridmem : rid ∈ cfg.heap.keys := AList.mem_keys_of_lookup_eq_some hregion
     have hxridRef_mem : Reference.RId xrid ∈ cfg.refs := List.mem_append_left _
       (swap_corollary_frame_refs_mem_stack frame_toFrame_mem
         (List.mem_append_right _ (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hxr))))
     have hyfRef_mem : yfRef ∈ cfg.refs := List.mem_append_right _
-      (swap_corollary_heap_refs_mem_of_lookup hregion
-        (swap_corollary_objMap_bind_refs_mem_of_lookup hobj
+      (heap_refs_mem_of_lookup hregion
+        (objMap_bind_refs_mem_of_lookup hobj
           (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hfield))))
     have hdrop_refs : ∀ r, r ∈ Stack.refs cfg.stack.dropLast → r ∈ cfg.refs := by
       intro r hr
@@ -2184,7 +1988,7 @@ theorem swap_HS2 : ValidConfig cfg →
       exact List.mem_append_right _ hr
     intro rid' hr
     dsimp at hr ⊢
-    rw [swap_corollary_heap_insert_keys_mem hridmem]
+    rw [heap_insert_keys_mem hridmem]
     unfold RuntimeConfig.refs at hr
     dsimp at hr
     rw [swap_corollary_stack_refs_append, List.mem_append, List.mem_append] at hr
@@ -2198,40 +2002,40 @@ theorem swap_HS2 : ValidConfig cfg →
       · rcases swap_corollary_alist_insert_refs_mem hr with hr' | hr'
         · exact hs2 rid' (hr' ▸ hyfRef_mem)
         · exact hs2 rid' (hframe_refs _ (List.mem_append_right _ hr'))
-    · rcases swap_corollary_heap_insert_refs_mem hridmem hr with hr' | hr'
+    · rcases heap_insert_refs_mem hridmem hr with hr' | hr'
       · unfold Region.refs at hr'
         dsimp at hr'
-        rcases swap_corollary_objMap_insert_bind_refs_mem hr' with hr'' | hr''
+        rcases objMap_insert_bind_refs_mem hr' with hr'' | hr''
         · rcases swap_corollary_alist_insert_refs_mem hr'' with hr''' | hr'''
           · exact hs2 rid' (hr''' ▸ hxridRef_mem)
           · exact hs2 rid' (List.mem_append_right _
-              (swap_corollary_heap_refs_mem_of_lookup hregion
-                (swap_corollary_objMap_bind_refs_mem_of_lookup hobj hr''')))
-        · exact hs2 rid' (List.mem_append_right _ (swap_corollary_heap_refs_mem_of_lookup hregion hr''))
+              (heap_refs_mem_of_lookup hregion
+                (objMap_bind_refs_mem_of_lookup hobj hr''')))
+        · exact hs2 rid' (List.mem_append_right _ (heap_refs_mem_of_lookup hregion hr''))
       · exact hs2 rid' (List.mem_append_right _ hr')
   · -- SWAP-REGION-BRIDGE: stack untouched, only the heap's region at yrid changes
     subst hcfg'
     have hfield : obj.lookup yf.field = some yfRef :=
       swap_corollary_region_field_eq_yfRef (hyoid ▸ hyr) (hyoid ▸ hyrloc ▸ hyrl) hregion hobj hyf
-    have hridmem : yrid ∈ cfg.heap.keys := swap_corollary_mem_keys_of_lookup hregion
+    have hridmem : yrid ∈ cfg.heap.keys := AList.mem_keys_of_lookup_eq_some hregion
     intro rid' hr
     dsimp at hr ⊢
-    rw [swap_corollary_heap_insert_keys_mem hridmem]
+    rw [heap_insert_keys_mem hridmem]
     unfold RuntimeConfig.refs at hr
     dsimp at hr
     rw [List.mem_append] at hr
     rcases hr with hr | hr
     · exact hs2 rid' (List.mem_append_left _ hr)
-    · rcases swap_corollary_heap_insert_refs_mem hridmem hr with hr' | hr'
+    · rcases heap_insert_refs_mem hridmem hr with hr' | hr'
       · unfold Region.refs at hr'
         dsimp at hr'
-        rcases swap_corollary_objMap_insert_bind_refs_mem hr' with hr'' | hr''
+        rcases objMap_insert_bind_refs_mem hr' with hr'' | hr''
         · rcases swap_corollary_alist_insert_refs_mem hr'' with hr''' | hr'''
           · exact absurd hr''' (by simp)
           · exact hs2 rid' (List.mem_append_right _
-              (swap_corollary_heap_refs_mem_of_lookup hregion
-                (swap_corollary_objMap_bind_refs_mem_of_lookup hobj hr''')))
-        · exact hs2 rid' (List.mem_append_right _ (swap_corollary_heap_refs_mem_of_lookup hregion hr''))
+              (heap_refs_mem_of_lookup hregion
+                (objMap_bind_refs_mem_of_lookup hobj hr''')))
+        · exact hs2 rid' (List.mem_append_right _ (heap_refs_mem_of_lookup hregion hr''))
       · exact hs2 rid' (List.mem_append_right _ hr')
 
 theorem swap_valid : ValidConfig cfg →

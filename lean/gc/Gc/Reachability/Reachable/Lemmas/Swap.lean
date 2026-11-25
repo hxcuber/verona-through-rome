@@ -1,14 +1,18 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Mutation.Mutation
-import Gc.Model.Preservation
-import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Def
-import Gc.Reachability.Reachable.Lemmas.Common
-import Gc.Reachability.Reachable.Lemmas.VarAsgn
-import Gc.Reachability.Reachable.Lemmas.FieldAsgn
-import Gc.Reachability.Reachable.Lemmas.Merge
+module
+
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Mutation.Mutation
+public import Gc.Model.Preservation
+public import Gc.Reachability.Reachable.Semantics
+public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Def
+public import Gc.Reachability.Reachable.Lemmas.Common
+public import Gc.Reachability.Reachable.Lemmas.VarAsgn
+public import Gc.Reachability.Reachable.Lemmas.FieldAsgn
+public import Gc.Reachability.Reachable.Lemmas.Merge
+
+@[expose] public section
 
 -- ===== swap =====
 
@@ -70,7 +74,7 @@ theorem swap_varmap_objAt_eq {cfg : RuntimeConfig} {frame : FrameWithIndex} {new
       dsimp only
       rw [hloc, hloc2]
     | Stk fid0 =>
-      obtain ⟨stack_eq, hidxeq⟩ := swap_corollary_stack_eq hframe
+      obtain ⟨stack_eq, hidxeq⟩ := stack_eq_of_stackWithIndex_getLast? hframe
       have hframe_mem : frame ∈ cfg.stackWithIndex := List.mem_of_getLast? hframe
       have hL : cfg.stackWithIndex =
           cfg.stack.dropLast.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) ++ [frame] := by
@@ -250,7 +254,7 @@ theorem swap_stack_shape_eq_of_last_update
     (n : ℕ) :
     (cfg.stack[n]?).map (fun f => (f.regionId, f.bridgeVar)) =
     (cfg'.stack[n]?).map (fun f => (f.regionId, f.bridgeVar)) := by
-  obtain ⟨stack_eq, _⟩ := swap_corollary_stack_eq hframe
+  obtain ⟨stack_eq, _⟩ := stack_eq_of_stackWithIndex_getLast? hframe
   by_cases hlp : n = cfg.stack.dropLast.length
   · have e1 : cfg.stack[n]? = some frame.toFrame := by conv_lhs => rw [stack_eq, hlp]; simp
     have e2 : cfg'.stack[n]? = some newFrame := by rw [hstack', hlp]; simp
@@ -334,7 +338,7 @@ theorem swap_stack_objAt_mutated {cfg cfg' : RuntimeConfig} {frame0 : FrameWithI
     rw [hcfg']
     unfold RuntimeConfig.stackWithIndex
     dsimp only
-    obtain ⟨stack_eq, hidxeq⟩ := swap_corollary_stack_eq hframe0
+    obtain ⟨stack_eq, hidxeq⟩ := stack_eq_of_stackWithIndex_getLast? hframe0
     rw [List.mapIdx_concat, ← hidxeq]
     exact List.mem_append_right _ (List.mem_singleton_self _)
   rw [swap_corollary_stackWithIndex_find_eq hnewFrame_mem]
@@ -369,7 +373,7 @@ theorem swap_stack_objAt_eq_of_ne {cfg : RuntimeConfig} {frame0 : FrameWithIndex
       dsimp only
       rw [hloc, hloc2]
     | Stk fid0 =>
-      obtain ⟨stack_eq, hidxeq⟩ := swap_corollary_stack_eq hframe0
+      obtain ⟨stack_eq, hidxeq⟩ := stack_eq_of_stackWithIndex_getLast? hframe0
       have hframe0_mem : frame0 ∈ cfg.stackWithIndex := List.mem_of_getLast? hframe0
       have hL : cfg.stackWithIndex =
           cfg.stack.dropLast.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) ++ [frame0] := by
@@ -422,7 +426,7 @@ theorem swap_frame_reachable_iff_of_lt {cfg cfg' : RuntimeConfig} (vcfg : ValidC
     FrameReachable cfg frame.index ref ↔ FrameReachable cfg' frame.index ref := by
   obtain ⟨frame0, hframe0, yRef, hyr, yRefLoc, hyrl, yfRef, hyf, yfRefLoc, hyfl, hcase⟩ := swap_cases h
   have hframe0_mem : frame0 ∈ cfg.stackWithIndex := List.mem_of_getLast? hframe0
-  obtain ⟨stack_eq0, hidx00⟩ := swap_corollary_stack_eq hframe0
+  obtain ⟨stack_eq0, hidx00⟩ := stack_eq_of_stackWithIndex_getLast? hframe0
   have hltd : frame.index < frame0.index := by rw [hidx00]; exact hlt
   rw [FrameReachable_iff_reflTransGen, FrameReachable_iff_reflTransGen]
   rcases hcase with
@@ -1040,7 +1044,7 @@ theorem swap_stack_yoid_step_of_ne {cfg cfg' : RuntimeConfig} {frame0 : FrameWit
         (cfg.stack[frame0.index]?).map (fun f => ({ toFrame := f, index := frame0.index } : FrameWithIndex)) := by
       unfold RuntimeConfig.stackWithIndex; rw [List.getElem?_mapIdx]
     rw [hget]
-    obtain ⟨stack_eq, hidxeq⟩ := swap_corollary_stack_eq hframe0
+    obtain ⟨stack_eq, hidxeq⟩ := stack_eq_of_stackWithIndex_getLast? hframe0
     have hget2 : cfg.stack[frame0.index]? = some frame0.toFrame := by
       conv_lhs => rw [stack_eq, hidxeq]
       simp

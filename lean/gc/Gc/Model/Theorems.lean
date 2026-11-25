@@ -1,4 +1,8 @@
-import Mathlib.Data.List.AList
+module
+
+public import Mathlib.Data.List.AList
+
+@[expose] public section
 
 theorem AList.lookup_mem_entries {α : Type u} {β : α → Type v} [DecidableEq α] {a : α} {b : β a} {s : AList β} :
   AList.lookup a s = some b → ⟨a, b⟩ ∈ s.entries := by
@@ -183,3 +187,22 @@ theorem List.find?_eq_some_of_unique {α} {p : α → Bool} {l : List α} {e : �
   have hx' : x ∈ l := by rw [hl]; exact List.mem_append_left _ hx
   rw [uniq x hx' hpx] at hx
   exact hx
+
+-- Generic AList fact (no domain dependency): replacing the value at an already-present key
+-- reorders `entries` but only *permutes* `.keys`, never changes the key set. Used at both
+-- nesting levels in this file (frame.objMap/region.objMap insert at the already-present `yoid`,
+-- and the analogous facts for varMap-level operations aren't needed since swap never allocates).
+theorem AList.keys_insert_perm_of_mem {α : Type*} {β : α → Type*} [DecidableEq α]
+    {l : AList β} {k : α} {v : β k} (hk : k ∈ l.keys) :
+    (l.insert k v).keys.Perm l.keys := by
+  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase hk
+  unfold AList.keys
+  rw [AList.entries_insert, hkerase]
+  conv_rhs => rw [heq]
+  rw [List.keys_cons, List.keys_append, List.keys_append, List.keys_cons]
+  exact List.perm_middle.symm
+
+-- Generic AList fact: a successful `lookup` means the key is already present.
+theorem AList.mem_keys_of_lookup_eq_some {α : Type*} {β : α → Type*} [DecidableEq α]
+    {l : AList β} {k : α} {v : β k} (hv : l.lookup k = some v) : k ∈ l.keys :=
+  AList.mem_keys.mp (AList.lookup_isSome.mp (by rw [hv]; rfl))

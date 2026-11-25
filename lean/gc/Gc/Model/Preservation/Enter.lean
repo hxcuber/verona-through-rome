@@ -1,30 +1,13 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Theorems
-import Gc.Model.Mutation.Enter
+module
 
-theorem enter_corollary_1 :
-  L1 cfg →
-  (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region1.objMap.keys →
-  (⟨rid2, region2⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region2.objMap.keys →
-  rid1 = rid2 := by
-  intro l1 mem1 in1 mem2 in2
-  by_contra hne
-  unfold L1 RuntimeConfig.objectIds at l1
-  obtain ⟨_, heap_nodup, _⟩ := List.nodup_append.mp l1
-  unfold Heap.objectIds at heap_nodup
-  rw [List.nodup_flatten, List.pairwise_map] at heap_nodup
-  obtain ⟨_, pairwise_disjoint⟩ := heap_nodup
-  have hneq : (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ≠ ⟨rid2, region2⟩ := by
-    intro heq
-    exact hne (congrArg Sigma.fst heq)
-  haveI : Std.Symm (fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds) := ⟨fun _ _ hd => List.disjoint_symm hd⟩
-  have disj := List.Pairwise.forall
-    (R := fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds)
-    pairwise_disjoint mem1 mem2 hneq
-  unfold Region.objectIds at disj
-  exact disj in1 in2
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Theorems
+public import Gc.Model.Mutation.Enter
+public import Gc.Model.Preservation.Common
+
+@[expose] public section
 
 theorem enter_corollary_2 : ValidConfig cfg →
   enter xf a cfg = some cfg' →
@@ -155,7 +138,7 @@ theorem enter_corollary_2 : ValidConfig cfg →
                 dsimp
                 intro hcontra
                 exact rid1_eq_rid
-                  (enter_corollary_1 l1 region1_mem region1_contains_oid
+                  (heap_region_unique l1 region1_mem region1_contains_oid
                     (AList.lookup_mem_entries heapLookup) (List.contains_iff_mem.mp hcontra))
               obtain ⟨b, l1e, l2e, _, entries_eq, kerase_eq⟩ :=
                 List.exists_of_kerase (a := rid) (l := cfg.heap.entries)

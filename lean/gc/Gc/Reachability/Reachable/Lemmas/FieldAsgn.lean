@@ -1,12 +1,16 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Mutation.Mutation
-import Gc.Model.Preservation
-import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.Lemmas.Common
-import Gc.Reachability.Reachable.Lemmas.Enter
-import Gc.Reachability.Reachable.Lemmas.VarAsgn
+module
+
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Mutation.Mutation
+public import Gc.Model.Preservation
+public import Gc.Reachability.Reachable.Semantics
+public import Gc.Reachability.Reachable.Lemmas.Common
+public import Gc.Reachability.Reachable.Lemmas.Enter
+public import Gc.Reachability.Reachable.Lemmas.VarAsgn
+
+@[expose] public section
 
 -- ===== fieldAsgn =====
 
@@ -20,7 +24,7 @@ theorem fieldAsgn_stack_objAt_eq_of_ne {cfg cfg' : RuntimeConfig} {frame : Frame
     (Reference.OId oid').objAt? cfg = (Reference.OId oid').objAt? cfg' := by
   have hlocEq : (Reference.OId oid').loc? cfg = (Reference.OId oid').loc? cfg' := by
     rw [hcfg']; exact fieldAsgn_corollary_stack_loc_eq hframe hobj oid'
-  obtain ⟨stack_eq, hframeidx⟩ := fieldAsgn_corollary_stack_eq hframe
+  obtain ⟨stack_eq, hframeidx⟩ := stack_eq_of_stackWithIndex_getLast? hframe
   unfold Reference.objAt?
   dsimp only
   rw [hlocEq]
@@ -182,7 +186,7 @@ theorem fieldAsgn_frame_root_iff {cfg cfg' : RuntimeConfig} (h : fieldAsgn xf y 
   rcases hcase with
       ⟨oid, oid_y, obj, hxr, hyr, hloc, hobj, hcfg'⟩ |
       ⟨oid, oid_y, rid, region, obj, hxr, hyr, hloc, hregion, hobj, hyloc, hstatus, hfrid, hcfg'⟩
-  · obtain ⟨stack_eq, hframeidx⟩ := fieldAsgn_corollary_stack_eq hframe
+  · obtain ⟨stack_eq, hframeidx⟩ := stack_eq_of_stackWithIndex_getLast? hframe
     have hframeLast : cfg.stack.getLast? = some frame.toFrame := by
       rw [stack_eq]; simp
     have hstack' : cfg'.stack = cfg.stack.dropLast ++
@@ -321,7 +325,7 @@ theorem fieldAsgn_stack_oidC_step_of_ne_oidY {cfg cfg' : RuntimeConfig} {frame :
     c = Reference.OId oid_y ∨ ReachableStep cfg (Reference.OId oid) c := by
   have hlocEq : (Reference.OId oid).loc? cfg = (Reference.OId oid).loc? cfg' := by
     rw [hcfg']; exact fieldAsgn_corollary_stack_loc_eq hframe hobj oid
-  obtain ⟨stack_eq, hframeidx⟩ := fieldAsgn_corollary_stack_eq hframe
+  obtain ⟨stack_eq, hframeidx⟩ := stack_eq_of_stackWithIndex_getLast? hframe
   have hstack' : cfg'.stack = cfg.stack.dropLast ++
       [({ frame with objMap := frame.objMap.insert oid (obj.insert field (Reference.OId oid_y)) } : Frame)] := by
     rw [hcfg']

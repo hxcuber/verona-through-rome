@@ -1,5 +1,10 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
+module
+
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Mathlib.Logic.Relation
+
+@[expose] public section
 
 def ReachableStep (cfg : RuntimeConfig) : Reference → Reference → Prop
   | Reference.RId rid, b =>

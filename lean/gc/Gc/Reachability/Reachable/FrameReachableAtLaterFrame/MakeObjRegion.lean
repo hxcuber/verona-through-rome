@@ -1,12 +1,16 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Mutation.Mutation
-import Gc.Model.Mutation.Stmt
-import Gc.Model.Preservation
-import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Def
-import Gc.Reachability.Reachable.Lemmas
+module
+
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Mutation.Mutation
+public import Gc.Model.Mutation.Stmt
+public import Gc.Model.Preservation
+public import Gc.Reachability.Reachable.Semantics
+public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Def
+public import Gc.Reachability.Reachable.Lemmas
+
+@[expose] public section
 
 theorem frameReachableAtLaterFrame_step_makeObjRegion (x : VarName) :
     FrameReachableAtLaterFrame_step (Stmt.makeObjRegion x) := by
@@ -32,7 +36,7 @@ theorem frameReachableAtLaterFrame_step_makeObjRegion (x : VarName) :
       rw [heq1, ← hframe'idx]; exact hlt
     omega
   have hframeRidNe : frame.regionId ≠ lastFrame.regionId :=
-    makeObjRegion_regionId_ne vcfg hframeMemCfg hframeLt hlast
+    regionId_ne_last_of_suspended vcfg hframeMemCfg hframeLt hlast
   have hidNe : oid ≠ cfg.freshObjectId := by
     intro heq
     subst heq

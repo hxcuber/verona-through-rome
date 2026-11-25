@@ -1,10 +1,14 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Mutation.Mutation
-import Gc.Model.Preservation
-import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.Lemmas.Common
+module
+
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Mutation.Mutation
+public import Gc.Model.Preservation
+public import Gc.Reachability.Reachable.Semantics
+public import Gc.Reachability.Reachable.Lemmas.Common
+
+@[expose] public section
 
 -- An on-stack frame's region is never what `enter` opens (L2: on-stack is Open, `enter` requires Closed).
 theorem enter_regionId_ne {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)

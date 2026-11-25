@@ -1,8 +1,12 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
+module
 
-import Mathlib.Data.List.AList
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+
+public import Mathlib.Data.List.AList
+
+@[expose] public section
 
 def RuntimeConfig.start : RuntimeConfig :=
   { heap := (∅ : Heap).insert 0 {

@@ -1,13 +1,17 @@
-import Gc.Model.Preservation.Enter
-import Gc.Model.Preservation.Exit
-import Gc.Model.Preservation.FieldAsgn
-import Gc.Model.Preservation.MakeObjRegion
-import Gc.Model.Preservation.MakeObjStack
-import Gc.Model.Preservation.MakeRegion
-import Gc.Model.Preservation.Merge
-import Gc.Model.Preservation.Swap
-import Gc.Model.Preservation.VarAsgn
-import Gc.Model.Mutation.Stmt
+module
+
+public import Gc.Model.Preservation.Enter
+public import Gc.Model.Preservation.Exit
+public import Gc.Model.Preservation.FieldAsgn
+public import Gc.Model.Preservation.MakeObjRegion
+public import Gc.Model.Preservation.MakeObjStack
+public import Gc.Model.Preservation.MakeRegion
+public import Gc.Model.Preservation.Merge
+public import Gc.Model.Preservation.Swap
+public import Gc.Model.Preservation.VarAsgn
+public import Gc.Model.Mutation.Stmt
+
+@[expose] public section
 
 -- `Stmt`-generic preservation: a property `P` of configs is preserved by a single `step`, and
 -- `AllPreserve P` says it's preserved no matter which of the 9 operations ran.
@@ -17,7 +21,7 @@ def StepPreserves (P : RuntimeConfig → Prop) (cmd : Stmt) : Prop :=
 def AllPreserve (P : RuntimeConfig → Prop) : Prop :=
   ∀ (cmd : Stmt), StepPreserves P cmd
 
-def allPreserve_ValidConfig : AllPreserve ValidConfig := by
+theorem allPreserve_ValidConfig : AllPreserve ValidConfig := by
   intro cmd cfg cfg' hstep hvalid
   simp [step] at hstep
   cases cmd with

@@ -1,12 +1,16 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Mutation.Mutation
-import Gc.Model.Mutation.Stmt
-import Gc.Model.Preservation
-import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.StackReachableInvariant.Def
-import Gc.Reachability.Reachable.Lemmas
+module
+
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Mutation.Mutation
+public import Gc.Model.Mutation.Stmt
+public import Gc.Model.Preservation
+public import Gc.Reachability.Reachable.Semantics
+public import Gc.Reachability.Reachable.StackReachableInvariant.Def
+public import Gc.Reachability.Reachable.Lemmas
+
+@[expose] public section
 
 theorem stackReachable_invariant_varAsgn (x : VarName) (yf : FieldAccess) :
     StackReachable_invariant_for_suspended_region_objects (Stmt.varAsgn x yf) := by
@@ -82,7 +86,7 @@ theorem stackReachable_invariant_varAsgn (x : VarName) (yf : FieldAccess) :
             (RegionReachable_iff_reflTransGen cfg rid (Reference.OId oid)).mpr ⟨region, hregion, hrtg⟩
           obtain ⟨regionF, hlkF, hopenF⟩ := l2_of_stackWithIndex vcfg hframeMem
           have hneRid : frame.regionId ≠ rid := by
-            rw [← hridEq]; exact varAsgn_regionId_ne vcfg hframeMem hframeSusp' hlast
+            rw [← hridEq]; exact regionId_ne_last_of_suspended vcfg hframeMem hframeSusp' hlast
           exact region_reachable_open_ne_absurd vcfg hregion hloc hlkF hopenF hneRid hrr
         · -- fresh-var branch: heap untouched, bridge transports directly; witness frame is the new last frame.
           have hlookupG' : cfg'.heap.lookup Gf.regionId = some regionG := by rw [hcfg']; exact hlookupG

@@ -1,21 +1,25 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Mutation.Mutation
-import Gc.Model.Mutation.Stmt
-import Gc.Model.Preservation
-import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.StackReachableInvariant.Def
-import Gc.Reachability.Reachable.Lemmas
-import Gc.Reachability.Reachable.StackReachableInvariant.Enter
-import Gc.Reachability.Reachable.StackReachableInvariant.Exit
-import Gc.Reachability.Reachable.StackReachableInvariant.MakeObjStack
-import Gc.Reachability.Reachable.StackReachableInvariant.MakeObjRegion
-import Gc.Reachability.Reachable.StackReachableInvariant.MakeRegion
-import Gc.Reachability.Reachable.StackReachableInvariant.Merge
-import Gc.Reachability.Reachable.StackReachableInvariant.VarAsgn
-import Gc.Reachability.Reachable.StackReachableInvariant.FieldAsgn
-import Gc.Reachability.Reachable.StackReachableInvariant.Swap
+module
+
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Mutation.Mutation
+public import Gc.Model.Mutation.Stmt
+public import Gc.Model.Preservation
+public import Gc.Reachability.Reachable.Semantics
+public import Gc.Reachability.Reachable.StackReachableInvariant.Def
+public import Gc.Reachability.Reachable.Lemmas
+public import Gc.Reachability.Reachable.StackReachableInvariant.Enter
+public import Gc.Reachability.Reachable.StackReachableInvariant.Exit
+public import Gc.Reachability.Reachable.StackReachableInvariant.MakeObjStack
+public import Gc.Reachability.Reachable.StackReachableInvariant.MakeObjRegion
+public import Gc.Reachability.Reachable.StackReachableInvariant.MakeRegion
+public import Gc.Reachability.Reachable.StackReachableInvariant.Merge
+public import Gc.Reachability.Reachable.StackReachableInvariant.VarAsgn
+public import Gc.Reachability.Reachable.StackReachableInvariant.FieldAsgn
+public import Gc.Reachability.Reachable.StackReachableInvariant.Swap
+
+@[expose] public section
 
 theorem stackReachable_invariant_all (cmd : Stmt) :
     StackReachable_invariant_for_suspended_region_objects cmd := by

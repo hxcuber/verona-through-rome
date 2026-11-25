@@ -1,9 +1,13 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Theorems
+module
 
-import Mathlib.Data.List.Infix
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Theorems
+
+public import Mathlib.Data.List.Infix
+
+@[expose] public section
 
 -- Generic, non-operation-specific facts shared by several `Preservation`/`Reachability` files.
 
@@ -169,3 +173,178 @@ theorem stackWithIndex_objMap_get_eq_of_last_varMap_update {cfg cfg' : RuntimeCo
       have e1 : cfg.stack[n]? = none := List.getElem?_eq_none (by omega)
       have e2 : cfg'.stack[n]? = none := List.getElem?_eq_none (by omega)
       rw [e1, e2]
+
+-- An oid can be found in at most one region's objMap (stated over bare L1, so it's usable on cfg
+-- before cfg''s own validity is established). Mirrors heap_region_unique/heap_region_unique.
+theorem heap_region_unique
+    {cfg : RuntimeConfig} {rid1 rid2 : RegionId} {region1 region2 : Region} {oid : ObjectId} :
+  L1 cfg →
+  (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region1.objMap.keys →
+  (⟨rid2, region2⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region2.objMap.keys →
+  rid1 = rid2 := by
+  intro l1 mem1 in1 mem2 in2
+  by_contra hne
+  unfold L1 RuntimeConfig.objectIds at l1
+  obtain ⟨_, heap_nodup, _⟩ := List.nodup_append.mp l1
+  unfold Heap.objectIds at heap_nodup
+  rw [List.nodup_flatten, List.pairwise_map] at heap_nodup
+  obtain ⟨_, pairwise_disjoint⟩ := heap_nodup
+  have hneq : (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ≠ ⟨rid2, region2⟩ := by
+    intro heq
+    exact hne (congrArg Sigma.fst heq)
+  have : Std.Symm (fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds) := ⟨fun _ _ hd => List.disjoint_symm hd⟩
+  have disj := List.Pairwise.forall
+    (R := fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds)
+    pairwise_disjoint mem1 mem2 hneq
+  unfold Region.objectIds at disj
+  exact disj in1 in2
+
+-- Reference.loc?'s (h1, h2)-match for OId factors through Option.map, so equal cfg's need only
+-- agree on the *projected* index/rid, not the full FrameWithIndex/heap-entry value.
+theorem loc_match_eq (o1 : Option FrameWithIndex)
+    (o2 : Option (Sigma (fun _ : RegionId => Region))) :
+    (match o1, o2 with
+      | some f, none => some (Location.Stk f.index)
+      | none, some ⟨rid, _⟩ => some (Location.Rgn rid)
+      | _, _ => none) =
+    (match o1.map FrameWithIndex.index, o2.map Sigma.fst with
+      | some n, none => some (Location.Stk n)
+      | none, some r => some (Location.Rgn r)
+      | _, _ => none) := by
+  cases o1 <;> cases o2 <;> rfl
+
+-- Relates the `stackWithIndex.getLast?` frame used by `swap_cases` back to `cfg.stack`'s own
+-- decomposition, mirroring stack_eq_of_stackWithIndex_getLast?/VarAsgn.lean's stack_eq construction.
+theorem stack_eq_of_stackWithIndex_getLast? {cfg : RuntimeConfig} {frame : FrameWithIndex}
+    (hframe : cfg.stackWithIndex.getLast? = some frame) :
+    cfg.stack = cfg.stack.dropLast ++ [frame.toFrame] ∧ frame.index = cfg.stack.dropLast.length := by
+  cases hlast : cfg.stack.getLast? with
+  | none =>
+    exfalso
+    have hnil : cfg.stack = [] := List.getLast?_eq_none_iff.mp hlast
+    unfold RuntimeConfig.stackWithIndex at hframe
+    rw [hnil] at hframe
+    simp at hframe
+  | some lastF =>
+    have stack_eq : cfg.stack = cfg.stack.dropLast ++ [lastF] :=
+      (List.dropLast_append_getLast? lastF hlast).symm
+    have stackWithIndex_eq :
+        cfg.stackWithIndex =
+          cfg.stack.dropLast.mapIdx (fun idx f => ({ f with index := idx } : FrameWithIndex)) ++
+            [({ lastF with index := cfg.stack.dropLast.length } : FrameWithIndex)] := by
+      unfold RuntimeConfig.stackWithIndex
+      conv_lhs => rw [stack_eq]
+      rw [List.mapIdx_concat]
+    rw [stackWithIndex_eq, List.getLast?_concat, Option.some_inj] at hframe
+    subst hframe
+    exact ⟨stack_eq, rfl⟩
+
+-- Once an object is already stored at some key of an ObjMap, its own refs already contribute to
+-- the ObjMap-level bind-refs.
+theorem objMap_bind_refs_mem_of_lookup {m : ObjMap} {oid : ObjectId} {obj : Object}
+    {r : Reference} (hobj : m.lookup oid = some obj) (hr : r ∈ Object.refs obj) :
+    r ∈ (m.entries.map (·.2) >>= Object.refs) := by
+  have hmem : (⟨oid, obj⟩ : Sigma (fun _ : ObjectId => Object)) ∈ m.entries :=
+    AList.mem_lookup_iff.mp (by rw [hobj]; rfl)
+  rw [List.bind_eq_flatMap, List.mem_flatMap]
+  exact ⟨obj, List.mem_map_of_mem (f := (·.2)) hmem, hr⟩
+
+-- Membership after inserting at an ObjMap key: either from the newly-written object, or already present.
+theorem objMap_insert_bind_refs_mem {m : ObjMap} {oid : ObjectId} {v : Object} {r : Reference}
+    (hr : r ∈ ((m.insert oid v).entries.map (·.2) >>= Object.refs)) :
+    r ∈ Object.refs v ∨ r ∈ (m.entries.map (·.2) >>= Object.refs) := by
+  by_cases hoid : oid ∈ m
+  · obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase (AList.mem_keys.mp hoid)
+    rw [AList.entries_insert, hkerase, List.map_cons, List.bind_eq_flatMap, List.flatMap_cons,
+      ← List.bind_eq_flatMap, List.mem_append, List.map_append, List.bind_eq_flatMap, List.flatMap_append,
+      ← List.bind_eq_flatMap, List.mem_append] at hr
+    rw [heq, List.map_append, List.map_cons, List.bind_eq_flatMap, List.flatMap_append, List.flatMap_cons,
+      ← List.bind_eq_flatMap, ← List.bind_eq_flatMap, List.mem_append, List.mem_append]
+    tauto
+  · rw [AList.entries_insert_of_notMem hoid, List.map_cons, List.bind_eq_flatMap, List.flatMap_cons,
+      ← List.bind_eq_flatMap, List.mem_append] at hr
+    tauto
+
+-- Once a region is already stored at some key of a heap, its own refs already contribute to Heap.refs.
+theorem heap_refs_mem_of_lookup {cfg : RuntimeConfig} {rid : RegionId} {region : Region}
+    {r : Reference} (hregion : cfg.heap.lookup rid = some region) (hr : r ∈ Region.refs region) :
+    r ∈ Heap.refs cfg.heap := by
+  have hmem : (⟨rid, region⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries :=
+    AList.mem_lookup_iff.mp (by rw [hregion]; rfl)
+  unfold Heap.refs
+  rw [List.bind_eq_flatMap, List.mem_flatMap]
+  exact ⟨region, List.mem_map_of_mem (f := (·.2)) hmem, hr⟩
+
+-- Membership after inserting at a heap key: either from the newly-written region, or already present.
+theorem heap_insert_refs_mem {cfg : RuntimeConfig} {rid : RegionId} {newRegion : Region}
+    {r : Reference} (hrid : rid ∈ cfg.heap.keys) (hr : r ∈ Heap.refs (cfg.heap.insert rid newRegion)) :
+    r ∈ Region.refs newRegion ∨ r ∈ Heap.refs cfg.heap := by
+  unfold Heap.refs at hr ⊢
+  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase hrid
+  rw [AList.entries_insert, hkerase, List.map_cons, List.bind_eq_flatMap, List.flatMap_cons,
+    ← List.bind_eq_flatMap, List.mem_append, List.map_append, List.bind_eq_flatMap, List.flatMap_append,
+    ← List.bind_eq_flatMap, List.mem_append] at hr
+  rw [heq, List.map_append, List.map_cons, List.bind_eq_flatMap, List.flatMap_append, List.flatMap_cons,
+    ← List.bind_eq_flatMap, ← List.bind_eq_flatMap, List.mem_append, List.mem_append]
+  tauto
+
+-- Heap key set is unchanged by inserting at an already-present key.
+theorem heap_insert_keys_mem {cfg : RuntimeConfig} {rid : RegionId} {newRegion : Region}
+    (hridmem : rid ∈ cfg.heap.keys) (rid' : RegionId) :
+    rid' ∈ (cfg.heap.insert rid newRegion).keys ↔ rid' ∈ cfg.heap.keys := by
+  rw [← AList.mem_keys, AList.mem_insert, AList.mem_keys]
+  exact or_iff_right_of_imp (fun heq => heq ▸ hridmem)
+
+-- The region-touching branches' `heap.insert` at an already-present key, where the newly-inserted
+-- region's objMap key set is only known up to a `Perm` of the old region's (the region's objMap
+-- genuinely changes, not just a scalar field) -- composes the outer heap-entries reorder with the
+-- inner region-level permutation. Mirrors heap_insert_objectIds_perm.
+theorem heap_insert_objectIds_perm {cfg : RuntimeConfig} {rid : RegionId}
+    {region newRegion : Region} (hregion : cfg.heap.lookup rid = some region)
+    (hperm : newRegion.objMap.keys.Perm region.objMap.keys) :
+    (Heap.objectIds (cfg.heap.insert rid newRegion)).Perm cfg.heap.objectIds := by
+  obtain ⟨region2, l1e, l2e, hnotmem, heq, hkerase⟩ :=
+    List.exists_of_kerase (AList.mem_keys_of_lookup_eq_some hregion)
+  have region2_eq : region2 = region :=
+    List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys
+      (heq ▸ List.mem_append_right _ List.mem_cons_self) (AList.mem_lookup_iff.mp (by rw [hregion]; rfl))
+  have cfg_eq : Heap.objectIds cfg.heap =
+      List.flatten (l1e.map (fun e => e.2.objectIds)) ++
+        (region.objectIds ++ List.flatten (l2e.map (fun e => e.2.objectIds))) := by
+    unfold Heap.objectIds
+    rw [heq, ← region2_eq, List.map_append, List.map_cons, List.flatten_append, List.flatten_cons]
+  have cfg'_eq : Heap.objectIds (cfg.heap.insert rid newRegion) =
+      newRegion.objectIds ++
+        (List.flatten (l1e.map (fun e => e.2.objectIds)) ++ List.flatten (l2e.map (fun e => e.2.objectIds))) := by
+    unfold Heap.objectIds
+    rw [AList.entries_insert, hkerase, List.map_cons, List.flatten_cons, List.map_append, List.flatten_append]
+  rw [cfg_eq, cfg'_eq]
+  set LA := List.flatten (l1e.map (fun e => e.2.objectIds))
+  set LB := List.flatten (l2e.map (fun e => e.2.objectIds))
+  have swap_perm : (region.objectIds ++ (LA ++ LB)).Perm (LA ++ (region.objectIds ++ LB)) := by
+    rw [← List.append_assoc, ← List.append_assoc]
+    exact (List.perm_append_comm).append_right LB
+  exact (hperm.append_right (LA ++ LB)).trans swap_perm
+
+-- Generic AList fact (Reference-valued): replacing the value at an already-present key changes
+-- the count of any target `t` by exactly (v_new==t?1:0) - (v_old==t?1:0), captured additively (to
+-- avoid Nat subtraction) as an equation relating the two counts via the two `==` conditions. This
+-- is what makes `swap` provably an *exchange* rather than a plain overwrite: applying this once
+-- for each of the two slots being swapped, the two `if`-terms cancel out exactly when combined.
+theorem alist_insert_count_eq {α : Type*} [DecidableEq α] {l : AList (fun _ : α => Reference)}
+    {k : α} {v_old v_new t : Reference} (hlookup : l.lookup k = some v_old) :
+    ((l.insert k v_new).entries.map (·.2)).count t + (if (v_old == t) = true then 1 else 0) =
+    (l.entries.map (·.2)).count t + (if (v_new == t) = true then 1 else 0) := by
+  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase (AList.mem_keys_of_lookup_eq_some hlookup)
+  have v0_eq : v0 = v_old := by
+    have hmem_v0 : (⟨k, v0⟩ : Sigma (fun _ : α => Reference)) ∈ l.entries :=
+      heq ▸ List.mem_append_right _ List.mem_cons_self
+    have hmem_vold : (⟨k, v_old⟩ : Sigma (fun _ : α => Reference)) ∈ l.entries :=
+      AList.mem_lookup_iff.mp (by rw [hlookup]; rfl)
+    exact List.NodupKeys.eq_of_mk_mem (β := fun _ : α => Reference) l.nodupKeys hmem_v0 hmem_vold
+  have hnew : (l.insert k v_new).entries.map (·.2) = v_new :: (l1e ++ l2e).map (·.2) := by
+    rw [AList.entries_insert, hkerase, List.map_cons]
+  have hold : l.entries.map (·.2) = l1e.map (·.2) ++ v_old :: l2e.map (·.2) := by
+    rw [heq, v0_eq, List.map_append, List.map_cons]
+  rw [hnew, hold, List.count_cons, List.map_append, List.count_append, List.count_append, List.count_cons]
+  omega

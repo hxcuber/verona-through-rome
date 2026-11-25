@@ -1,6 +1,11 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Theorems
+module
+
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Theorems
+public import Mathlib.Data.List.Pairwise
+
+@[expose] public section
 
 def L1 (cfg : RuntimeConfig) : Prop :=
   cfg.objectIds.Nodup

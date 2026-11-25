@@ -1,11 +1,15 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Mutation.Mutation
-import Gc.Model.Preservation
-import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.Lemmas.Common
-import Gc.Reachability.Reachable.Lemmas.Enter
+module
+
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Mutation.Mutation
+public import Gc.Model.Preservation
+public import Gc.Reachability.Reachable.Semantics
+public import Gc.Reachability.Reachable.Lemmas.Common
+public import Gc.Reachability.Reachable.Lemmas.Enter
+
+@[expose] public section
 
 -- A pre-existing, non-popped frame survives `exit` unchanged, at the same index.
 theorem exit_frame_mem_up {cfg cfg' : RuntimeConfig} (h : exit cfg = some cfg')
@@ -53,19 +57,6 @@ theorem exit_poppedFrame_mem {cfg : RuntimeConfig} {poppedFrame : Frame}
   apply List.mem_mapIdx.mpr
   refine ⟨cfg.stack.length - 1, by omega, ?_⟩
   rw [hgetElem]
-
--- A frame before the popped one has a different regionId (S1: injective across the stack).
-theorem exit_regionId_ne {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
-    {f : FrameWithIndex} (hf : f ∈ cfg.stackWithIndex) (hflt : f.index < cfg.stack.length - 1)
-    {poppedFrame : Frame} (hlast : cfg.stack.getLast? = some poppedFrame) (hlen : cfg.stack.length ≥ 2) :
-    f.regionId ≠ poppedFrame.regionId := by
-  intro heq
-  obtain ⟨fp, hfpMem, hfpEq, hfpIdx⟩ := exit_poppedFrame_mem hlast hlen
-  have hregEq : f.regionId = fp.regionId := by rw [hfpEq]; exact heq
-  have hidxEq : f.index = fp.index := merge_corollary_regionId_unique_index vcfg.s1 hf hfpMem hregEq
-  rw [hfpIdx] at hidxEq
-  rw [hidxEq] at hflt
-  exact absurd hflt (lt_irrefl _)
 
 -- If `a` avoids the popped slot and steps to `c` (both `SafeRef`), so does `c`: region hops stay in-region, stack hops only decrease index (S2).
 theorem exit_avoid_popped_step {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
@@ -237,8 +228,7 @@ theorem exit_root_avoid_popped {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
 -- Every pre-existing frame below the popped one survives `exit` unchanged, same heap entry.
 theorem exit_frame_reachable_transport {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
     (h : exit cfg = some cfg') {poppedFrame : Frame} {region0 : Region}
-    (hlast : cfg.stack.getLast? = some poppedFrame) (hlen : cfg.stack.length ≥ 2)
-    (_hlookupRid : cfg.heap.lookup poppedFrame.regionId = some region0) (_hopenRid : region0.status = Status.Open)
+    (hlast : cfg.stack.getLast? = some poppedFrame)
     (hcfg' : cfg' = { cfg with
       stack := cfg.stack.dropLast,
       heap := cfg.heap.insert poppedFrame.regionId { region0 with status := Status.Closed } })
@@ -251,7 +241,7 @@ theorem exit_frame_reachable_transport {cfg cfg' : RuntimeConfig} (vcfg : ValidC
   obtain ⟨start, hroot, hrtg⟩ := hXreach
   have hstartAvoid := exit_root_avoid_popped vcfg hXmem hXlt hroot
   have hrtg' := exit_reflTransGen_transport vcfg h hlookup hopen hloc hrtg hstartAvoid
-  have hXridNe : X.regionId ≠ poppedFrame.regionId := exit_regionId_ne vcfg hXmem hXlt hlast hlen
+  have hXridNe : X.regionId ≠ poppedFrame.regionId := regionId_ne_last_of_suspended vcfg hXmem hXlt hlast
   have hroot' : FrameRoot cfg' X.index start := by
     rcases hroot with ⟨Xf, hXfmem, hXfidx, var, hvar⟩ | ⟨Xf, hXfmem, hXfidx, region', hlookupXf, hbridge⟩
     · exact Or.inl ⟨Xf, (exit_frame_mem_up h hXfmem (hXfidx ▸ hXlt)), hXfidx, var, hvar⟩
@@ -330,7 +320,7 @@ theorem exit_reflTransGen_transport_backward {cfg cfg' : RuntimeConfig} (vcfg : 
 -- Mirrors `exit_frame_reachable_transport`, backward: reachability transports down to `cfg`.
 theorem exit_frame_reachable_transport_backward {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg)
     (h : exit cfg = some cfg') {poppedFrame : Frame} {region0 : Region}
-    (hlast : cfg.stack.getLast? = some poppedFrame) (hlen : cfg.stack.length ≥ 2)
+    (hlast : cfg.stack.getLast? = some poppedFrame)
     (hcfg' : cfg' = { cfg with
       stack := cfg.stack.dropLast,
       heap := cfg.heap.insert poppedFrame.regionId { region0 with status := Status.Closed } })
@@ -345,7 +335,7 @@ theorem exit_frame_reachable_transport_backward {cfg cfg' : RuntimeConfig} (vcfg
   have hsafe : SafeRef cfg' rid (Reference.OId oid) := Or.inl hloc'
   have hrtg' := exit_reflTransGen_transport_backward vcfg h hlookup hlookup' hopen hrtg hsafe
   obtain ⟨hXmemcfg, hXlt⟩ := exit_frame_mem_down h hXmem
-  have hXridNe : X.regionId ≠ poppedFrame.regionId := exit_regionId_ne vcfg hXmemcfg hXlt hlast hlen
+  have hXridNe : X.regionId ≠ poppedFrame.regionId := regionId_ne_last_of_suspended vcfg hXmemcfg hXlt hlast
   have hroot' : FrameRoot cfg X.index start := by
     rcases hroot with ⟨Xf, hXfmem, hXfidx, var, hvar⟩ | ⟨Xf, hXfmem, hXfidx, region', hlookupXf, hbridge⟩
     · have hXfeq : Xf = X := swap_corollary_stackWithIndex_index_inj hXfmem hXmem hXfidx

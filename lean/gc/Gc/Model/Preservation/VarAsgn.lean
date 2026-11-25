@@ -1,10 +1,15 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Theorems
-import Gc.Model.Mutation.VarAsgn
+module
 
-import Mathlib.Data.List.Infix
+public import Gc.Model.Types
+public import Gc.Model.Helpers
+public import Gc.Model.Validity
+public import Gc.Model.Theorems
+public import Gc.Model.Mutation.VarAsgn
+public import Gc.Model.Preservation.Common
+
+public import Mathlib.Data.List.Infix
+
+@[expose] public section
 
 -- The bridge-var branch's `heap.insert` at an already-present key never changes the key *set*
 -- (only reorders `entries`, moving the mutated region to the front).
@@ -243,46 +248,6 @@ theorem varAsgn_corollary_fresh_loc_eq {cfg : RuntimeConfig} {frame : Frame} {xf
       rw [find_eqL, find_eqR]
     rw [h1_eq]
 
--- An oid can be found in at most one region's objMap (stated over bare L1, so it's usable on cfg
--- before cfg''s own validity is established). Mirrors enter_corollary_1/makeObjRegion_corollary_region_unique.
-theorem varAsgn_corollary_region_unique
-    {cfg : RuntimeConfig} {rid1 rid2 : RegionId} {region1 region2 : Region} {oid : ObjectId} :
-  L1 cfg →
-  (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region1.objMap.keys →
-  (⟨rid2, region2⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries → oid ∈ region2.objMap.keys →
-  rid1 = rid2 := by
-  intro l1 mem1 in1 mem2 in2
-  by_contra hne
-  unfold L1 RuntimeConfig.objectIds at l1
-  obtain ⟨_, heap_nodup, _⟩ := List.nodup_append.mp l1
-  unfold Heap.objectIds at heap_nodup
-  rw [List.nodup_flatten, List.pairwise_map] at heap_nodup
-  obtain ⟨_, pairwise_disjoint⟩ := heap_nodup
-  have hneq : (⟨rid1, region1⟩ : Sigma (fun _ : RegionId => Region)) ≠ ⟨rid2, region2⟩ := by
-    intro heq
-    exact hne (congrArg Sigma.fst heq)
-  haveI : Std.Symm (fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds) := ⟨fun _ _ hd => List.disjoint_symm hd⟩
-  have disj := List.Pairwise.forall
-    (R := fun (e1 e2 : Sigma (fun _ : RegionId => Region)) => List.Disjoint e1.2.objectIds e2.2.objectIds)
-    pairwise_disjoint mem1 mem2 hneq
-  unfold Region.objectIds at disj
-  exact disj in1 in2
-
--- Reference.loc?'s (h1, h2)-match for OId factors through Option.map, so equal cfg's need only
--- agree on the *projected* index/rid, not the full FrameWithIndex/heap-entry value. Mirrors
--- makeObjRegion_corollary_loc_match_eq.
-theorem varAsgn_corollary_loc_match_eq (o1 : Option FrameWithIndex)
-    (o2 : Option (Sigma (fun _ : RegionId => Region))) :
-    (match o1, o2 with
-      | some f, none => some (Location.Stk f.index)
-      | none, some ⟨rid, _⟩ => some (Location.Rgn rid)
-      | _, _ => none) =
-    (match o1.map FrameWithIndex.index, o2.map Sigma.fst with
-      | some n, none => some (Location.Stk n)
-      | none, some r => some (Location.Rgn r)
-      | _, _ => none) := by
-  cases o1 <;> cases o2 <;> rfl
-
 -- The bridge-var branch never touches the stack, so `Reference.loc?`'s stack side is literally
 -- unchanged; the heap side genuinely reorders (the mutated region's entry moves to the front via
 -- the AList.insert kerase), so it needs region-uniqueness to show find? still lands on the same
@@ -321,7 +286,7 @@ theorem varAsgn_corollary_bridge_loc_eq {cfg : RuntimeConfig} {rid oid : ObjectI
         intro y hy hpy
         obtain ⟨rid_y, region_y⟩ := y
         have rid_y_eq : rid_y = rid :=
-          varAsgn_corollary_region_unique l1 hy (List.contains_iff_mem.mp hpy)
+          heap_region_unique l1 hy (List.contains_iff_mem.mp hpy)
             region_mem_cfg (List.contains_iff_mem.mp hb2)
         subst rid_y_eq
         have region_y_eq : region_y = region :=
@@ -368,10 +333,10 @@ theorem varAsgn_corollary_bridge_loc_eq {cfg : RuntimeConfig} {rid oid : ObjectI
             rw [find_eqA, find_eqB]
             exact ih
       rw [find_eqL]
-  have step1 := varAsgn_corollary_loc_match_eq
+  have step1 := loc_match_eq
     (cfg.stackWithIndex.findRev? (fun f => (AList.keys f.objMap).contains oid'))
     (cfg.heap.entries.find? (fun p => (AList.keys p.snd.objMap).contains oid'))
-  have step2 := varAsgn_corollary_loc_match_eq
+  have step2 := loc_match_eq
     (cfg.stackWithIndex.findRev? (fun f => (AList.keys f.objMap).contains oid'))
     ((AList.insert rid { region with bridgeObjectId := oid } cfg.heap).entries.find?
       (fun p => (AList.keys p.snd.objMap).contains oid'))

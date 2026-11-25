@@ -1,5 +1,9 @@
-import Gc.Model.Helpers
-import Gc.Model.Types
+module
+
+public import Gc.Model.Helpers
+public import Gc.Model.Types
+
+@[expose] public section
 
 def exit (cfg : RuntimeConfig) : Option (RuntimeConfig) := do
   if cfg.stack.length >= 2 then
