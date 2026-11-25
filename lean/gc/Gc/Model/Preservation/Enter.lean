@@ -9,58 +9,6 @@ public import Gc.Model.Preservation.Common
 
 @[expose] public section
 
--- Changing a region's status keeps the (key, objMap) pairs of the heap entries.
-private theorem entries_mem_iff {heap : Heap} {rid : RegionId} {region : Region} {s : Status}
-    (hlookup : heap.lookup rid = some region) (r : RegionId) (m : ObjMap) :
-    (∃ reg, (⟨r, reg⟩ : Sigma (fun _ : RegionId => Region)) ∈ (heap.insert rid { region with status := s }).entries ∧
-      reg.objMap = m) ↔
-    ∃ reg, (⟨r, reg⟩ : Sigma (fun _ : RegionId => Region)) ∈ heap.entries ∧ reg.objMap = m := by
-  simp only [← AList.mem_lookup_iff, Option.mem_def, ← Option.map_eq_some_iff]
-  by_cases hr : r = rid
-  · subst hr; simp [hlookup]
-  · rw [AList.lookup_insert_ne hr]
-
--- Under L1, the region found holding an oid is unaffected by changing a region's status.
-private theorem heap_find_fst {cfg : RuntimeConfig} {rid : RegionId} {region : Region} {s : Status}
-    {oid : ObjectId} (l1 : L1 cfg) (hlookup : cfg.heap.lookup rid = some region) :
-    ((cfg.heap.insert rid { region with status := s }).entries.find? (fun x => x.2.objMap.keys.contains oid)).map
-      Sigma.fst = (cfg.heap.entries.find? (fun x => x.2.objMap.keys.contains oid)).map Sigma.fst := by
-  have key : ∀ {r reg}, (⟨r, reg⟩ : Sigma (fun _ : RegionId => Region)) ∈
-      (cfg.heap.insert rid { region with status := s }).entries →
-      ∃ reg0, (⟨r, reg0⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries ∧ reg0.objMap = reg.objMap :=
-    fun h => (entries_mem_iff hlookup _ _).mp ⟨_, h, rfl⟩
-  cases ho : cfg.heap.entries.find? (fun x => x.2.objMap.keys.contains oid) with
-  | none =>
-    rw [List.find?_eq_none] at ho
-    rw [Option.map_none, Option.map_eq_none_iff, List.find?_eq_none]
-    rintro ⟨r, reg⟩ hm hp
-    obtain ⟨reg0, hm0, he⟩ := key hm
-    exact ho _ hm0 (he ▸ hp)
-  | some e =>
-    obtain ⟨r, reg⟩ := e
-    have hp := List.find?_some ho
-    have hm := List.mem_of_find?_eq_some ho
-    obtain ⟨reg', hm', he'⟩ := (entries_mem_iff hlookup _ _).mpr ⟨_, hm, rfl⟩
-    cases hn : (cfg.heap.insert rid { region with status := s }).entries.find? (fun x => x.2.objMap.keys.contains oid) with
-    | none => exact absurd (he' ▸ hp) (List.find?_eq_none.mp hn _ hm')
-    | some e' =>
-      obtain ⟨r', reg''⟩ := e'
-      obtain ⟨reg0, hm0, he0⟩ := key (List.mem_of_find?_eq_some hn)
-      have hp' := List.find?_some hn
-      simp only [Option.map_some, Option.some.injEq]
-      exact heap_region_unique l1 hm0 (List.contains_iff_mem.mp (he0 ▸ hp')) hm (List.contains_iff_mem.mp hp)
-
--- Inserting a region with the same refs at a present heap key permutes `Heap.refs`.
-private theorem heap_insert_refs_perm {heap : Heap} {rid : RegionId} {region newRegion : Region}
-    (hlookup : heap.lookup rid = some region) (hrefs : newRegion.refs = region.refs) :
-    (Heap.refs (heap.insert rid newRegion)).Perm heap.refs := by
-  obtain ⟨r2, l1, l2, _, heq, hk⟩ := List.exists_of_kerase (AList.mem_keys_of_lookup_eq_some hlookup)
-  obtain rfl : r2 = region := List.NodupKeys.eq_of_mk_mem heap.nodupKeys
-    (heq ▸ List.mem_append_right _ List.mem_cons_self) (AList.lookup_mem_entries hlookup)
-  unfold Heap.refs
-  rw [AList.entries_insert, hk, heq]
-  simp [hrefs, List.perm_append_comm_assoc]
-
 -- `enter` preserves every location.
 private theorem enter_loc (vcfg : ValidConfig cfg) (h : enter xf a cfg = some cfg') (ref : Reference) :
     ref.loc? cfg' = ref.loc? cfg := by
@@ -75,7 +23,7 @@ private theorem enter_loc (vcfg : ValidConfig cfg) (h : enter xf a cfg = some cf
       List.reverse_append, List.reverse_singleton, List.singleton_append, List.find?_cons, AList.keys_empty,
       List.contains_nil]
     refine (loc_match_eq _ _).trans ?_
-    rw [heap_find_fst (s := Status.Open) vcfg.l1 hlookup]
+    rw [heap_status_update_find_fst (s := Status.Open) vcfg.l1 hlookup]
     exact (loc_match_eq _ _).symm
 
 theorem enter_corollary_2 : ValidConfig cfg →

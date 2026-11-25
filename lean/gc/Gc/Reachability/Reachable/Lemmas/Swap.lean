@@ -958,7 +958,7 @@ theorem swap_stack_yoid_step_of_ne {cfg cfg' : RuntimeConfig} {frame0 : FrameWit
   rw [hobjAtC] at hobjAtC2
   injection hobjAtC2 with hobjAtCeq
   rw [← hobjAtCeq] at hcontainsC
-  rcases fieldAsgn_corollary_object_insert_refs_mem (List.contains_iff_mem.mp hcontainsC) with heq | hmem
+  rcases object_insert_refs_mem (List.contains_iff_mem.mp hcontainsC) with heq | hmem
   · left; exact heq
   · right
     rw [ReachableStep_oid_iff]
@@ -988,7 +988,7 @@ theorem swap_region_stack_yoid_step_of_ne {cfg : RuntimeConfig} (vcfg : ValidCon
   rw [hobjAtC] at hobjAtC2
   injection hobjAtC2 with hobjAtCeq
   rw [← hobjAtCeq] at hcontainsC
-  rcases fieldAsgn_corollary_object_insert_refs_mem (List.contains_iff_mem.mp hcontainsC) with heq | hmem
+  rcases object_insert_refs_mem (List.contains_iff_mem.mp hcontainsC) with heq | hmem
   · left; exact heq
   · right
     rw [ReachableStep_oid_iff]
@@ -1017,7 +1017,7 @@ theorem swap_bridge_yoid_step_of_ne {cfg : RuntimeConfig} (vcfg : ValidConfig cf
   rw [hobjAtC] at hobjAtC2
   injection hobjAtC2 with hobjAtCeq
   rw [← hobjAtCeq] at hcontainsC
-  rcases fieldAsgn_corollary_object_insert_refs_mem (List.contains_iff_mem.mp hcontainsC) with heq | hmem
+  rcases object_insert_refs_mem (List.contains_iff_mem.mp hcontainsC) with heq | hmem
   · left; exact heq
   · right
     rw [ReachableStep_oid_iff]

@@ -16,25 +16,6 @@ private theorem fresh_not_in_region {cfg : RuntimeConfig} {rid : RegionId} {regi
     (hlookup : cfg.heap.lookup rid = some region) : cfg.freshObjectId ∉ region.objMap.keys := fun hmem =>
   cfg.freshObjectId_not_mem (List.mem_append_right _ (heap_objectIds_of_mem (AList.lookup_mem_entries hlookup) hmem))
 
--- freshObjectId is not in any stack frame's objMap.
-private theorem fresh_not_in_stack {cfg : RuntimeConfig} {f : Frame} (hf : f ∈ cfg.stack) :
-    cfg.freshObjectId ∉ f.objMap.keys := fun hmem =>
-  cfg.freshObjectId_not_mem (List.mem_append_left _ (by simpa [Stack.objectIds, Frame.objectIds] using ⟨f, hf, hmem⟩))
-
--- A frame's refs are among its stack's refs.
-private theorem stack_refs_mem {s : Stack} {f : Frame} {r : Reference} (hf : f ∈ s) (hr : r ∈ f.refs) :
-    r ∈ Stack.refs s := by
-  simpa [Stack.refs] using ⟨f, hf, hr⟩
-
--- Stack.refs of a stack ending in `f`.
-private theorem stack_refs_concat (L : List Frame) (f : Frame) : Stack.refs (L ++ [f]) = Stack.refs L ++ f.refs := by
-  simp [Stack.refs]
-
--- Under HS1, a stored oid is never the fresh one.
-private theorem ne_fresh_of_refs {cfg : RuntimeConfig} {oid : ObjectId} (vcfg : ValidConfig cfg)
-    (hr : Reference.OId oid ∈ cfg.refs) : oid ≠ cfg.freshObjectId := fun he =>
-  cfg.freshObjectId_not_mem (he ▸ vcfg.hs1 oid hr)
-
 -- Inserting the fresh empty object leaves a region's refs unchanged.
 private theorem newRegion_refs {cfg : RuntimeConfig} {rid : RegionId} {region : Region}
     (hlookup : cfg.heap.lookup rid = some region) :
@@ -43,42 +24,6 @@ private theorem newRegion_refs {cfg : RuntimeConfig} {rid : RegionId} {region : 
   rw [AList.entries_insert_of_notMem (fresh_not_in_region hlookup)]
   simp [Object.refs]
 
--- Inserting a region with the same refs at a present heap key permutes `Heap.refs`.
-private theorem heap_insert_refs_perm {heap : Heap} {rid : RegionId} {region newRegion : Region}
-    (hlookup : heap.lookup rid = some region) (hrefs : newRegion.refs = region.refs) :
-    (Heap.refs (heap.insert rid newRegion)).Perm heap.refs := by
-  obtain ⟨r2, l1, l2, _, heq, hk⟩ := List.exists_of_kerase (AList.mem_keys_of_lookup_eq_some hlookup)
-  obtain rfl : r2 = region := List.NodupKeys.eq_of_mk_mem heap.nodupKeys
-    (heq ▸ List.mem_append_right _ List.mem_cons_self) (AList.lookup_mem_entries hlookup)
-  unfold Heap.refs
-  rw [AList.entries_insert, hk, heq]
-  simp [hrefs, List.perm_append_comm_assoc]
-
--- A ref of a frame after a varMap insert is the inserted value or an old ref of the frame.
-private theorem newFrame_refs_mem {frame : Frame} {x : VarName} {r0 r : Reference}
-    (hr : r ∈ Frame.refs { frame with varMap := frame.varMap.insert x r0 }) : r = r0 ∨ r ∈ frame.refs := by
-  unfold Frame.refs at hr ⊢
-  rw [AList.entries_insert, List.map_cons] at hr
-  simp only [List.mem_append, List.mem_cons] at hr ⊢
-  rcases hr with hr | hr | hr
-  · exact Or.inr (Or.inl hr)
-  · exact Or.inl hr
-  · exact Or.inr (Or.inr (((List.kerase_sublist _ _).map _).subset hr))
-
--- stackWithIndex of a stack split off at its last frame.
-private theorem swi_eq {c : RuntimeConfig} {frame : Frame} (hlast : c.stack.getLast? = some frame) :
-    c.stackWithIndex = c.stack.dropLast.mapIdx (fun i f => ({ f with index := i } : FrameWithIndex)) ++
-      [{ frame with index := c.stack.dropLast.length }] := by
-  rw [RuntimeConfig.stackWithIndex]
-  conv_lhs => rw [← List.dropLast_append_getLast? frame hlast]
-  rw [List.mapIdx_concat]
-
--- stackWithIndex of a config whose stack is given as `L ++ [f]`.
-private theorem swi_mk (L : List Frame) (f : Frame) (heap : Heap) :
-    (RuntimeConfig.mk (L ++ [f]) heap).stackWithIndex =
-      L.mapIdx (fun i f => ({ f with index := i } : FrameWithIndex)) ++ [{ f with index := L.length }] :=
-  List.mapIdx_concat ..
-
 -- Each frame after makeObjRegion has an old counterpart with the same index, region and objMap whose refs cover its own up to the fresh ref.
 private theorem swi_down (h : makeObjRegion x cfg = some cfg') {f' : FrameWithIndex}
     (hf' : f' ∈ cfg'.stackWithIndex) :
@@ -86,13 +31,13 @@ private theorem swi_down (h : makeObjRegion x cfg = some cfg') {f' : FrameWithIn
       ∀ r ∈ f'.refs, r ∈ f.refs ∨
         (r = Reference.OId cfg.freshObjectId ∧ cfg.stack.getLast?.map Frame.regionId = some f'.regionId) := by
   obtain ⟨frame, region, hlast, -, -, rfl⟩ := makeObjRegion_cases h
-  rw [swi_eq hlast]
-  rw [swi_mk] at hf'
+  rw [stackWithIndex_eq_of_getLast? hlast]
+  rw [stackWithIndex_mk_append_singleton] at hf'
   rcases List.mem_append.mp hf' with hd | hl
   · exact ⟨f', List.mem_append_left _ hd, rfl, rfl, rfl, fun r hr => Or.inl hr⟩
   · obtain rfl := List.mem_singleton.mp hl
     refine ⟨_, List.mem_append_right _ (List.mem_singleton_self _), rfl, rfl, rfl, fun r hr => ?_⟩
-    rcases newFrame_refs_mem hr with rfl | hr
+    rcases frame_varMap_insert_refs_mem hr with rfl | hr
     · exact Or.inr ⟨rfl, by simp [hlast]⟩
     · exact Or.inl hr
 
@@ -100,8 +45,8 @@ private theorem swi_down (h : makeObjRegion x cfg = some cfg') {f' : FrameWithIn
 private theorem swi_up (h : makeObjRegion x cfg = some cfg') {f : FrameWithIndex} (hf : f ∈ cfg.stackWithIndex) :
     ∃ f' ∈ cfg'.stackWithIndex, f'.index = f.index ∧ f'.regionId = f.regionId := by
   obtain ⟨frame, region, hlast, -, -, rfl⟩ := makeObjRegion_cases h
-  rw [swi_eq hlast] at hf
-  rw [swi_mk]
+  rw [stackWithIndex_eq_of_getLast? hlast] at hf
+  rw [stackWithIndex_mk_append_singleton]
   rcases List.mem_append.mp hf with hd | hl
   · exact ⟨f, List.mem_append_left _ hd, rfl, rfl⟩
   · obtain rfl := List.mem_singleton.mp hl
@@ -134,7 +79,7 @@ private theorem refs_mem (h : makeObjRegion x cfg = some cfg') {r : Reference} (
   rcases hr with (hd | hn) | hh
   · exact Or.inr (List.mem_append_left _ (by
       simpa [Stack.refs] using ((List.dropLast_sublist _).map Frame.refs).flatten_sublist.subset hd))
-  · exact (newFrame_refs_mem hn).imp_right (List.mem_append_left _ <| stack_refs_mem hmem ·)
+  · exact (frame_varMap_insert_refs_mem hn).imp_right (List.mem_append_left _ <| stack_refs_mem hmem ·)
   · exact Or.inr (List.mem_append_right _ ((heap_insert_refs_perm hlookup (newRegion_refs hlookup)).subset hh))
 
 theorem makeObjRegion_L1 : ValidConfig cfg →
@@ -175,9 +120,9 @@ theorem makeObjRegion_H2 : ValidConfig cfg →
     simp only [Frame.refs, AList.entries_insert, List.map_cons, List.count_append, List.count_cons]
     simpa using ((List.kerase_sublist _ _).map _).count_le _
   have := vcfg.h2 rid
-  rw [← List.dropLast_append_getLast? frame hlast, stack_refs_concat, List.count_append] at this
+  rw [← List.dropLast_append_getLast? frame hlast, stack_refs_append_singleton, List.count_append] at this
   dsimp only
-  rw [stack_refs_concat, List.count_append, (heap_insert_refs_perm hlookup (newRegion_refs hlookup)).count_eq]
+  rw [stack_refs_append_singleton, List.count_append, (heap_insert_refs_perm hlookup (newRegion_refs hlookup)).count_eq]
   omega
 
 -- Under L1, `find?` locates an oid in the same region of any heap with the same oid-holding keys.
@@ -216,7 +161,7 @@ theorem makeObjRegion_corollary_loc_eq : ValidConfig cfg →
       ((RuntimeConfig.mk (cfg.stack.dropLast ++
         [{ frame with varMap := frame.varMap.insert x (Reference.OId cfg.freshObjectId) }]) cfg.heap).stackWithIndex.findRev?
         (fun f => f.objMap.keys.contains oid)).map FrameWithIndex.index := by
-    rw [swi_eq hlast, swi_mk]
+    rw [stackWithIndex_eq_of_getLast? hlast, stackWithIndex_mk_append_singleton]
     simp only [List.findRev?_eq_find?_reverse, List.reverse_append, List.reverse_singleton, List.singleton_append,
       List.find?_cons]
     cases frame.objMap.keys.contains oid <;> rfl
@@ -245,7 +190,7 @@ theorem makeObjRegion_H3 : ValidConfig cfg →
       exact ⟨region, hlookup, newRegion_refs hlookup ▸ hoid⟩
     · exact ⟨reg, by rwa [AList.lookup_insert_ne hr] at hreg, hoid⟩
   rw [← makeObjRegion_corollary_loc_eq vcfg h oid
-    (ne_fresh_of_refs vcfg (List.mem_append_right _ (heap_refs_mem_of_lookup hl0 hr0)))]
+    (ne_freshObjectId_of_mem_refs vcfg (List.mem_append_right _ (heap_refs_mem_of_lookup hl0 hr0)))]
   exact vcfg.h3 rid oid reg0 hl0 hr0
 
 theorem makeObjRegion_S1 : ValidConfig cfg →
@@ -268,7 +213,7 @@ theorem makeObjRegion_corollary_loc_fresh : ValidConfig cfg →
     intro f hf hc
     obtain ⟨g, hg, -, -, hobj, -⟩ := swi_down h (List.mem_reverse.mp hf)
     obtain ⟨n, hn, rfl⟩ := List.mem_mapIdx.mp hg
-    exact fresh_not_in_stack (List.getElem_mem hn) (hobj ▸ List.contains_iff_mem.mp hc)
+    exact freshObjectId_not_mem_frame (List.getElem_mem hn) (hobj ▸ List.contains_iff_mem.mp hc)
   obtain ⟨frame, region, hlast, hlookup, -, rfl⟩ := makeObjRegion_cases h
   refine ⟨frame, hlast, ?_⟩
   simp only [Reference.loc?]
@@ -300,7 +245,7 @@ theorem makeObjRegion_S3 : ValidConfig cfg →
     obtain ⟨_, hlast, hfresh⟩ := makeObjRegion_corollary_loc_fresh vcfg h
     rcases hrefs _ href with hr | ⟨-, hreg⟩
     · obtain ⟨n, hn, rfl⟩ := List.mem_mapIdx.mp hf
-      exact absurd rfl (ne_fresh_of_refs vcfg (List.mem_append_left _ (stack_refs_mem (List.getElem_mem hn) hr)))
+      exact absurd rfl (ne_freshObjectId_of_mem_refs vcfg (List.mem_append_left _ (stack_refs_mem (List.getElem_mem hn) hr)))
     · rw [hfresh, Option.some_inj, Location.Rgn.injEq] at hloc
       rw [hlast, Option.map_some, Option.some_inj] at hreg
       exact ⟨f', hf', hloc ▸ hreg.symm, le_refl _⟩

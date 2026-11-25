@@ -368,7 +368,7 @@ theorem fieldAsgn_stack_oidC_step_of_ne_oidY {cfg cfg' : RuntimeConfig} {frame :
   rw [hobjAtC] at hobjAtC2
   injection hobjAtC2 with hobjAtCeq
   rw [← hobjAtCeq] at hcontainsC
-  rcases fieldAsgn_corollary_object_insert_refs_mem (List.contains_iff_mem.mp hcontainsC) with heq | hmem
+  rcases object_insert_refs_mem (List.contains_iff_mem.mp hcontainsC) with heq | hmem
   · left; exact heq
   · right
     rw [ReachableStep_oid_iff]
@@ -409,7 +409,7 @@ theorem fieldAsgn_region_oidC_step_of_ne_oidY {cfg cfg' : RuntimeConfig} (vcfg :
   rw [hobjAtC] at hobjAtC2
   injection hobjAtC2 with hobjAtCeq
   rw [← hobjAtCeq] at hcontainsC
-  rcases fieldAsgn_corollary_object_insert_refs_mem (List.contains_iff_mem.mp hcontainsC) with heq | hmem
+  rcases object_insert_refs_mem (List.contains_iff_mem.mp hcontainsC) with heq | hmem
   · left; exact heq
   · right
     rw [ReachableStep_oid_iff]

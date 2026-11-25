@@ -11,58 +11,17 @@ public import Mathlib.Data.List.Infix
 
 @[expose] public section
 
--- stackWithIndex of a stack split off at its last frame.
-private theorem swi_eq {c : RuntimeConfig} {frame : Frame} (hlast : c.stack.getLast? = some frame) :
-    c.stackWithIndex = c.stack.dropLast.mapIdx (fun i f => ({ f with index := i } : FrameWithIndex)) ++
-      [{ frame with index := c.stack.dropLast.length }] := by
-  rw [RuntimeConfig.stackWithIndex]
-  conv_lhs => rw [← List.dropLast_append_getLast? frame hlast]
-  rw [List.mapIdx_concat]
-
--- stackWithIndex of a config whose stack is given as `L ++ [f]`.
-private theorem swi_mk (L : List Frame) (f : Frame) (heap : Heap) :
-    (RuntimeConfig.mk (L ++ [f]) heap).stackWithIndex =
-      L.mapIdx (fun i f => ({ f with index := i } : FrameWithIndex)) ++ [{ f with index := L.length }] :=
-  List.mapIdx_concat ..
-
--- Stack.refs of a stack ending in `f`.
-private theorem stack_refs_concat (L : List Frame) (f : Frame) : Stack.refs (L ++ [f]) = Stack.refs L ++ f.refs := by
-  simp [Stack.refs]
-
--- A frame's refs are among its stack's refs.
-private theorem stack_refs_mem {s : Stack} {f : Frame} {r : Reference} (hf : f ∈ s) (hr : r ∈ f.refs) :
-    r ∈ Stack.refs s := by
-  simpa [Stack.refs] using ⟨f, hf, hr⟩
-
 -- A stackWithIndex frame's index is below the stack length.
 private theorem swi_index_lt {cfg : RuntimeConfig} {f : FrameWithIndex} (hf : f ∈ cfg.stackWithIndex) :
     f.index < cfg.stack.length := by
   obtain ⟨n, hn, rfl⟩ := List.mem_mapIdx.mp hf
   exact hn
 
--- A stackWithIndex frame's refs are among cfg.refs.
-private theorem swi_refs_mem {cfg : RuntimeConfig} {f : FrameWithIndex} {r : Reference}
-    (hf : f ∈ cfg.stackWithIndex) (hr : r ∈ f.refs) : r ∈ cfg.refs := by
-  obtain ⟨n, hn, rfl⟩ := List.mem_mapIdx.mp hf
-  exact List.mem_append_left _ (stack_refs_mem (List.getElem_mem hn) hr)
-
 -- Inserting a fresh variable adds exactly its value to the frame's refs.
 private theorem newFrame_refs_perm {frame : Frame} {x : VarName} {v : Reference} (hx : x ∉ frame.varMap.keys) :
     (Frame.refs { frame with varMap := frame.varMap.insert x v }).Perm (v :: frame.refs) := by
   simp only [Frame.refs, AList.entries_insert, List.kerase_of_notMem_keys hx, List.map_cons]
   exact List.perm_middle
-
--- Inserting a region with the same refs at an existing heap key permutes Heap.refs.
-private theorem heap_insert_refs_perm {heap : Heap} {rid : RegionId} {region newRegion : Region}
-    (hregion : heap.lookup rid = some region) (hrefs : newRegion.refs = region.refs) :
-    (Heap.refs (heap.insert rid newRegion)).Perm heap.refs := by
-  obtain ⟨region2, l1e, l2e, -, heq, hkerase⟩ := List.exists_of_kerase (AList.mem_keys_of_lookup_eq_some hregion)
-  obtain rfl : region2 = region := List.NodupKeys.eq_of_mk_mem heap.nodupKeys
-    (heq ▸ List.mem_append_right _ List.mem_cons_self) (AList.lookup_mem_entries hregion)
-  unfold Heap.refs
-  rw [AList.entries_insert, hkerase, heq]
-  simp only [List.map_cons, List.map_append, List.bind_eq_flatMap, List.flatMap_cons, List.flatMap_append]
-  exact hrefs ▸ List.perm_append_comm_assoc ..
 
 -- Inserting a region with the same objMap at an existing heap key preserves every loc?.
 private theorem heap_insert_loc_eq {cfg : RuntimeConfig} {rid : RegionId} {region newRegion : Region}
@@ -95,7 +54,7 @@ theorem varAsgn_corollary_fresh_not_in_frame {cfg : RuntimeConfig} {frame : Fram
     xf ∉ frame.varMap.keys := by
   intro hmem
   obtain ⟨v, hv⟩ := Option.isSome_iff_exists.mp (AList.lookup_isSome.mpr (AList.mem_keys.mpr hmem))
-  simp [resolveV, swi_eq hframe, List.findRev?_eq_find?_reverse, hmem, hv] at hresolve
+  simp [resolveV, stackWithIndex_eq_of_getLast? hframe, List.findRev?_eq_find?_reverse, hmem, hv] at hresolve
 
 -- A resolved field value is stored in a stack frame, or in a heap region holding the resolved root object.
 private theorem resolveFA_mem {cfg : RuntimeConfig} {y : FieldAccess} {r : Reference}
@@ -118,7 +77,7 @@ private theorem resolveFA_mem {cfg : RuntimeConfig} {y : FieldAccess} {r : Refer
 private theorem resolveFA_refs_mem {cfg : RuntimeConfig} {y : FieldAccess} {r : Reference}
     (h : resolveFA y cfg = some r) : r ∈ cfg.refs := by
   obtain ⟨_, -, ⟨f, hf, hr⟩ | ⟨_, _, -, hreg, hr⟩⟩ := resolveFA_mem h
-  · exact swi_refs_mem hf hr
+  · exact refs_mem_of_stackWithIndex hf hr
   · exact List.mem_append_right _ (heap_refs_mem_of_lookup hreg hr)
 
 -- An object in region rid0 named by a variable already has an owning frame on the stack.
@@ -160,7 +119,7 @@ theorem varAsgn_corollary_loc_eq : ValidConfig cfg →
   obtain ⟨frame, hframe, ⟨oid, rid, region, -, -, -, -, hregion, rfl⟩ | ⟨oid, -, -, -, rfl⟩⟩ := varAsgn_cases h
   · exact (heap_insert_loc_eq (newRegion := { region with bridgeObjectId := oid }) vcfg.l1 hregion rfl oid').symm
   · simp only [Reference.loc?]
-    rw [swi_eq hframe, swi_mk]
+    rw [stackWithIndex_eq_of_getLast? hframe, stackWithIndex_mk_append_singleton]
     simp only [List.findRev?_eq_find?_reverse, List.reverse_append, List.reverse_singleton, List.singleton_append,
       List.find?_cons]
     cases frame.objMap.keys.contains oid' <;> cases cfg.heap.entries.find? (fun x => x.2.objMap.keys.contains oid') <;>
@@ -183,10 +142,10 @@ private theorem refs_mem (h : varAsgn xf y cfg = some cfg') {r : Reference} (hr 
     · exact List.mem_append_left _ hs
     · exact List.mem_append_right _ ((heap_insert_refs_mem (AList.mem_keys_of_lookup_eq_some hregion) hh).elim
         (fun hr => heap_refs_mem_of_lookup hregion hr) id)
-  · simp only [RuntimeConfig.refs, stack_refs_concat, List.mem_append] at hr
+  · simp only [RuntimeConfig.refs, stack_refs_append_singleton, List.mem_append] at hr
     rcases hr with (hd | hn) | hh
     · exact List.mem_append_left _ (by
-        rw [← List.dropLast_append_getLast? frame hframe, stack_refs_concat]
+        rw [← List.dropLast_append_getLast? frame hframe, stack_refs_append_singleton]
         exact List.mem_append_left _ hd)
     · rcases List.mem_cons.mp ((newFrame_refs_perm (varAsgn_corollary_fresh_not_in_frame hframe hres)).mem_iff.mp hn)
         with rfl | hn
@@ -201,8 +160,8 @@ private theorem swi_down (h : varAsgn xf y cfg = some cfg') {f' : FrameWithIndex
       ∀ r ∈ f'.refs, r ∈ f.refs ∨ (resolveFA y cfg = some r ∧ cfg.stack.length ≤ f'.index + 1) := by
   obtain ⟨frame, hframe, ⟨_, _, _, -, -, -, -, -, rfl⟩ | ⟨oid, hyf, -, hres, rfl⟩⟩ := varAsgn_cases h
   · exact ⟨f', hf', rfl, rfl, fun r hr => Or.inl hr⟩
-  · rw [swi_eq hframe]
-    rw [swi_mk] at hf'
+  · rw [stackWithIndex_eq_of_getLast? hframe]
+    rw [stackWithIndex_mk_append_singleton] at hf'
     rcases List.mem_append.mp hf' with hd | hl
     · exact ⟨f', List.mem_append_left _ hd, rfl, rfl, fun r hr => Or.inl hr⟩
     · obtain rfl := List.mem_singleton.mp hl
@@ -218,8 +177,8 @@ private theorem swi_up (h : varAsgn xf y cfg = some cfg') {f : FrameWithIndex} (
     ∃ f' ∈ cfg'.stackWithIndex, f'.index = f.index ∧ f'.regionId = f.regionId := by
   obtain ⟨frame, hframe, ⟨_, _, _, -, -, -, -, -, rfl⟩ | ⟨_, -, -, -, rfl⟩⟩ := varAsgn_cases h
   · exact ⟨f, hf, rfl, rfl⟩
-  · rw [swi_eq hframe] at hf
-    rw [swi_mk]
+  · rw [stackWithIndex_eq_of_getLast? hframe] at hf
+    rw [stackWithIndex_mk_append_singleton]
     rcases List.mem_append.mp hf with hd | hl
     · exact ⟨f, List.mem_append_left _ hd, rfl, rfl⟩
     · obtain rfl := List.mem_singleton.mp hl
@@ -268,9 +227,9 @@ theorem varAsgn_H2 : ValidConfig cfg →
     varAsgn_cases h
   · exact (heap_insert_refs_perm hregion rfl).count_eq _ ▸ vcfg.h2 rid'
   · have := vcfg.h2 rid'
-    rw [← List.dropLast_append_getLast? frame hframe, stack_refs_concat, List.count_append] at this
+    rw [← List.dropLast_append_getLast? frame hframe, stack_refs_append_singleton, List.count_append] at this
     dsimp only
-    rw [stack_refs_concat, List.count_append,
+    rw [stack_refs_append_singleton, List.count_append,
       (newFrame_refs_perm (varAsgn_corollary_fresh_not_in_frame hframe hres)).count_eq, List.count_cons]
     simpa using this
 

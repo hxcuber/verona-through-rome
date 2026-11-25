@@ -51,55 +51,10 @@ theorem swap_cases_norm (h : swap x yf cfg = some cfg') :
   · refine ⟨yoid, obj, Or.inr (Or.inr ⟨region, yfoid, hregion, hobj, ?_, rfl, hyfl, rfl⟩)⟩
     simpa [resolveFA, hyr, hyrl, hregion, hobj] using hyf
 
--- `Stack.objectIds` distributes over `++ [f]`.
-theorem swap_corollary_stack_objectIds_append (l : Stack) (f : Frame) :
-    Stack.objectIds (l ++ [f]) = Stack.objectIds l ++ f.objectIds := by
-  simp [Stack.objectIds]
-
--- `Stack.refs` distributes over `++ [f]`.
-theorem swap_corollary_stack_refs_append (l : Stack) (f : Frame) :
-    Stack.refs (l ++ [f]) = Stack.refs l ++ f.refs := by
-  simp [Stack.refs]
-
--- Membership in `cfg.refs` split along a stack of the form `L ++ [g]`.
-theorem mem_refs_of_stack_eq {cfg : RuntimeConfig} {L : Stack} {g : Frame} {r : Reference}
-    (hst : cfg.stack = L ++ [g]) :
-    r ∈ cfg.refs ↔ (r ∈ Stack.refs L ∨ r ∈ g.refs) ∨ r ∈ Heap.refs cfg.heap := by
-  rw [RuntimeConfig.refs, List.mem_append, hst, swap_corollary_stack_refs_append, List.mem_append]
-
 -- A value stored at an AList key is among the AList's values.
 theorem alist_lookup_mem_values {α β : Type*} [DecidableEq α] {l : AList (fun _ : α => β)} {k : α} {v : β}
     (h : l.lookup k = some v) : v ∈ l.entries.map (·.2) :=
   List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries h)
-
--- Membership after inserting at an AList key: either the newly-written value or a pre-existing one.
-theorem swap_corollary_alist_insert_refs_mem {α : Type*} [DecidableEq α] {l : AList (fun _ : α => Reference)}
-    {k : α} {v r : Reference} (hr : r ∈ (l.insert k v).entries.map (·.2)) :
-    r = v ∨ r ∈ l.entries.map (·.2) := by
-  by_cases hk : k ∈ l
-  · obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase (AList.mem_keys.mp hk)
-    rw [AList.entries_insert, hkerase] at hr
-    rw [heq]
-    simp only [List.map_cons, List.map_append, List.mem_cons, List.mem_append] at hr ⊢
-    tauto
-  · rwa [AList.entries_insert_of_notMem hk, List.map_cons, List.mem_cons] at hr
-
--- Membership after overwriting one field of a stored object: either the new field value or a pre-existing ref.
-theorem objMap_insert_field_refs_mem {m : ObjMap} {oid : ObjectId} {obj : Object} {k : FieldName}
-    {v r : Reference} (hobj : m.lookup oid = some obj)
-    (hr : r ∈ ((m.insert oid (obj.insert k v)).entries.map (·.2) >>= Object.refs)) :
-    r = v ∨ r ∈ (m.entries.map (·.2) >>= Object.refs) := by
-  rcases objMap_insert_bind_refs_mem hr with hr | hr
-  · exact (swap_corollary_alist_insert_refs_mem hr).imp_right (objMap_bind_refs_mem_of_lookup hobj)
-  · exact Or.inr hr
-
--- Membership in the refs of a frame whose varMap had one value overwritten.
-theorem frame_varMap_insert_refs_mem {f : Frame} {x : VarName} {v r : Reference}
-    (hr : r ∈ Frame.refs { f with varMap := f.varMap.insert x v }) : r = v ∨ r ∈ f.refs := by
-  simp only [Frame.refs, List.mem_append] at hr ⊢
-  rcases hr with hr | hr
-  · exact Or.inr (Or.inl hr)
-  · exact (swap_corollary_alist_insert_refs_mem hr).imp_right Or.inr
 
 -- SWAP-STACK only exchanges two values already stored in the frame, so the frame's refs can only shrink.
 theorem swap_stack_frame_refs_mem {f : Frame} {x : VarName} {yoid : ObjectId} {obj : Object} {k : FieldName}
@@ -112,7 +67,7 @@ theorem swap_stack_frame_refs_mem {f : Frame} {x : VarName} {yoid : ObjectId} {o
   · rcases objMap_insert_field_refs_mem hobj hr with rfl | hr
     · exact Or.inr (alist_lookup_mem_values hxr)
     · exact Or.inl hr
-  · rcases swap_corollary_alist_insert_refs_mem hr with rfl | hr
+  · rcases alist_insert_refs_mem hr with rfl | hr
     · exact Or.inl (objMap_bind_refs_mem_of_lookup hobj (alist_lookup_mem_values hfield))
     · exact Or.inr hr
 
@@ -122,19 +77,6 @@ theorem heap_insert_regions_mem {heap : Heap} {rid : RegionId} {newRegion r : Re
   unfold Heap.regions at hr ⊢
   rw [AList.entries_insert, List.map_cons, List.mem_cons] at hr
   exact hr.imp_right ((List.kerase_sublist rid heap.entries).map _).mem
-
--- Replacing the value at a present AList key changes a bind-count by the delta of the replaced value's own count.
-theorem alist_insert_bind_count_eq {α : Type*} {β : Type} [DecidableEq α] {m : AList (fun _ : α => β)} {k : α}
-    {old new : β} (f : β → List Reference) (t : Reference) (h : m.lookup k = some old) :
-    ((m.insert k new).entries.map (·.2) >>= f).count t + (f old).count t =
-    (m.entries.map (·.2) >>= f).count t + (f new).count t := by
-  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase (AList.mem_keys_of_lookup_eq_some h)
-  obtain rfl : v0 = old := List.NodupKeys.eq_of_mk_mem (β := fun _ : α => β) m.nodupKeys
-    (heq ▸ List.mem_append_right _ List.mem_cons_self) (AList.mem_lookup_iff.mp (by rw [h]; rfl))
-  rw [AList.entries_insert, hkerase, heq]
-  simp only [List.map_cons, List.map_append, List.bind_eq_flatMap, List.flatMap_cons, List.flatMap_append,
-    List.count_append]
-  omega
 
 -- Overwriting one field of a stored object changes the ObjMap's bind-refs count by the two `==` indicators.
 theorem objMap_insert_field_count_eq {m : ObjMap} {oid : ObjectId} {obj : Object} {k : FieldName}
@@ -149,20 +91,6 @@ theorem objMap_insert_field_count_eq {m : ObjMap} {oid : ObjectId} {obj : Object
       (m.entries.map (·.2) >>= Object.refs).count t + (Object.refs (obj.insert k v_new)).count t :=
     alist_insert_bind_count_eq Object.refs t hobj
   omega
-
--- `Reference.loc?` of an object id only depends on the index of the stack frame and the key of the region holding it.
-theorem loc_eq_of_find_map_eq {cfg cfg' : RuntimeConfig} {oid : ObjectId}
-    (hs : (cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid)).map FrameWithIndex.index =
-      (cfg'.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid)).map FrameWithIndex.index)
-    (hh : (cfg.heap.entries.find? (fun p => p.snd.objMap.keys.contains oid)).map Sigma.fst =
-      (cfg'.heap.entries.find? (fun p => p.snd.objMap.keys.contains oid)).map Sigma.fst) :
-    (Reference.OId oid).loc? cfg = (Reference.OId oid).loc? cfg' := by
-  have step1 := loc_match_eq (cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid))
-    (cfg.heap.entries.find? (fun p => p.snd.objMap.keys.contains oid))
-  have step2 := loc_match_eq (cfg'.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid))
-    (cfg'.heap.entries.find? (fun p => p.snd.objMap.keys.contains oid))
-  rw [hs, hh] at step1
-  exact step1.trans step2.symm
 
 -- Replacing the last frame by one with a permuted objMap key set leaves every object's `Reference.loc?` unchanged.
 theorem last_frame_loc_eq {cfg : RuntimeConfig} {frame : FrameWithIndex} {g : Frame}
@@ -258,11 +186,11 @@ theorem swap_objectIds_perm (h : swap x yf cfg = some cfg') : cfg'.objectIds.Per
     have keys_perm := fun v => AList.keys_insert_perm_of_mem (v := v) (AList.mem_keys_of_lookup_eq_some hobj)
     unfold RuntimeConfig.objectIds
   · conv_rhs => rw [stack_eq]
-    rw [swap_corollary_stack_objectIds_append, swap_corollary_stack_objectIds_append]
+    rw [stack_objectIds_append_singleton, stack_objectIds_append_singleton]
     exact ((keys_perm _).append_left _).append_right _
   · refine List.Perm.append (List.Perm.of_eq ?_) (heap_insert_objectIds_perm hregion (keys_perm _))
     conv_rhs => rw [stack_eq]
-    rw [swap_corollary_stack_objectIds_append, swap_corollary_stack_objectIds_append]
+    rw [stack_objectIds_append_singleton, stack_objectIds_append_singleton]
     rfl
   · exact (heap_insert_objectIds_perm hregion (keys_perm _)).append_left _
 
@@ -378,14 +306,14 @@ theorem swap_rid_count (h : swap x yf cfg = some cfg') (rid : RegionId) :
   · have h1 := objMap_insert_field_count_eq (v_new := xRef) hobj hfield (Reference.RId rid)
     have h2 := alist_insert_count_eq (v_new := yfRef) (t := Reference.RId rid) hxr
     conv_rhs => rw [(stack_eq_of_stackWithIndex_getLast? hframe).1]
-    simp only [swap_corollary_stack_refs_append, List.count_append, Frame.refs]
+    simp only [stack_refs_append_singleton, List.count_append, Frame.refs]
     omega
   · have h1 := objMap_insert_field_count_eq (v_new := xRef) hobj hfield (Reference.RId rid)
     have h2 := alist_insert_count_eq (v_new := yfRef) (t := Reference.RId rid) hxr
     have h3 := alist_insert_bind_count_eq Region.refs (Reference.RId rid)
       (new := { region with objMap := region.objMap.insert yoid (obj.insert yf.field xRef) }) hregion
     conv_rhs => rw [(stack_eq_of_stackWithIndex_getLast? hframe).1]
-    simp only [swap_corollary_stack_refs_append, List.count_append, Frame.refs, Heap.refs, Region.refs] at h3 ⊢
+    simp only [stack_refs_append_singleton, List.count_append, Frame.refs, Heap.refs, Region.refs] at h3 ⊢
     omega
   · have h1 := objMap_insert_field_count_eq (v_new := Reference.OId region.bridgeObjectId) hobj hfield
       (Reference.RId rid)

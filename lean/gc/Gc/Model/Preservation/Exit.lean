@@ -17,62 +17,10 @@ private theorem stack_objectIds_of_getLast? {stack : Stack} {frame : Frame} (hla
   conv_lhs => rw [← List.dropLast_append_getLast? frame hlast]
   simp [Stack.objectIds, Frame.objectIds]
 
--- Changing a region's status keeps the (key, objMap) pairs of the heap entries.
-theorem exit_entries_mem_iff {heap : Heap} {rid : RegionId} {region : Region} {s : Status}
-    (hlookup : heap.lookup rid = some region) (r : RegionId) (m : ObjMap) :
-    (∃ reg, (⟨r, reg⟩ : Sigma (fun _ : RegionId => Region)) ∈ (heap.insert rid { region with status := s }).entries ∧
-      reg.objMap = m) ↔
-    ∃ reg, (⟨r, reg⟩ : Sigma (fun _ : RegionId => Region)) ∈ heap.entries ∧ reg.objMap = m := by
-  simp only [← AList.mem_lookup_iff, Option.mem_def, ← Option.map_eq_some_iff]
-  by_cases hr : r = rid
-  · subst hr; simp [hlookup]
-  · rw [AList.lookup_insert_ne hr]
-
--- Under L1, the region found holding an oid is unaffected by changing a region's status.
-theorem exit_heap_find_fst {cfg : RuntimeConfig} {rid : RegionId} {region : Region} {s : Status} {oid : ObjectId}
-    (l1 : L1 cfg) (hlookup : cfg.heap.lookup rid = some region) :
-    ((cfg.heap.insert rid { region with status := s }).entries.find? (fun x => x.2.objMap.keys.contains oid)).map
-      Sigma.fst = (cfg.heap.entries.find? (fun x => x.2.objMap.keys.contains oid)).map Sigma.fst := by
-  have key : ∀ {r reg}, (⟨r, reg⟩ : Sigma (fun _ : RegionId => Region)) ∈
-      (cfg.heap.insert rid { region with status := s }).entries →
-      ∃ reg0, (⟨r, reg0⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries ∧ reg0.objMap = reg.objMap :=
-    fun h => (exit_entries_mem_iff hlookup _ _).mp ⟨_, h, rfl⟩
-  cases ho : cfg.heap.entries.find? (fun x => x.2.objMap.keys.contains oid) with
-  | none =>
-    rw [List.find?_eq_none] at ho
-    rw [Option.map_none, Option.map_eq_none_iff, List.find?_eq_none]
-    rintro ⟨r, reg⟩ hm hp
-    obtain ⟨reg0, hm0, he⟩ := key hm
-    exact ho _ hm0 (he ▸ hp)
-  | some e =>
-    obtain ⟨r, reg⟩ := e
-    have hp := List.find?_some ho
-    have hm := List.mem_of_find?_eq_some ho
-    obtain ⟨reg', hm', he'⟩ := (exit_entries_mem_iff hlookup _ _).mpr ⟨_, hm, rfl⟩
-    cases hn : (cfg.heap.insert rid { region with status := s }).entries.find? (fun x => x.2.objMap.keys.contains oid) with
-    | none => exact absurd (he' ▸ hp) (List.find?_eq_none.mp hn _ hm')
-    | some e' =>
-      obtain ⟨r', reg''⟩ := e'
-      obtain ⟨reg0, hm0, he0⟩ := key (List.mem_of_find?_eq_some hn)
-      have hp' := List.find?_some hn
-      simp only [Option.map_some, Option.some.injEq]
-      exact heap_region_unique l1 hm0 (List.contains_iff_mem.mp (he0 ▸ hp')) hm (List.contains_iff_mem.mp hp)
-
 -- Dropping the last frame only shrinks a per-frame flattened list.
 private theorem dropLast_bind_sublist {α : Type} (s : List Frame) (f : Frame → List α) :
     (s.dropLast.map f >>= id).Sublist (s.map f >>= id) := by
   simpa using ((List.dropLast_sublist s).map f).flatten_sublist
-
--- Inserting a region with the same refs at a present heap key permutes `Heap.refs`.
-private theorem heap_insert_refs_perm {heap : Heap} {rid : RegionId} {region newRegion : Region}
-    (hlookup : heap.lookup rid = some region) (hrefs : newRegion.refs = region.refs) :
-    (Heap.refs (heap.insert rid newRegion)).Perm heap.refs := by
-  obtain ⟨r2, l1, l2, _, heq, hk⟩ := List.exists_of_kerase (AList.mem_keys_of_lookup_eq_some hlookup)
-  obtain rfl : r2 = region := List.NodupKeys.eq_of_mk_mem heap.nodupKeys
-    (heq ▸ List.mem_append_right _ List.mem_cons_self) (AList.lookup_mem_entries hlookup)
-  unfold Heap.refs
-  rw [AList.entries_insert, hk, heq]
-  simp [hrefs, List.perm_append_comm_assoc]
 
 -- `exit` preserves every location, except that an oid in the popped frame loses its location.
 theorem exit_loc {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg) (h : exit cfg = some cfg') (ref : Reference) :
@@ -102,7 +50,7 @@ theorem exit_loc {cfg cfg' : RuntimeConfig} (vcfg : ValidConfig cfg) (h : exit c
       simp only [List.findRev?_eq_find?_reverse, List.reverse_append, List.reverse_singleton, List.singleton_append,
         List.find?_cons]
       cases frame'.objMap.keys.contains oid <;> rfl
-    have hfst := exit_heap_find_fst (s := Status.Closed) (oid := oid) vcfg.l1 hlookup
+    have hfst := heap_status_update_find_fst (s := Status.Closed) (oid := oid) vcfg.l1 hlookup
     rw [← hheap] at hfst
     by_cases hc : frame'.objMap.keys.contains oid
     · rw [ite_eq_left hc] at hS
@@ -189,7 +137,7 @@ theorem exit_H3 : ValidConfig cfg →
   H3 cfg' := by
   intro vcfg h rid oid region hregion hoid
   obtain ⟨frame', region', -, -, hlookup, -, rfl⟩ := exit_cases h
-  obtain ⟨reg0, hm0, he⟩ := (exit_entries_mem_iff hlookup rid region.objMap).mp
+  obtain ⟨reg0, hm0, he⟩ := (heap_status_update_entries_mem_iff hlookup rid region.objMap).mp
     ⟨region, AList.mem_lookup_iff.mp hregion, rfl⟩
   refine (exit_corollary_1 vcfg h _).mp (vcfg.h3 rid oid reg0 (AList.mem_lookup_iff.mpr hm0) ?_)
   unfold Region.refs at hoid ⊢

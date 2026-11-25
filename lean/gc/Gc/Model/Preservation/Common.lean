@@ -228,3 +228,161 @@ theorem alist_insert_count_eq {α : Type*} [DecidableEq α] {l : AList (fun _ : 
     rw [heq, v0_eq, List.map_append, List.map_cons]
   rw [hnew, hold, List.count_cons, List.map_append, List.count_append, List.count_append, List.count_cons]
   omega
+
+-- A frame's refs are among its stack's refs.
+theorem stack_refs_mem {s : Stack} {f : Frame} {r : Reference} (hf : f ∈ s) (hr : r ∈ f.refs) :
+    r ∈ Stack.refs s := by
+  simpa [Stack.refs] using ⟨f, hf, hr⟩
+
+-- `Stack.refs` distributes over `++ [f]`.
+theorem stack_refs_append_singleton (l : Stack) (f : Frame) :
+    Stack.refs (l ++ [f]) = Stack.refs l ++ f.refs := by
+  simp [Stack.refs]
+
+-- `Stack.objectIds` distributes over `++ [f]`.
+theorem stack_objectIds_append_singleton (l : Stack) (f : Frame) :
+    Stack.objectIds (l ++ [f]) = Stack.objectIds l ++ f.objectIds := by
+  simp [Stack.objectIds]
+
+-- stackWithIndex of a stack split off at its last frame.
+theorem stackWithIndex_eq_of_getLast? {c : RuntimeConfig} {frame : Frame} (hlast : c.stack.getLast? = some frame) :
+    c.stackWithIndex = c.stack.dropLast.mapIdx (fun i f => ({ f with index := i } : FrameWithIndex)) ++
+      [{ frame with index := c.stack.dropLast.length }] := by
+  rw [RuntimeConfig.stackWithIndex]
+  conv_lhs => rw [← List.dropLast_append_getLast? frame hlast]
+  rw [List.mapIdx_concat]
+
+-- stackWithIndex of a config whose stack is given as `L ++ [f]`.
+theorem stackWithIndex_mk_append_singleton (L : List Frame) (f : Frame) (heap : Heap) :
+    (RuntimeConfig.mk (L ++ [f]) heap).stackWithIndex =
+      L.mapIdx (fun i f => ({ f with index := i } : FrameWithIndex)) ++ [{ f with index := L.length }] :=
+  List.mapIdx_concat ..
+
+-- Inserting a region with the same refs at a present heap key permutes `Heap.refs`.
+theorem heap_insert_refs_perm {heap : Heap} {rid : RegionId} {region newRegion : Region}
+    (hlookup : heap.lookup rid = some region) (hrefs : newRegion.refs = region.refs) :
+    (Heap.refs (heap.insert rid newRegion)).Perm heap.refs := by
+  obtain ⟨r2, l1, l2, _, heq, hk⟩ := List.exists_of_kerase (AList.mem_keys_of_lookup_eq_some hlookup)
+  obtain rfl : r2 = region := List.NodupKeys.eq_of_mk_mem heap.nodupKeys
+    (heq ▸ List.mem_append_right _ List.mem_cons_self) (AList.lookup_mem_entries hlookup)
+  unfold Heap.refs
+  rw [AList.entries_insert, hk, heq]
+  simp [hrefs, List.perm_append_comm_assoc]
+
+-- freshObjectId is not in any stack frame's objMap.
+theorem freshObjectId_not_mem_frame {cfg : RuntimeConfig} {f : Frame} (hf : f ∈ cfg.stack) :
+    cfg.freshObjectId ∉ f.objMap.keys := fun hmem =>
+  cfg.freshObjectId_not_mem (List.mem_append_left _ (by simpa [Stack.objectIds, Frame.objectIds] using ⟨f, hf, hmem⟩))
+
+-- Under HS1, a stored oid is never the fresh one.
+theorem ne_freshObjectId_of_mem_refs {cfg : RuntimeConfig} {oid : ObjectId} (vcfg : ValidConfig cfg)
+    (hr : Reference.OId oid ∈ cfg.refs) : oid ≠ cfg.freshObjectId := fun he =>
+  cfg.freshObjectId_not_mem (he ▸ vcfg.hs1 oid hr)
+
+-- Changing a region's status keeps the (key, objMap) pairs of the heap entries.
+theorem heap_status_update_entries_mem_iff {heap : Heap} {rid : RegionId} {region : Region} {s : Status}
+    (hlookup : heap.lookup rid = some region) (r : RegionId) (m : ObjMap) :
+    (∃ reg, (⟨r, reg⟩ : Sigma (fun _ : RegionId => Region)) ∈ (heap.insert rid { region with status := s }).entries ∧
+      reg.objMap = m) ↔
+    ∃ reg, (⟨r, reg⟩ : Sigma (fun _ : RegionId => Region)) ∈ heap.entries ∧ reg.objMap = m := by
+  simp only [← AList.mem_lookup_iff, Option.mem_def, ← Option.map_eq_some_iff]
+  by_cases hr : r = rid
+  · subst hr; simp [hlookup]
+  · rw [AList.lookup_insert_ne hr]
+
+-- Under L1, the region found holding an oid is unaffected by changing a region's status.
+theorem heap_status_update_find_fst {cfg : RuntimeConfig} {rid : RegionId} {region : Region} {s : Status} {oid : ObjectId}
+    (l1 : L1 cfg) (hlookup : cfg.heap.lookup rid = some region) :
+    ((cfg.heap.insert rid { region with status := s }).entries.find? (fun x => x.2.objMap.keys.contains oid)).map
+      Sigma.fst = (cfg.heap.entries.find? (fun x => x.2.objMap.keys.contains oid)).map Sigma.fst := by
+  have key : ∀ {r reg}, (⟨r, reg⟩ : Sigma (fun _ : RegionId => Region)) ∈
+      (cfg.heap.insert rid { region with status := s }).entries →
+      ∃ reg0, (⟨r, reg0⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries ∧ reg0.objMap = reg.objMap :=
+    fun h => (heap_status_update_entries_mem_iff hlookup _ _).mp ⟨_, h, rfl⟩
+  cases ho : cfg.heap.entries.find? (fun x => x.2.objMap.keys.contains oid) with
+  | none =>
+    rw [List.find?_eq_none] at ho
+    rw [Option.map_none, Option.map_eq_none_iff, List.find?_eq_none]
+    rintro ⟨r, reg⟩ hm hp
+    obtain ⟨reg0, hm0, he⟩ := key hm
+    exact ho _ hm0 (he ▸ hp)
+  | some e =>
+    obtain ⟨r, reg⟩ := e
+    have hp := List.find?_some ho
+    have hm := List.mem_of_find?_eq_some ho
+    obtain ⟨reg', hm', he'⟩ := (heap_status_update_entries_mem_iff hlookup _ _).mpr ⟨_, hm, rfl⟩
+    cases hn : (cfg.heap.insert rid { region with status := s }).entries.find? (fun x => x.2.objMap.keys.contains oid) with
+    | none => exact absurd (he' ▸ hp) (List.find?_eq_none.mp hn _ hm')
+    | some e' =>
+      obtain ⟨r', reg''⟩ := e'
+      obtain ⟨reg0, hm0, he0⟩ := key (List.mem_of_find?_eq_some hn)
+      have hp' := List.find?_some hn
+      simp only [Option.map_some, Option.some.injEq]
+      exact heap_region_unique l1 hm0 (List.contains_iff_mem.mp (he0 ▸ hp')) hm (List.contains_iff_mem.mp hp)
+
+-- Membership after inserting at an AList key: either the newly-written value or a pre-existing one.
+theorem alist_insert_refs_mem {α : Type*} [DecidableEq α] {l : AList (fun _ : α => Reference)}
+    {k : α} {v r : Reference} (hr : r ∈ (l.insert k v).entries.map (·.2)) :
+    r = v ∨ r ∈ l.entries.map (·.2) := by
+  rw [AList.entries_insert, List.map_cons, List.mem_cons] at hr
+  exact hr.imp_right ((List.kerase_sublist k l.entries).map _).mem
+
+-- An object's refs after writing one field: the new field value or a pre-existing ref.
+theorem object_insert_refs_mem {obj : Object} {field : FieldName} {v r : Reference}
+    (hr : r ∈ Object.refs (obj.insert field v)) : r = v ∨ r ∈ Object.refs obj :=
+  alist_insert_refs_mem hr
+
+-- Membership after overwriting one field of a stored object: either the new field value or a pre-existing ref.
+theorem objMap_insert_field_refs_mem {m : ObjMap} {oid : ObjectId} {obj : Object} {k : FieldName}
+    {v r : Reference} (hobj : m.lookup oid = some obj)
+    (hr : r ∈ ((m.insert oid (obj.insert k v)).entries.map (·.2) >>= Object.refs)) :
+    r = v ∨ r ∈ (m.entries.map (·.2) >>= Object.refs) := by
+  rcases objMap_insert_bind_refs_mem hr with hr | hr
+  · exact (object_insert_refs_mem hr).imp_right (objMap_bind_refs_mem_of_lookup hobj)
+  · exact Or.inr hr
+
+-- Membership in `cfg.refs` split along a stack of the form `L ++ [g]`.
+theorem mem_refs_of_stack_eq {cfg : RuntimeConfig} {L : Stack} {g : Frame} {r : Reference}
+    (hst : cfg.stack = L ++ [g]) :
+    r ∈ cfg.refs ↔ (r ∈ Stack.refs L ∨ r ∈ g.refs) ∨ r ∈ Heap.refs cfg.heap := by
+  simp [RuntimeConfig.refs, hst, Stack.refs, or_assoc]
+
+-- Replacing the value at a present AList key changes a bind-count by the delta of the replaced value's own count.
+theorem alist_insert_bind_count_eq {α : Type*} {β : Type} [DecidableEq α] {m : AList (fun _ : α => β)}
+    {k : α} {old new : β} (f : β → List Reference) (t : Reference) (h : m.lookup k = some old) :
+    ((m.insert k new).entries.map (·.2) >>= f).count t + (f old).count t =
+    (m.entries.map (·.2) >>= f).count t + (f new).count t := by
+  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase (AList.mem_keys_of_lookup_eq_some h)
+  obtain rfl : v0 = old := List.NodupKeys.eq_of_mk_mem (β := fun _ : α => β) m.nodupKeys
+    (heq ▸ List.mem_append_right _ List.mem_cons_self) (AList.mem_lookup_iff.mp (by rw [h]; rfl))
+  rw [AList.entries_insert, hkerase, heq]
+  simp only [List.map_cons, List.map_append, List.bind_eq_flatMap, List.flatMap_cons, List.flatMap_append,
+    List.count_append]
+  omega
+
+-- `Reference.loc?` of an object id only depends on the index of the stack frame and the key of the region holding it.
+theorem loc_eq_of_find_map_eq {cfg cfg' : RuntimeConfig} {oid : ObjectId}
+    (hs : (cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid)).map FrameWithIndex.index =
+      (cfg'.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid)).map FrameWithIndex.index)
+    (hh : (cfg.heap.entries.find? (fun p => p.snd.objMap.keys.contains oid)).map Sigma.fst =
+      (cfg'.heap.entries.find? (fun p => p.snd.objMap.keys.contains oid)).map Sigma.fst) :
+    (Reference.OId oid).loc? cfg = (Reference.OId oid).loc? cfg' := by
+  have step1 := loc_match_eq (cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid))
+    (cfg.heap.entries.find? (fun p => p.snd.objMap.keys.contains oid))
+  have step2 := loc_match_eq (cfg'.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid))
+    (cfg'.heap.entries.find? (fun p => p.snd.objMap.keys.contains oid))
+  rw [hs, hh] at step1
+  exact step1.trans step2.symm
+
+-- A stackWithIndex frame's refs are among cfg.refs.
+theorem refs_mem_of_stackWithIndex {cfg : RuntimeConfig} {f : FrameWithIndex} {r : Reference}
+    (hf : f ∈ cfg.stackWithIndex) (hr : r ∈ f.refs) : r ∈ cfg.refs := by
+  obtain ⟨n, hn, rfl⟩ := List.mem_mapIdx.mp hf
+  exact List.mem_append_left _ (stack_refs_mem (List.getElem_mem hn) hr)
+
+-- A ref of a frame after a varMap insert is the inserted value or an old ref.
+theorem frame_varMap_insert_refs_mem {frame : Frame} {x : VarName} {v r : Reference}
+    (hr : r ∈ Frame.refs { frame with varMap := frame.varMap.insert x v }) : r = v ∨ r ∈ frame.refs := by
+  simp only [Frame.refs, AList.entries_insert, List.map_cons, List.mem_append, List.mem_cons] at hr ⊢
+  have := ((List.kerase_sublist x frame.varMap.entries).map (·.2)).mem (a := r)
+  tauto

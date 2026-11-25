@@ -11,30 +11,11 @@ public import Mathlib.Data.List.Infix
 
 @[expose] public section
 
--- freshObjectId is not in any stack frame's objMap.
-private theorem fresh_not_in_stack {cfg : RuntimeConfig} {f : Frame} (hf : f ∈ cfg.stack) :
-    cfg.freshObjectId ∉ f.objMap.keys := fun hmem =>
-  cfg.freshObjectId_not_mem (List.mem_append_left _ (by simpa [Stack.objectIds, Frame.objectIds] using ⟨f, hf, hmem⟩))
-
 -- No heap region holds freshObjectId.
 private theorem fresh_heap_find_none (cfg : RuntimeConfig) :
     cfg.heap.entries.find? (fun x => x.2.objMap.keys.contains cfg.freshObjectId) = none :=
   List.find?_eq_none.mpr fun _ he hc => cfg.freshObjectId_not_mem (List.mem_append_right _
     (heap_objectIds_of_mem he (List.contains_iff_mem.mp hc)))
-
--- A frame's refs are among its stack's refs.
-private theorem stack_refs_mem {s : Stack} {f : Frame} {r : Reference} (hf : f ∈ s) (hr : r ∈ f.refs) :
-    r ∈ Stack.refs s := by
-  simpa [Stack.refs] using ⟨f, hf, hr⟩
-
--- Stack.refs of a stack ending in `f`.
-private theorem stack_refs_concat (L : List Frame) (f : Frame) : Stack.refs (L ++ [f]) = Stack.refs L ++ f.refs := by
-  simp [Stack.refs]
-
--- Under HS1, a stored oid is never the fresh one.
-private theorem ne_fresh_of_refs {cfg : RuntimeConfig} {oid : ObjectId} (vcfg : ValidConfig cfg)
-    (hr : Reference.OId oid ∈ cfg.refs) : oid ≠ cfg.freshObjectId := fun he =>
-  cfg.freshObjectId_not_mem (he ▸ vcfg.hs1 oid hr)
 
 -- The new top frame's refs are a permutation of the fresh ref plus a sublist of the old frame's refs.
 private theorem newFrame_refs_perm {frame : Frame} {x : VarName} {o : ObjectId} (ho : o ∉ frame.objMap.keys) :
@@ -52,40 +33,26 @@ private theorem newFrame_refs_mem {frame : Frame} {x : VarName} {o : ObjectId} {
   have ⟨_, hs, hp⟩ := newFrame_refs_perm ho
   (List.mem_cons.mp (hp.mem_iff.mp hr)).imp_right (hs.subset ·)
 
--- stackWithIndex of a stack split off at its last frame.
-private theorem swi_eq {c : RuntimeConfig} {frame : Frame} (hlast : c.stack.getLast? = some frame) :
-    c.stackWithIndex = c.stack.dropLast.mapIdx (fun i f => ({ f with index := i } : FrameWithIndex)) ++
-      [{ frame with index := c.stack.dropLast.length }] := by
-  rw [RuntimeConfig.stackWithIndex]
-  conv_lhs => rw [← List.dropLast_append_getLast? frame hlast]
-  rw [List.mapIdx_concat]
-
--- stackWithIndex of a config whose stack is given as `L ++ [f]`.
-private theorem swi_mk (L : List Frame) (f : Frame) (heap : Heap) :
-    (RuntimeConfig.mk (L ++ [f]) heap).stackWithIndex =
-      L.mapIdx (fun i f => ({ f with index := i } : FrameWithIndex)) ++ [{ f with index := L.length }] :=
-  List.mapIdx_concat ..
-
 -- Each new frame has an old counterpart with the same index and region covering its refs, bar the fresh ref on top.
 private theorem swi_down (h : makeObjStack x cfg = some cfg') {f' : FrameWithIndex}
     (hf' : f' ∈ cfg'.stackWithIndex) :
     ∃ f ∈ cfg.stackWithIndex, f.index = f'.index ∧ f.regionId = f'.regionId ∧
       ∀ r ∈ f'.refs, r ∈ f.refs ∨ (r = Reference.OId cfg.freshObjectId ∧ f'.index = cfg.stack.dropLast.length) := by
   obtain ⟨frame, hlast, rfl⟩ := makeObjStack_cases h
-  rw [swi_eq hlast]
-  rw [swi_mk] at hf'
+  rw [stackWithIndex_eq_of_getLast? hlast]
+  rw [stackWithIndex_mk_append_singleton] at hf'
   rcases List.mem_append.mp hf' with hd | hl
   · exact ⟨f', List.mem_append_left _ hd, rfl, rfl, fun r hr => Or.inl hr⟩
   · obtain rfl := List.mem_singleton.mp hl
     refine ⟨_, List.mem_append_right _ (List.mem_singleton_self _), rfl, rfl, fun r hr => ?_⟩
-    exact (newFrame_refs_mem (fresh_not_in_stack (List.mem_of_getLast? hlast)) hr).symm.imp id (⟨·, rfl⟩)
+    exact (newFrame_refs_mem (freshObjectId_not_mem_frame (List.mem_of_getLast? hlast)) hr).symm.imp id (⟨·, rfl⟩)
 
 -- Each old frame has a counterpart after makeObjStack with the same index and region.
 private theorem swi_up (h : makeObjStack x cfg = some cfg') {f : FrameWithIndex} (hf : f ∈ cfg.stackWithIndex) :
     ∃ f' ∈ cfg'.stackWithIndex, f'.index = f.index ∧ f'.regionId = f.regionId := by
   obtain ⟨frame, hlast, rfl⟩ := makeObjStack_cases h
-  rw [swi_eq hlast] at hf
-  rw [swi_mk]
+  rw [stackWithIndex_eq_of_getLast? hlast] at hf
+  rw [stackWithIndex_mk_append_singleton]
   rcases List.mem_append.mp hf with hd | hl
   · exact ⟨f, List.mem_append_left _ hd, rfl, rfl⟩
   · obtain rfl := List.mem_singleton.mp hl
@@ -95,7 +62,7 @@ private theorem swi_up (h : makeObjStack x cfg = some cfg') {f : FrameWithIndex}
 private theorem objectIds_perm (h : makeObjStack x cfg = some cfg') :
     cfg'.objectIds.Perm (cfg.freshObjectId :: cfg.objectIds) := by
   obtain ⟨frame, hlast, rfl⟩ := makeObjStack_cases h
-  have hk := List.erase_of_not_mem (fresh_not_in_stack (List.mem_of_getLast? hlast))
+  have hk := List.erase_of_not_mem (freshObjectId_not_mem_frame (List.mem_of_getLast? hlast))
   unfold RuntimeConfig.objectIds
   conv_rhs => rw [← List.dropLast_append_getLast? frame hlast]
   simp [Stack.objectIds, Frame.objectIds, AList.keys_insert, hk, List.perm_middle]
@@ -105,12 +72,12 @@ private theorem refs_mem (h : makeObjStack x cfg = some cfg') {r : Reference} (h
     r = Reference.OId cfg.freshObjectId ∨ r ∈ cfg.refs := by
   obtain ⟨frame, hlast, rfl⟩ := makeObjStack_cases h
   have hmem : frame ∈ cfg.stack := List.mem_of_getLast? hlast
-  simp only [RuntimeConfig.refs, stack_refs_concat, List.mem_append] at hr
+  simp only [RuntimeConfig.refs, stack_refs_append_singleton, List.mem_append] at hr
   rcases hr with (hd | hn) | hh
   · exact Or.inr (List.mem_append_left _ (by
-      rw [← List.dropLast_append_getLast? frame hlast, stack_refs_concat]
+      rw [← List.dropLast_append_getLast? frame hlast, stack_refs_append_singleton]
       exact List.mem_append_left _ hd))
-  · exact (newFrame_refs_mem (fresh_not_in_stack hmem) hn).imp_right (List.mem_append_left _ <| stack_refs_mem hmem ·)
+  · exact (newFrame_refs_mem (freshObjectId_not_mem_frame hmem) hn).imp_right (List.mem_append_left _ <| stack_refs_mem hmem ·)
   · exact Or.inr (List.mem_append_right _ hh)
 
 -- Locations after makeObjStack: the fresh object sits in the top frame, every other object stays put.
@@ -119,7 +86,7 @@ private theorem loc_eq (h : makeObjStack x cfg = some cfg') (oid : ObjectId) :
       if oid = cfg.freshObjectId then some (Location.Stk cfg.stack.dropLast.length) else (Reference.OId oid).loc? cfg := by
   obtain ⟨frame, hlast, rfl⟩ := makeObjStack_cases h
   simp only [Reference.loc?]
-  rw [swi_eq hlast, swi_mk]
+  rw [stackWithIndex_eq_of_getLast? hlast, stackWithIndex_mk_append_singleton]
   simp only [List.findRev?_eq_find?_reverse, List.reverse_append, List.reverse_singleton, List.singleton_append,
     List.find?_cons]
   split_ifs with hne
@@ -158,12 +125,12 @@ theorem makeObjStack_H2 : ValidConfig cfg →
   H2 cfg' := by
   intro vcfg h rid
   obtain ⟨frame, hlast, rfl⟩ := makeObjStack_cases h
-  obtain ⟨l, hs, hp⟩ := newFrame_refs_perm (x := x) (fresh_not_in_stack (List.mem_of_getLast? hlast))
+  obtain ⟨l, hs, hp⟩ := newFrame_refs_perm (x := x) (freshObjectId_not_mem_frame (List.mem_of_getLast? hlast))
   have hf := hs.count_le (Reference.RId rid)
   have := vcfg.h2 rid
-  rw [← List.dropLast_append_getLast? frame hlast, stack_refs_concat, List.count_append] at this
+  rw [← List.dropLast_append_getLast? frame hlast, stack_refs_append_singleton, List.count_append] at this
   dsimp only
-  rw [stack_refs_concat, List.count_append, hp.count_eq, List.count_cons]
+  rw [stack_refs_append_singleton, List.count_append, hp.count_eq, List.count_cons]
   simp only [reduceCtorEq, beq_iff_eq, ↓reduceIte] at *
   omega
 
@@ -172,7 +139,7 @@ theorem makeObjStack_H3 : ValidConfig cfg →
   H3 cfg' := by
   intro vcfg h rid oid reg hreg hoid
   obtain ⟨frame, -, rfl⟩ := makeObjStack_cases h
-  simpa [loc_eq h, ne_fresh_of_refs vcfg (List.mem_append_right _ (heap_refs_mem_of_lookup hreg hoid))] using
+  simpa [loc_eq h, ne_freshObjectId_of_mem_refs vcfg (List.mem_append_right _ (heap_refs_mem_of_lookup hreg hoid))] using
     vcfg.h3 rid oid reg hreg hoid
 
 theorem makeObjStack_S1 : ValidConfig cfg →
@@ -194,7 +161,7 @@ theorem makeObjStack_S2 : ValidConfig cfg →
   split_ifs at hloc with hne
   · rcases hrefs _ href with hr | ⟨-, hi⟩
     · obtain ⟨n, hn, rfl⟩ := List.mem_mapIdx.mp hf
-      exact absurd hne (ne_fresh_of_refs vcfg (List.mem_append_left _ (stack_refs_mem (List.getElem_mem hn) hr)))
+      exact absurd hne (ne_freshObjectId_of_mem_refs vcfg (List.mem_append_left _ (stack_refs_mem (List.getElem_mem hn) hr)))
     · cases hloc
       exact hi.ge
   · rcases hrefs _ href with hr | ⟨heq, -⟩

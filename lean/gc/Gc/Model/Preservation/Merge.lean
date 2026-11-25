@@ -203,13 +203,6 @@ theorem merge_H2 : ValidConfig cfg →
   dsimp only
   split_ifs at hc <;> omega
 
--- A ref of a frame after a varMap insert is the inserted value or an old ref.
-private theorem merge_frame_refs_mem {frame : Frame} {x : VarName} {v r : Reference}
-    (hr : r ∈ Frame.refs { frame with varMap := frame.varMap.insert x v }) : r = v ∨ r ∈ frame.refs := by
-  simp only [Frame.refs, AList.entries_insert, List.map_cons, List.mem_append, List.mem_cons] at hr ⊢
-  have := ((List.kerase_sublist x frame.varMap.entries).map (·.2)).mem (a := r)
-  tauto
-
 -- Both `stackWithIndex`es share every frame but the last.
 private theorem merge_swi_split {cfg cfg' : RuntimeConfig} {frame newFrame : Frame}
     (hframe : cfg.stack.getLast? = some frame) (hstack : cfg'.stack = cfg.stack.dropLast ++ [newFrame]) :
@@ -247,7 +240,7 @@ private theorem merge_swi_down {cfg cfg' : RuntimeConfig} {frame : Frame} {x : V
   · exact ⟨f', h1 ▸ List.mem_append_left _ hf', rfl, rfl, fun r hr => Or.inl hr⟩
   · refine ⟨{ frame with index := cfg.stack.dropLast.length }, h1 ▸ List.mem_append_right _ (List.mem_singleton_self _),
       rfl, rfl, fun r hr => ?_⟩
-    rcases merge_frame_refs_mem (frame := frame) (x := x) (v := v) hr with rfl | hr
+    rcases frame_varMap_insert_refs_mem (frame := frame) (x := x) (v := v) hr with rfl | hr
     · exact Or.inr ⟨rfl, rfl⟩
     · exact Or.inl hr
 

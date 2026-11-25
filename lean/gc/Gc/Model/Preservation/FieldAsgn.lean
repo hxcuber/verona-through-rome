@@ -11,27 +11,6 @@ public import Mathlib.Data.List.Infix
 
 @[expose] public section
 
--- Membership after inserting at an AList key: either the newly-written value or a pre-existing one.
-private theorem alist_insert_refs_mem {α : Type*} [DecidableEq α] {l : AList (fun _ : α => Reference)}
-    {k : α} {v r : Reference} (hr : r ∈ (l.insert k v).entries.map (·.2)) :
-    r = v ∨ r ∈ l.entries.map (·.2) := by
-  rw [AList.entries_insert, List.map_cons, List.mem_cons] at hr
-  exact hr.imp_right ((List.kerase_sublist k l.entries).map _).mem
-
--- An object's refs after writing one field: the new field value or a pre-existing ref.
-theorem fieldAsgn_corollary_object_insert_refs_mem {obj : Object} {field : FieldName} {v r : Reference}
-    (hr : r ∈ Object.refs (obj.insert field v)) : r = v ∨ r ∈ Object.refs obj :=
-  alist_insert_refs_mem hr
-
--- Membership after overwriting one field of a stored object: either the new field value or a pre-existing ref.
-private theorem objMap_insert_field_refs_mem {m : ObjMap} {oid : ObjectId} {obj : Object} {k : FieldName}
-    {v r : Reference} (hobj : m.lookup oid = some obj)
-    (hr : r ∈ ((m.insert oid (obj.insert k v)).entries.map (·.2) >>= Object.refs)) :
-    r = v ∨ r ∈ (m.entries.map (·.2) >>= Object.refs) := by
-  rcases objMap_insert_bind_refs_mem hr with hr | hr
-  · exact (fieldAsgn_corollary_object_insert_refs_mem hr).imp_right (objMap_bind_refs_mem_of_lookup hobj)
-  · exact Or.inr hr
-
 -- Membership in the refs of a frame with one object field overwritten.
 private theorem frame_insert_field_refs_mem {f : Frame} {oid : ObjectId} {obj : Object} {k : FieldName}
     {v r : Reference} (hobj : f.objMap.lookup oid = some obj)
@@ -40,25 +19,6 @@ private theorem frame_insert_field_refs_mem {f : Frame} {oid : ObjectId} {obj : 
   rcases hr with hr | hr
   · exact (objMap_insert_field_refs_mem hobj hr).imp_right Or.inl
   · exact Or.inr (Or.inr hr)
-
--- Membership in `cfg.refs` split along a stack of the form `L ++ [g]`.
-private theorem mem_refs_of_stack_eq {cfg : RuntimeConfig} {L : Stack} {g : Frame} {r : Reference}
-    (hst : cfg.stack = L ++ [g]) :
-    r ∈ cfg.refs ↔ (r ∈ Stack.refs L ∨ r ∈ g.refs) ∨ r ∈ Heap.refs cfg.heap := by
-  simp [RuntimeConfig.refs, hst, Stack.refs, or_assoc]
-
--- Replacing the value at a present AList key changes a bind-count by the delta of the replaced value's own count.
-private theorem alist_insert_bind_count_eq {α : Type*} {β : Type} [DecidableEq α] {m : AList (fun _ : α => β)}
-    {k : α} {old new : β} (f : β → List Reference) (t : Reference) (h : m.lookup k = some old) :
-    ((m.insert k new).entries.map (·.2) >>= f).count t + (f old).count t =
-    (m.entries.map (·.2) >>= f).count t + (f new).count t := by
-  obtain ⟨v0, l1e, l2e, hnotmem, heq, hkerase⟩ := List.exists_of_kerase (AList.mem_keys_of_lookup_eq_some h)
-  obtain rfl : v0 = old := List.NodupKeys.eq_of_mk_mem (β := fun _ : α => β) m.nodupKeys
-    (heq ▸ List.mem_append_right _ List.mem_cons_self) (AList.mem_lookup_iff.mp (by rw [h]; rfl))
-  rw [AList.entries_insert, hkerase, heq]
-  simp only [List.map_cons, List.map_append, List.bind_eq_flatMap, List.flatMap_cons, List.flatMap_append,
-    List.count_append]
-  omega
 
 -- Writing a non-`t` value into one field never increases an ObjMap's bind-refs count of `t`.
 private theorem objMap_insert_field_count_le {m : ObjMap} {oid : ObjectId} {obj : Object} {k : FieldName}
@@ -73,20 +33,6 @@ private theorem objMap_insert_field_count_le {m : ObjMap} {oid : ObjectId} {obj 
     rw [AList.entries_insert, List.map_cons, List.count_cons, hne]
     simpa using ((List.kerase_sublist k obj.entries).map (·.2)).count_le t
   omega
-
--- `Reference.loc?` of an object id only depends on the index of the stack frame and the key of the region holding it.
-private theorem loc_eq_of_find_map_eq {cfg cfg' : RuntimeConfig} {oid : ObjectId}
-    (hs : (cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid)).map FrameWithIndex.index =
-      (cfg'.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid)).map FrameWithIndex.index)
-    (hh : (cfg.heap.entries.find? (fun p => p.snd.objMap.keys.contains oid)).map Sigma.fst =
-      (cfg'.heap.entries.find? (fun p => p.snd.objMap.keys.contains oid)).map Sigma.fst) :
-    (Reference.OId oid).loc? cfg = (Reference.OId oid).loc? cfg' := by
-  have step1 := loc_match_eq (cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid))
-    (cfg.heap.entries.find? (fun p => p.snd.objMap.keys.contains oid))
-  have step2 := loc_match_eq (cfg'.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid))
-    (cfg'.heap.entries.find? (fun p => p.snd.objMap.keys.contains oid))
-  rw [hs, hh] at step1
-  exact step1.trans step2.symm
 
 -- FIELD-ASGN-STACK keeps the last frame's objMap key set (up to perm), so `Reference.loc?` transports.
 theorem fieldAsgn_corollary_stack_loc_eq {cfg : RuntimeConfig} {frame : FrameWithIndex} {oid : ObjectId}
@@ -132,14 +78,6 @@ theorem fieldAsgn_corollary_region_loc_eq {cfg : RuntimeConfig} {rid oid : Objec
     rfl
   · rw [Bool.not_eq_true] at hb2
     simp only [hb2, heq, List.find?_append, List.find?_cons]
-
--- The refs of any on-stack frame are among the config's refs.
-private theorem refs_mem_of_stackWithIndex {cfg : RuntimeConfig} {f : FrameWithIndex} {r : Reference}
-    (hf : f ∈ cfg.stackWithIndex) (hr : r ∈ f.refs) : r ∈ cfg.refs := by
-  obtain ⟨n, hn, rfl⟩ := List.mem_mapIdx.mp hf
-  refine List.mem_append_left _ ?_
-  simp only [Stack.refs, List.bind_eq_flatMap, List.flatMap_id, List.mem_flatten, List.mem_map]
-  exact ⟨_, ⟨_, List.getElem_mem hn, rfl⟩, hr⟩
 
 -- A resolved object reference is stored in some frame, or is the bridge object of some frame's region.
 private theorem resolveV_oid_source {cfg : RuntimeConfig} {var : VarName} {oid : ObjectId}
