@@ -8,7 +8,7 @@ import Gc.Reachability.Reachable.Lemmas.Common
 
 -- ===== merge =====
 
--- An allocated object id always resolves somewhere (never `none`); reproven here since this layer can't import `Gc.Reachability.Referencable`.
+-- An allocated object id always resolves somewhere (never `none`).
 theorem loc_ne_none_of_mem_objectIds (cfg : RuntimeConfig) (hvalid : ValidConfig cfg) (oid : ObjectId)
     (hmem : oid ∈ cfg.objectIds) : (Reference.OId oid).loc? cfg ≠ none := by
   unfold RuntimeConfig.objectIds at hmem
@@ -116,7 +116,7 @@ theorem merge_corollary_union_lookup_right {region region' : Region} {oid : Obje
   rw [hnone]
   rfl
 
--- `objAt?` is unconditionally preserved by merge (only relocates heap entries, never edits content); ported from Referencable's private `merge_corollary_objAt_eq`.
+-- `objAt?` is unconditionally preserved by merge (only relocates heap entries, never edits content).
 theorem merge_objAt_eq (vcfg : ValidConfig cfg) {x : VarName} {cfg' : RuntimeConfig}
     (h : merge x cfg = some cfg') (oid : ObjectId) :
     (Reference.OId oid).objAt? cfg = (Reference.OId oid).objAt? cfg' := by

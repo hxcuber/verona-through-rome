@@ -5,15 +5,7 @@ import Gc.Model.Theorems
 
 import Mathlib.Data.List.Infix
 
--- Generic, non-operation-specific facts reused across several `Preservation` files (both the
--- `Gc/Model/Preservation/*.lean` layer and `Gc/Reachability/Referencable/CR3/*.lean`'s CR3
--- layer). Each of these originally lived in whichever operation's own file first needed it
--- (`heap_objectIds_of_mem` in `Exit.lean`, the `stackWithIndex` pair in `Swap.lean`,
--- `regionId_unique_index` in `Merge.lean`), which meant unrelated operations had to import that
--- operation's entire preservation file just to borrow one generic lemma. Consolidated here once
--- all 9 `Mutation.lean` operations' CR3 proofs were done and it was clear which facts are actually
--- shared (see CLAUDE.md's "Next planned step" section for the full rationale). Names kept
--- unchanged from their original per-operation files to avoid a mass rename across every call site.
+-- Generic, non-operation-specific facts shared by several `Preservation`/`Reachability` files.
 
 -- A `heap.entries` membership witnessing `oid` inside some region's `objMap` puts `oid` in the
 -- heap's own flattened `objectIds`.

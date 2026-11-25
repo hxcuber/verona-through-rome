@@ -1007,7 +1007,7 @@ theorem swap_root_escape {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
   · have hltidx : frameD.index < frame0.index := lt_of_le_of_ne hownerbound heqidx
     exact hcr3 frameD hframeDMem frame0 hframe0_mem hltidx oid hlocDown hreachY
 
--- New vs. `Referencable`: `ReachableStep` can continue from an `RId` source, but reaching `oid` (in `frameD`'s Open region) from one is still impossible, via `reflTransGen_rid_source_open_absurd`.
+-- `ReachableStep` can continue from an `RId` source, but reaching `oid` (in `frameD`'s Open region) from one is still impossible, via `reflTransGen_rid_source_open_absurd`.
 theorem swap_root_escape_rid {cfg : RuntimeConfig} (vcfg : ValidConfig cfg)
     {oid : ObjectId} {xrid0 : RegionId} {frameD : FrameWithIndex}
     (hframeDMem : frameD ∈ cfg.stackWithIndex)

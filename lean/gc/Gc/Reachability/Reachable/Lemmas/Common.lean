@@ -5,7 +5,7 @@ import Gc.Model.Mutation.Mutation
 import Gc.Model.Preservation
 import Gc.Reachability.Reachable.Semantics
 
--- Generic, non-operation-specific helper lemmas shared across `Lemmas/<Op>.lean`, re-derived independently of `Gc.Reachability.Referencable`.
+-- Generic, non-operation-specific helper lemmas shared across `Lemmas/<Op>.lean`.
 
 -- An object's own refs contribute to its region's overall refs.
 theorem mem_region_refs_of_mem_objMap {region : Region} {oid : ObjectId} {obj : Object}
