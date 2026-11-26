@@ -94,13 +94,7 @@ public import Gc.Some.Dependency
   region", and conversely) from which the stack invariants follow. A new operation gets its own
   `Preservation/<Op>.lean` of this shape.
 - `Preservation/Common.lean`: shared stack/heap transport facts. Check here (`lean_file_outline`) before
-  re-deriving one. Highlights: `heap_region_unique`, `loc_match_eq`, `loc_eq_of_find_map_eq`,
-  `stack_eq_of_stackWithIndex_getLast?`, `stackWithIndex_eq_of_getLast?`,
-  `stackWithIndex_mk_append_singleton`, `stackWithIndex_frame_transport_down/up_of_shape_eq`,
-  `refs_mem_of_stackWithIndex`, `stack_refs_mem`, `frame_varMap_insert_refs_mem`,
-  `object_insert_refs_mem`, `objMap_insert_field_refs_mem`, `heap_insert_refs_mem`,
-  `heap_insert_objectIds_perm`, `freshObjectId_not_mem_frame`, `ne_freshObjectId_of_mem_refs`,
-  `merge_corollary_regionId_unique_index`, `swap_corollary_stackWithIndex_index_inj`.
+  re-deriving one.
 - `Preservation.lean`: aggregator; defines `StepPreserves`/`AllPreserve` and proves
   `allPreserve_ValidConfig : AllPreserve ValidConfig` by `cases` on `Stmt`.
 
@@ -119,23 +113,10 @@ per-operation toolkit in `Lemmas/`.
   entirely with the `Relation.ReflTransGen (ReachableStep cfg)` form. `RegionReachable`/`FrameReachable`
   never cross an `RId` boundary within one relation; bridging that seam is what makes the Closed-region
   results below non-trivial.
-- `Lemmas/Common.lean`: operation-independent machinery shared across the layer. Groups:
-  - step unpacking: `bridge_loc`, `oid_step_container` (the target is a ref of the source's region or stack
-    frame), `rid_step_inv`, `predecessor_cases`, `predecessor_of_region_object`,
-    `predecessor_of_closed_region_object`, `predecessor_of_stack_object`, `open_rid_no_step`;
-  - backward chase: `SafeRef`, `predecessor_safe`, `safe_reflTransGen_transport`;
-  - owner-index bounds: `stack_container_confined`, `region_container_confined`, `stack_step_index_le`;
-  - Closed regions: `closed_region_not_owned`, `closed_chain`, `RegionReachable_of_FrameReachable_closed`,
-    `FrameReachable_rid_of_closed_container`;
-  - chain building: `FrameReachable_extend`, `StackReachable_of_root`, `reflTransGen_split` (a chain under a
-    relation that changed only at one source is an old chain or ends in an old chain from the new target),
-    `StackReachable_of_edge_added`, `FrameReachable_of_StackReachable` (the forward direction every
-    `<op>_suspended_reach` uses);
-  - stack-index facts: `stackWithIndex_getLast_mem`, `regionId_ne_last_of_suspended`, `index_le_last`,
-    `index_lt_length_sub_one`, `stackWithIndex_length_of_replace_last`, `last_frame_root`;
-  - `objAt?`/step agreement after an edit: `objAt_of_loc_last`, `objAt_insert_step`, `objAt_last_frame_eq`,
-    `objAt_heap_insert_eq`, `step_iff_of_ne_of_objAt`, `rid_step_iff_of_insert_open`,
-    `ne_freshRegionId_of_lookup`, `frame_regionId_ne_fresh`.
+- `Lemmas/Common.lean`: operation-independent machinery shared across the layer (step unpacking,
+  backward chase via `SafeRef`, owner-index bounds, Closed-region chains, chain building incl.
+  `reflTransGen_split`, stack-index facts, `objAt?`/step agreement after an edit). Check here
+  (`lean_file_outline`) before re-deriving one.
 - `Lemmas/<Op>.lean`: per-op `loc?`/`objAt?`/`ReachableStep` agreement facts, frame-membership transports
   (`<op>_frame_mem_up/down`, `<op>_frame_cases`), frame-reachability transports
   (`<op>_frame_reachable_iff`), and one `<op>_suspended_reach` lemma: the argument shared by both leaf
