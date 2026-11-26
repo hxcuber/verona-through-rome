@@ -2,7 +2,8 @@
 \section{\texttt{fieldAsgn}}
 %======================================================================
 
-In both rules $\sigma = \langle S :: F, H\rangle$ and $n = |S|$, the index of $F$.
+In both rules $\sigma = \langle S :: F, H\rangle$ and $n = |S|$, the index of $F$ in $\sigma$
+(Lemma~\ref{lem:stack-split}(b)).
 \begin{mathpar}
   \inferrule* [lab=field-asgn-stack]
     {\mathit{resolveV}(x, \sigma) = \OId(oid) \\ \mathit{resolveV}(y, \sigma) = \OId(oid_y) \\
@@ -20,8 +21,8 @@ $\omap[oid \mapsto o[f \mapsto \OId(oid_y)]]$.
 
 \texttt{fieldAsgn} overwrites the field $f$ of one existing object $oid$, either a temporary of the top
 frame or an object of the top frame's (open) region. Throughout this section fix
-$\sigma = \langle S :: F, H\rangle$ with $\sigma \vdash \inv{ValidConfig}$, let $(F, n)$ be its last
-indexed frame, so $n = |S|$ (Lemma~\ref{lem:stack-split}(b)), and fix $oid$, $oid_y$, $o$ as in the
+$\sigma = \langle S :: F, H\rangle$ with $\sigma \vdash \inv{ValidConfig}$, and $n$, $oid$, $oid_y$,
+$o$ as in the
 rules. Write $v = \OId(oid_y)$ for the written reference and $o' = o[f \mapsto v]$. There are two cases:
 \begin{itemize}[nosep]
   \item \emph{stack case} (\textsc{field-asgn-stack}): $\sigma' = \langle S :: F', H\rangle$;
@@ -32,9 +33,7 @@ This is exactly what \texttt{fieldAsgn\_cases} extracts from
 $\texttt{fieldAsgn}\ (x.f)\ y\ \sigma = \mathsf{some}\ \sigma'$. Every proof below treats the two cases
 separately.
 
-For an $\omap$ $m$ write $\refs(m)$ for the concatenation of $\refs(q)$ over the objects $q$ of $m$, so
-$\refs(R) = \refs(R.\omap)$ and $\refs(G) = \refs(G.\omap) \cat \mathit{values}(G.\vmap)$. Since $oid$
-is already a key of $F.\omap$ (stack case), resp.\ of $R.\omap$ (region case), inserting at it only
+Since $oid$ is already a key of $F.\omap$ (stack case), resp.\ of $R.\omap$ (region case), inserting at it only
 reorders the keys: $\dom(F'.\omap) \perm \dom(F.\omap)$, resp.\ $\dom(R'.\omap) \perm \dom(R.\omap)$.
 
 The proof shows that the operation changes neither the object ids (up to order), the heap keys, the
@@ -46,61 +45,21 @@ and~\ref{lem:fieldAsgn-frames}). The invariants that look at where stored refere
 
 \subsection{Supporting lemmas}
 
-\begin{lemma}[Writing one field]
+\begin{lemma}[Writing one field never adds a reference to count]
 \label{lem:fieldAsgn-write}
-Let $m$ be an $\omap$ with $m(oid) = o$, let $f$ be a field, $v$ and $t$ references, and
-$m' = m[oid \mapsto o[f \mapsto v]]$.
-\begin{enumerate}[nosep,label=(\alph*)]
-  \item For a frame $G$ with $G.\omap = m$, every element of $\refs$ of $G$ with $\omap := m'$ is $v$
-    or in $\refs(G)$; \leanpart{frame\_insert\_field\_refs\_mem}
-  \item if $v \ne t$ then $\#\refs(m') \le \#\refs(m)$, where $\#$ counts occurrences of $t$.
-    \leanpart{objMap\_insert\_field\_count\_le}
-\end{enumerate}
-\leanform{(b) assumes \texttt{(v == t) = false}.}
+\lean{objMap\_insert\_field\_count\_le}
+Let $m$ be an $\omap$ with $m(oid) = o$, let $f$ be a field, $v$ and $t$ references with $v \ne t$,
+and $m' = m[oid \mapsto o[f \mapsto v]]$. Then $\#\refs(m') \le \#\refs(m)$, where $\#$ counts
+occurrences of $t$.
+\leanform{$v \ne t$ is assumed as \texttt{(v == t) = false}.}
 \end{lemma}
 \begin{proof}
-(a) An element of $\refs$ of the new frame is in $\refs(m')$ or is a value of $G.\vmap$, which is
-unchanged. In the first case Lemma~\ref{lem:write-mem}(d) gives that it is $v$ or in $\refs(m)$; both
-$\refs(m)$ and $\mathit{values}(G.\vmap)$ are part of $\refs(G)$.
-
-(b) By Lemma~\ref{lem:write-count}(b) with $g = \refs$,
+By Lemma~\ref{lem:write-count}(b) with $g = \refs$,
 $\#\refs(m') + \#\refs(o) = \#\refs(m) + \#\refs(o[f \mapsto v])$, so it suffices that
 $\#\refs(o[f \mapsto v]) \le \#\refs(o)$. Inserting $f$ into $o$ removes any existing entry for $f$ and
-puts $(f, v)$ in front, so $\refs(o[f \mapsto v]) = v :: \ell$ where $\ell$ (the values of $o$ with the
-entry for $f$ erased) is a sublist of $\refs(o)$. As $v \ne t$,
+puts $(f, v)$ in front, so $\refs(o[f \mapsto v]) = [v] \cat \ell$ where $\ell$ (the values of $o$ with
+the entry for $f$ erased) is a sublist of $\refs(o)$. As $v \ne t$,
 $\#\refs(o[f \mapsto v]) = \#\ell \le \#\refs(o)$.
-\end{proof}
-
-\begin{lemma}[Resolved object references]
-\label{lem:fieldAsgn-resolve}
-Let $\tau = \langle S_\tau, H_\tau\rangle$ be any configuration and $z$ a variable with
-$\mathit{resolveV}(z, \tau) = \OId(p)$.
-\begin{enumerate}[nosep,label=(\alph*)]
-  \item There is an indexed frame $(G, i)$ of $\tau$ with $\OId(p) \in \refs(G)$, or with
-    $H_\tau(G.\rid) = Q$ for some $Q$ with $Q.\bridge = p$;
-    \leanpart{resolveV\_oid\_source}
-  \item if $\tau \vdash \inv{ValidConfig}$ then $p \in \oids(\tau)$;
-    \leanpart{resolveV\_oid\_mem\_objectIds}
-  \item if $\tau \vdash \inv{ValidConfig}$ and $\loc{\tau}{\OId(p)} = \Rgn(rid)$, then there is an
-    indexed frame $(G'', k)$ of $\tau$ with $G''.\rid = rid$ and $k < |S_\tau|$.
-    \leanpart{resolveV\_loc\_ancestor}
-\end{enumerate}
-\end{lemma}
-\begin{proof}
-(a) By Definition~\ref{def:resolve}, $\mathit{resolveV}$ picks an indexed frame $(G, i)$ of $\tau$ and
-returns one of two references. Either it returns $G.\vmap(z)$, which is a value of $G.\vmap$ and hence
-in $\refs(G)$; or it returns $\OId(Q.\bridge)$, where $H_\tau(G.\rid) = Q$.
-
-(b) Take $(G, i)$ from (a). In the first case, $\OId(p) \in \refs(\tau)$ by
-Lemma~\ref{lem:stored}(d), so $p \in \oids(\tau)$ by \inv{HS1}. In the second, \inv{H1} gives
-$p = Q.\bridge \in \dom(Q.\omap)$, and $(G.\rid, Q)$ is an entry of $H_\tau$, so $p \in \oids(H_\tau)$
-by Lemma~\ref{lem:stored}(e).
-
-(c) Take $(G, i)$ from (a); $i < |S_\tau|$ as $i$ is a position in $S_\tau$. In the first case \inv{S3}
-for $\tau$, applied to $(G, i)$ and $\OId(p)$, gives $(G'', k)$ with $G''.\rid = rid$ and
-$k \le i < |S_\tau|$. In the second, $p \in \dom(Q.\omap)$ by \inv{H1}, so by
-Lemma~\ref{lem:loc-l1}(a) $\loc{\tau}{\OId(p)} = \Rgn(G.\rid)$. Hence $rid = G.\rid$ and $(G, i)$
-itself is the witness.
 \end{proof}
 
 \begin{lemma}[What \texttt{fieldAsgn} leaves unchanged]
@@ -150,24 +109,11 @@ By Lemma~\ref{lem:loc-searches} it suffices that the stack search and the heap s
 Definition~\ref{def:loc} for $oid'$ give the same frame index, resp.\ region key, in $\sigma$ and
 $\sigma'$ (including whether they succeed).
 
-(a) The heap is unchanged, so the heap search agrees. By Lemma~\ref{lem:stack-split}(a), the indexed
-frames of $S :: F$ and of $S :: F'$ are those of $S$, with the same indices, followed by $(F, n)$,
-resp.\ $(F', n)$. The stack search starts at the top. Since $\dom(F'.\omap) \perm \dom(F.\omap)$,
-$oid' \in \dom(F'.\omap)$ iff $oid' \in \dom(F.\omap)$. If so, both searches return index $n$;
-otherwise both continue over the frames of $S$ and return the same result.
+(a) The heap is unchanged, so the heap search agrees. Since $\dom(F'.\omap) \perm \dom(F.\omap)$,
+the stack search agrees by Lemma~\ref{lem:stack-search}.
 
-(b) The stack is unchanged, so the stack search agrees. Write the entries of $H$ as
-$\ell_1 \cat [(rid_0, R)] \cat \ell_2$ with $rid_0$ not a key of $\ell_1$; then the entries of $H'$
-are $[(rid_0, R')] \cat \ell_1 \cat \ell_2$. The heap search in $H'$ first tests $R'$, and
-$oid' \in \dom(R'.\omap)$ iff $oid' \in \dom(R.\omap)$.
-\begin{itemize}[nosep]
-  \item If $oid' \in \dom(R.\omap)$, the search in $H'$ returns key $rid_0$. By
-    Lemma~\ref{lem:region-unique}, $(rid_0, R)$ is the only entry of $H$ whose region contains
-    $oid'$ (entries with key $rid_0$ have region $R$, as keys are unique), so the search in $H$ also
-    returns key $rid_0$.
-  \item Otherwise the search in $H'$ is the search over $\ell_1 \cat \ell_2$, and the search in $H$
-    skips $(rid_0, R)$ and so gives the same result. \qedhere
-\end{itemize}
+(b) The stack is unchanged, so the stack search agrees. The heap search agrees by
+Lemma~\ref{lem:heap-search}, since $\dom(R'.\omap) \perm \dom(R.\omap)$.
 \end{proof}
 
 \begin{lemma}[References after \texttt{fieldAsgn}]
@@ -177,12 +123,12 @@ Every element of $\refs(\sigma')$ is in $\refs(\sigma)$ or is $v$; and $oid_y \i
 \leanform{The conclusion is ``$r \in \refs(\sigma)$, or $r = \OId(p)$ for some $p \in \oids(\sigma)$''.}
 \end{lemma}
 \begin{proof}
-$oid_y \in \oids(\sigma)$ is Lemma~\ref{lem:fieldAsgn-resolve}(b) applied to
+$oid_y \in \oids(\sigma)$ is Lemma~\ref{lem:resolveV}(b) applied to
 $\mathit{resolveV}(y, \sigma) = v$. Let $r \in \refs(\sigma')$.
 
 \emph{Stack case.} By Lemma~\ref{lem:stack-split}(d), $r$ is in $\refs(S)$, $\refs(F')$ or
 $\refs(H)$. By the same lemma for $\sigma$, $\refs(S)$ and $\refs(H)$ are part of $\refs(\sigma)$. If
-$r \in \refs(F')$, Lemma~\ref{lem:fieldAsgn-write}(a) gives $r = v$ or $r \in \refs(F)$, and $\refs(F)$
+$r \in \refs(F')$, Lemma~\ref{lem:write-mem}(f) gives $r = v$ or $r \in \refs(F)$, and $\refs(F)$
 is part of $\refs(\sigma)$.
 
 \emph{Region case.} $\refs(\sigma') = \refs(S :: F) \cat \refs(H')$, and $\refs(S :: F)$ is part of
@@ -201,7 +147,7 @@ element of $\refs(G')$ is in $\refs(F)$ or is $v$, where $\mathit{resolveV}(y, \
 \begin{proof}
 In the region case the stack is unchanged. In the stack case, by Lemma~\ref{lem:stack-split}(a), the
 indexed frames of $\sigma'$ are those of $S$, which are indexed frames of $\sigma$ with the same
-indices, and $(F', n)$. For the latter, Lemma~\ref{lem:fieldAsgn-write}(a) bounds $\refs(F')$.
+indices, and $(F', n)$. For the latter, Lemma~\ref{lem:write-mem}(f) bounds $\refs(F')$.
 \end{proof}
 
 \subsection{The invariants}
@@ -228,9 +174,8 @@ the same status, $\Open$.
 $\sigma' \vdash \inv{H1}$.
 \end{lemma}
 \begin{proof}
-In the stack case the heap is unchanged. In the region case, the regions of $H'$ are $R'$ followed by
-the regions of the entries of $H$ with key $\ne rid_0$, which are regions of $H$ and satisfy \inv{H1}
-for $\sigma$. For $R'$: $R'.\bridge = R.\bridge$, which is in $\dom(R.\omap)$ by \inv{H1} for
+In the stack case the heap is unchanged. In the region case, by Lemma~\ref{lem:heap-insert}(e) a region
+of $H'$ is $R'$ or a region of $H$, and the latter satisfy \inv{H1} for $\sigma$. For $R'$: $R'.\bridge = R.\bridge$, which is in $\dom(R.\omap)$ by \inv{H1} for
 $\sigma$, and $\dom(R.\omap) \subseteq \dom(R.\omap[oid \mapsto o']) = \dom(R'.\omap)$.
 \end{proof}
 
@@ -244,12 +189,12 @@ Note $v = \OId(oid_y) \ne t$.
 
 \emph{Stack case.} The heap is unchanged, and by Lemma~\ref{lem:stack-split}(c)
 \[ \refs(S :: F') = \refs(S) \cat \refs(F'.\omap) \cat \mathit{values}(F.\vmap), \]
-and likewise for $S :: F$ with $\refs(F.\omap)$ in the middle. Lemma~\ref{lem:fieldAsgn-write}(b)
+and likewise for $S :: F$ with $\refs(F.\omap)$ in the middle. Lemma~\ref{lem:fieldAsgn-write}
 with $m = F.\omap$ gives $\#\refs(F'.\omap) \le \#\refs(F.\omap)$.
 
 \emph{Region case.} The stack is unchanged. Lemma~\ref{lem:write-count}(b), with $g$ the $\refs$ of a
 region, gives $\#\refs(H') + \#\refs(R) = \#\refs(H) + \#\refs(R')$, and
-Lemma~\ref{lem:fieldAsgn-write}(b) with $m = R.\omap$ gives $\#\refs(R') \le \#\refs(R)$. Hence
+Lemma~\ref{lem:fieldAsgn-write} with $m = R.\omap$ gives $\#\refs(R') \le \#\refs(R)$. Hence
 $\#\refs(H') \le \#\refs(H)$.
 \end{proof}
 
@@ -310,7 +255,7 @@ Lemma~\ref{lem:fieldAsgn-frames}:
   \item if $(G', i)$ is an indexed frame of $\sigma$, \inv{S3} for $\sigma$ gives it;
   \item if $i = n$ and $\OId(oid_1) \in \refs(F)$, \inv{S3} for $\sigma$ applied to $(F, n)$ gives it,
     with $k \le n = i$;
-  \item if $i = n$ and $\OId(oid_1) = v$: Lemma~\ref{lem:fieldAsgn-resolve}(c), applied to
+  \item if $i = n$ and $\OId(oid_1) = v$: Lemma~\ref{lem:resolveV}(c), applied to
     $\mathit{resolveV}(y, \sigma) = \OId(oid_y)$ and $\loc{\sigma}{\OId(oid_y)} = \Rgn(rid')$, gives
     $(G_0, k)$ with $G_0.\rid = rid'$ and $k < |S :: F| = n + 1$, so $k \le n = i$. \qedhere
 \end{itemize}

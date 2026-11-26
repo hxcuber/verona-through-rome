@@ -26,7 +26,7 @@ $\sigma'$ in terms of $\sigma$ (Lemma~\ref{lem:makeObjStack-loc}); and the ten i
 \begin{lemma}[References of the new top frame]
 \label{lem:makeObjStack-frame-refs}
 \begin{enumerate}[nosep,label=(\alph*)]
-  \item there is a list $\ell \sublist \refs(F)$ with $\refs(F') \perm \OId(o^*) :: \ell$;
+  \item there is a list $\ell \sublist \refs(F)$ with $\refs(F') \perm [\OId(o^*)] \cat \ell$;
     \leanpart{newFrame\_refs\_perm}
   \item every element of $\refs(F')$ is $\OId(o^*)$ or is in $\refs(F)$.
     \leanpart{newFrame\_refs\_mem}
@@ -39,7 +39,7 @@ removes none, and the empty object has no references. So the objects of $F'.\oma
 references as those of $F.\omap$. The values of $F'.\vmap$ are $\OId(o^*)$ followed by the values of
 $F.\vmap$ with the entry at $x$, if there is one, removed. Taking $\ell$ to be the references of the
 objects of $F.\omap$ followed by these remaining values gives $\ell \sublist \refs(F)$ and
-$\refs(F') \perm \OId(o^*) :: \ell$.
+$\refs(F') \perm [\OId(o^*)] \cat \ell$.
 
 (b) Immediate from (a), as every element of $\ell$ is in $\refs(F)$.
 \end{proof}
@@ -113,17 +113,14 @@ For every $oid$,
 \]
 \end{lemma}
 \begin{proof}
-The heap is unchanged, so the heap search is the same in $\sigma$ and $\sigma'$. The stack search in
-$\sigma'$ looks first at $(F', n)$, and in $\sigma$ first at $(F, n)$; both then continue through the
-indexed frames of $S$.
+The heap is unchanged, so the heap search is the same in $\sigma$ and $\sigma'$.
 \begin{itemize}[nosep]
   \item If $oid = o^*$, then $oid \in \dom(F'.\omap)$, so the stack search in $\sigma'$ returns
     $(F', n)$. The heap search fails by Lemma~\ref{lem:makeObjStack-fresh-heap}. So
     $\loc{\sigma'}{\OId(oid)} = \Stk(n)$.
-  \item If $oid \ne o^*$, then $oid \in \dom(F'.\omap)$ iff $oid \in \dom(F.\omap)$. If it is in
-    both, the stack searches return $(F', n)$ and $(F, n)$, with the same index. If it is in neither,
-    both searches continue through $S$ and return the same result. Either way the two locations agree
-    by Lemma~\ref{lem:loc-searches}. \qedhere
+  \item If $oid \ne o^*$, then $oid \in \dom(F'.\omap)$ iff $oid \in \dom(F.\omap)$, so the stack
+    searches agree by Lemma~\ref{lem:stack-search}, and hence the locations agree by
+    Lemma~\ref{lem:loc-searches}. \qedhere
 \end{itemize}
 \end{proof}
 

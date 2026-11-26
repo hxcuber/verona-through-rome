@@ -30,9 +30,9 @@ and $\loc{\sigma}{r} = \Stk(i)$ for some $i$.
 \end{lemma}
 \begin{proof}
 For $r = \RId(rid)$: the location depends only on $\dom$, which is unchanged by
-Lemma~\ref{lem:status-update}(a), so $\loc{\sigma'}{r} = \loc{\sigma}{r}$.
+Lemma~\ref{lem:heap-insert}(a), so $\loc{\sigma'}{r} = \loc{\sigma}{r}$.
 
-For $r = \OId(oid)$: by Lemma~\ref{lem:status-update}(d), the heap search gives the same answer in
+For $r = \OId(oid)$: by Lemma~\ref{lem:status-update}(b), the heap search gives the same answer in
 $H'$ as in $H$, so only the stack search can differ. The frames of $\sigma'$ are those of $\sigma$
 minus the top one, with the same indices. Searching $\sigma$'s stack from the top therefore first
 looks at $(F, n)$, and if $oid \notin \dom(F.\omap)$ then continues exactly as the search of
@@ -71,7 +71,7 @@ $\refs(S) \sublist \refs(S :: F)$ and $\refs(H') \perm \refs(H)$.
 \end{lemma}
 \begin{proof}
 $\refs(S :: F) = \refs(S) \cat \refs(F)$, and $\refs(H') \perm \refs(H)$ is
-Lemma~\ref{lem:status-update}(b).
+Lemma~\ref{lem:heap-insert}(b).
 \end{proof}
 
 \subsection{The invariants}
@@ -82,7 +82,7 @@ $\sigma' \vdash \inv{L1}$.
 \begin{proof}
 \[ \oids(\sigma') = \oids(S) \cat \oids(H') \perm \oids(S) \cat \oids(H) \]
 by
-Lemma~\ref{lem:status-update}(b), and this is a sublist of
+Lemma~\ref{lem:heap-insert}(c), and this is a sublist of
 $\oids(S) \cat \dom(F.\omap) \cat \oids(H) = \oids(\sigma)$, which is duplicate-free by \inv{L1}.
 \end{proof}
 
@@ -99,9 +99,9 @@ $G \in S :: F$) is an $\Open$ region.
 $\sigma' \vdash \inv{H1}$.
 \end{lemma}
 \begin{proof}
-A region of $H'$ is either $R'$ or a region of $H$ stored at some key other than $F.\rid$. In the
-second case \inv{H1} for $\sigma$ applies directly. In the first, $R'$ has the same $\bridge$ and
-$\omap$ as $R$, and $R$ satisfies \inv{H1} since it is a region of $H$.
+By Lemma~\ref{lem:heap-insert}(e), a region of $H'$ is $R'$ or a region of $H$. In the second case
+\inv{H1} for $\sigma$ applies directly. In the first, $R'$ has the same $\bridge$ and $\omap$ as $R$,
+and $R$ satisfies \inv{H1} since it is a region of $H$.
 \end{proof}
 
 \begin{lemma}[\inv{H2}] \lean{exit\_H2}
@@ -117,7 +117,7 @@ $\#\refs(S) + \#\refs(H') \le \#\refs(S :: F) + \#\refs(H) \le 1$ by \inv{H2} fo
 $\sigma' \vdash \inv{H3}$.
 \end{lemma}
 \begin{proof}
-Let $H'(rid) = Q'$ and $\OId(oid) \in \refs(Q')$. By Lemma~\ref{lem:status-update}(c),
+Let $H'(rid) = Q'$ and $\OId(oid) \in \refs(Q')$. By Lemma~\ref{lem:status-update}(a),
 $H(rid) = Q$ for some $Q$ with the same $\omap$ as $Q'$, and $\refs$ of a region depends only on its
 $\omap$, so $\OId(oid) \in \refs(Q)$. By \inv{H3} for $\sigma$,
 $\loc{\sigma}{\OId(oid)} = \Rgn(rid)$, and by Corollary~\ref{cor:exit-loc}(a),
@@ -160,7 +160,7 @@ Let $\OId(oid) \in \refs(\sigma')$. By Lemma~\ref{lem:exit-refs} it is in $\refs
 \inv{HS1} for $\sigma$,
 \[ oid \in \oids(\sigma) = \oids(S) \cat \dom(F.\omap) \cat \oids(H). \]
 If $oid \in \oids(S)$ it is in $\oids(\sigma')$ directly; if $oid \in \oids(H)$ it is in
-$\oids(H') \perm \oids(H)$ (Lemma~\ref{lem:status-update}(b)).
+$\oids(H') \perm \oids(H)$ (Lemma~\ref{lem:heap-insert}(c)).
 
 It remains to rule out $oid \in \dom(F.\omap)$: the popped frame's objects must not still be
 referenced. Suppose $oid \in \dom(F.\omap)$. By Lemma~\ref{lem:loc-l1}(b),
@@ -168,7 +168,7 @@ $\loc{\sigma}{\OId(oid)} = \Stk(n)$. Now $\OId(oid)$ is in $\refs(\sigma') = \re
 \begin{itemize}[nosep]
   \item If $\OId(oid) \in \refs(G)$ for some indexed frame $(G, m)$ of $\sigma'$, then $(G, m)$ is also one of $\sigma$ and
     \inv{S2} for $\sigma$ gives $n \le m$, contradicting $m < n$.
-  \item If $\OId(oid) \in \refs(H')$, then by Lemma~\ref{lem:status-update}(b) it is in $\refs(Q)$
+  \item If $\OId(oid) \in \refs(H')$, then by Lemma~\ref{lem:heap-insert}(b) it is in $\refs(Q)$
     for some $H(rid) = Q$. \inv{H3} for $\sigma$ gives $\loc{\sigma}{\OId(oid)} = \Rgn(rid)$,
     contradicting $\loc{\sigma}{\OId(oid)} = \Stk(n)$. \qedhere
 \end{itemize}
@@ -179,7 +179,7 @@ $\sigma' \vdash \inv{HS2}$.
 \end{lemma}
 \begin{proof}
 If $\RId(rid) \in \refs(\sigma')$ then $\RId(rid) \in \refs(\sigma)$ by Lemma~\ref{lem:exit-refs}, so
-$rid \in \dom(H) = \dom(H')$ by \inv{HS2} for $\sigma$ and Lemma~\ref{lem:status-update}(a).
+$rid \in \dom(H) = \dom(H')$ by \inv{HS2} for $\sigma$ and Lemma~\ref{lem:heap-insert}(a).
 \end{proof}
 
 \begin{theorem} \lean{exit\_valid}

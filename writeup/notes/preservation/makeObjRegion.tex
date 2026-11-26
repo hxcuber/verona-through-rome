@@ -19,7 +19,7 @@ same $\rid$ and $\omap$ as $F$, and $R'$ has the same $\bridge$ and $\status$ as
 
 The proof has three parts: lemmas that compare the frames, object ids and stored references of
 $\sigma'$ with those of $\sigma$ (Lemmas~\ref{lem:makeObjRegion-region}--\ref{lem:makeObjRegion-refs}),
-lemmas that give every object location of $\sigma'$ (Lemmas~\ref{lem:makeObjRegion-search}--\ref{lem:makeObjRegion-loc-fresh}), and the ten
+lemmas that give every object location of $\sigma'$ (Lemmas~\ref{lem:makeObjRegion-loc-eq} and~\ref{lem:makeObjRegion-loc-fresh}), and the ten
 invariants.
 
 \subsection{Supporting lemmas}
@@ -41,10 +41,12 @@ object has no references.
 \begin{lemma}[Frames after \texttt{makeObjRegion}]
 \label{lem:makeObjRegion-frames}
 \begin{enumerate}[nosep,label=(\alph*)]
-  \item For every $(G', i)$ in $\sigma'$ there is $(G, i)$ in $\sigma$ with $G.\rid = G'.\rid$ and
+  \item For every indexed frame $(G', i)$ of $\sigma'$ there is an indexed frame $(G, i)$ of
+    $\sigma$ with $G.\rid = G'.\rid$ and
     $G.\omap = G'.\omap$, such that every $r \in \refs(G')$ either is in $\refs(G)$, or satisfies
     $r = \OId(o^*)$ and $G'.\rid = F.\rid$. \leanpart{swi\_down}
-  \item For every $(G, i)$ in $\sigma$ there is $(G', i)$ in $\sigma'$ with $G'.\rid = G.\rid$.
+  \item For every indexed frame $(G, i)$ of $\sigma$ there is an indexed frame $(G', i)$ of
+    $\sigma'$ with $G'.\rid = G.\rid$.
     \leanpart{swi\_up}
 \end{enumerate}
 \leanform{In (a), ``$G'.\rid = F.\rid$'' is
@@ -93,22 +95,6 @@ Let $r \in \refs(\sigma') = \refs(S) \cat \refs(F') \cat \refs(H')$
 \end{itemize}
 \end{proof}
 
-\begin{lemma}[Heap search under \inv{L1}]
-\label{lem:makeObjRegion-search}
-\lean{heap\_find\_fst\_eq}
-Let $\sigma \vdash \inv{L1}$, let $oid$ be an object id and $\hat H$ any heap such that, for every
-$r$, $\hat H$ has an entry $(r, Q)$ with $oid \in \dom(Q.\omap)$ iff $H$ has one. Then the heap search
-of Definition~\ref{def:loc} for $oid$ succeeds in $\hat H$ iff it succeeds in $H$, and then returns
-the same region id.
-\end{lemma}
-\begin{proof}
-If the search in $H$ fails, no entry of $H$ contains $oid$, so by the assumption no entry of
-$\hat H$ does, and the search in $\hat H$ fails. If the search in $H$ returns $(r, Q)$, then by the
-assumption some entry of $\hat H$ at key $r$ contains $oid$, so the search in $\hat H$ succeeds,
-returning some $(r', Q')$. By the assumption again, $H$ has an entry at key $r'$ containing $oid$, and
-Lemma~\ref{lem:region-unique} gives $r' = r$.
-\end{proof}
-
 \begin{lemma}[Locations of old object ids]
 \label{lem:makeObjRegion-loc-eq}
 \lean{makeObjRegion\_corollary\_loc\_eq}
@@ -117,15 +103,11 @@ For every $oid \ne o^*$, $\loc{\sigma'}{\OId(oid)} = \loc{\sigma}{\OId(oid)}$.
 \begin{proof}
 By Lemma~\ref{lem:loc-searches} it suffices that the two searches agree.
 
-\emph{Stack search.} Searching from the top, $\sigma$ first looks at $(F, n)$ and $\sigma'$ at
-$(F', n)$. Since $F'.\omap = F.\omap$, either both stop there, with index $n$, or both continue with
-the frames of $S$, which are the same. So the index returned, if any, is the same.
+\emph{Stack search.} Since $F'.\omap = F.\omap$, this is Lemma~\ref{lem:stack-search}.
 
-\emph{Heap search.} We check the assumption of Lemma~\ref{lem:makeObjRegion-search} for
-$\hat H = H'$. At a key $r \ne F.\rid$ we have $H'(r) = H(r)$. At $r = F.\rid$ the region is $R'$ in
-$H'$ and $R$ in $H$, and $\dom(R'.\omap) = \dom(R.\omap) \cup \{o^*\}$, so since $oid \ne o^*$,
-$oid \in \dom(R'.\omap)$ iff $oid \in \dom(R.\omap)$. By Lemma~\ref{lem:makeObjRegion-search} the
-heap search gives the same answer in $H'$ as in $H$.
+\emph{Heap search.} $\dom(R'.\omap) = \dom(R.\omap) \cup \{o^*\}$, so since $oid \ne o^*$,
+$oid \in \dom(R'.\omap)$ iff $oid \in \dom(R.\omap)$. By Lemma~\ref{lem:heap-search} the heap search
+gives the same answer in $H'$ as in $H$.
 \end{proof}
 
 \begin{lemma}[Location of the new object]
@@ -164,8 +146,8 @@ $H'(G.\rid) = H(G.\rid)$, which by \inv{L2} for $\sigma$ is an $\Open$ region.
 $\sigma' \vdash \inv{H1}$.
 \end{lemma}
 \begin{proof}
-A region of $H'$ is either $R'$ or a region of $H$ stored at some key other than $F.\rid$. In the
-second case \inv{H1} for $\sigma$ applies directly. In the first, $R$ is a region of $H$, so
+By Lemma~\ref{lem:heap-insert}(e), a region of $H'$ is $R'$ or a region of $H$. In the second case
+\inv{H1} for $\sigma$ applies directly. In the first, $R$ is a region of $H$, so
 $R.\bridge \in \dom(R.\omap)$, and hence
 \[ R'.\bridge = R.\bridge \in \dom(R.\omap) \subseteq \dom(R'.\omap). \qedhere \]
 \end{proof}
@@ -209,7 +191,7 @@ is duplicate-free by \inv{S1} for $\sigma$.
 $\sigma' \vdash \inv{S2}$.
 \end{lemma}
 \begin{proof}
-Let $(G', i)$ be in $\sigma'$, $\OId(oid) \in \refs(G')$ and
+Let $(G', i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G')$ and
 $\loc{\sigma'}{\OId(oid)} = \Stk(j)$. Take the counterpart $(G, i)$ of
 Lemma~\ref{lem:makeObjRegion-frames}(a). We have $oid \ne o^*$, since otherwise
 $\loc{\sigma'}{\OId(oid)}$ would be a region location
@@ -222,7 +204,7 @@ gives $j \le i$.
 $\sigma' \vdash \inv{S3}$.
 \end{lemma}
 \begin{proof}
-Let $(G', i)$ be in $\sigma'$, $\OId(oid) \in \refs(G')$ and
+Let $(G', i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G')$ and
 $\loc{\sigma'}{\OId(oid)} = \Rgn(rid')$. Take the counterpart $(G, i)$ of
 Lemma~\ref{lem:makeObjRegion-frames}(a).
 
@@ -234,8 +216,8 @@ required witness.
 
 \emph{Case $oid \ne o^*$.} Here $\OId(oid) \in \refs(G)$, and
 $\loc{\sigma}{\OId(oid)} = \Rgn(rid')$ by Lemma~\ref{lem:makeObjRegion-loc-eq}. \inv{S3} for
-$\sigma$ gives a frame $(G'', k)$ of $\sigma$ with $G''.\rid = rid'$ and $k \le i$.
-Lemma~\ref{lem:makeObjRegion-frames}(b) gives a frame of $\sigma'$ with index $k$ and region id
+$\sigma$ gives an indexed frame $(G'', k)$ of $\sigma$ with $G''.\rid = rid'$ and
+$k \le i$. Lemma~\ref{lem:makeObjRegion-frames}(b) gives an indexed frame of $\sigma'$ with index $k$ and region id
 $rid'$, which is the required witness.
 \end{proof}
 

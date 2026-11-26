@@ -30,18 +30,15 @@ invariants.
 \label{lem:enter-loc}
 \lean{enter\_loc}
 For every reference $r$, $\loc{\sigma'}{r} = \loc{\sigma}{r}$.
-\leanpart{enter\_corollary\_2}
-\leanform{\texttt{enter\_corollary\_2} is the case $r = \OId(oid)$, with the equation written the
-other way round.}
 \end{lemma}
 \begin{proof}
 For $r = \RId(rid_1)$: the location depends only on whether $rid_1$ is in the domain of the heap, and
-$\dom(H') = \dom(H)$ by Lemma~\ref{lem:status-update}(a).
+$\dom(H') = \dom(H)$ by Lemma~\ref{lem:heap-insert}(a).
 
 For $r = \OId(oid)$: the stack search in $\sigma'$ looks first at $(E, n)$. Since $E.\omap$ is empty,
 it passes over this frame and continues with the frames of $S$, which keep their indices
 (Lemma~\ref{lem:stack-split}(a)). So it gives the same answer as the stack search in $\sigma$. By
-Lemma~\ref{lem:status-update}(d), which uses \inv{L1} for $\sigma$, the heap search gives the same
+Lemma~\ref{lem:status-update}(b), which uses \inv{L1} for $\sigma$, the heap search gives the same
 answer in $H'$ as in $H$. By Lemma~\ref{lem:loc-searches}, the two locations agree.
 \end{proof}
 
@@ -58,12 +55,12 @@ The stored references and object ids do not change:
 \end{lemma}
 \begin{proof}
 (a) $E$ has an empty $\omap$ and an empty $\vmap$, so $\refs(E)$ is empty, and the first equation
-follows from Lemma~\ref{lem:stack-split}(c). The second is Lemma~\ref{lem:status-update}(b).
+follows from Lemma~\ref{lem:stack-split}(c). The second is Lemma~\ref{lem:heap-insert}(b).
 
 (b) By (a), $\refs(\sigma') = \refs(S) \cat \refs(H') \perm \refs(S) \cat \refs(H) = \refs(\sigma)$.
 
 (c) Since $E.\omap$ is empty, Lemma~\ref{lem:stack-split}(c) gives $\oids(S :: E) = \oids(S)$. With
-$\oids(H') \perm \oids(H)$ (Lemma~\ref{lem:status-update}(b)), this gives
+$\oids(H') \perm \oids(H)$ (Lemma~\ref{lem:heap-insert}(c)), this gives
 \[ \oids(\sigma') = \oids(S) \cat \oids(H') \perm \oids(S) \cat \oids(H) = \oids(\sigma). \qedhere \]
 \end{proof}
 
@@ -114,7 +111,7 @@ Let $G \in S :: E$.
 $\sigma' \vdash \inv{H1}$.
 \end{lemma}
 \begin{proof}
-A region of $H'$ is either $R'$ or a region of $H$. In the second case \inv{H1} for $\sigma$ applies
+By Lemma~\ref{lem:heap-insert}(e), a region of $H'$ is $R'$ or a region of $H$. In the second case \inv{H1} for $\sigma$ applies
 directly. In the first, $R'$ has the same $\bridge$ and $\omap$ as $R$, and $R$ satisfies \inv{H1}
 since it is a region of $H$.
 \end{proof}
@@ -156,8 +153,8 @@ $\sigma' \vdash \inv{S2}$.
 \end{lemma}
 \begin{proof}
 Let $(G, i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G)$ and
-$\loc{\sigma'}{\OId(oid)} = \Stk(j)$. By Lemma~\ref{lem:enter-frames}, either $(G, i)$ is a frame of
-$\sigma$ or $(G, i) = (E, n)$. In the first case $\loc{\sigma}{\OId(oid)} = \Stk(j)$ by
+$\loc{\sigma'}{\OId(oid)} = \Stk(j)$. By Lemma~\ref{lem:enter-frames}, either $(G, i)$ is an indexed frame
+of $\sigma$ or $(G, i) = (E, n)$. In the first case $\loc{\sigma}{\OId(oid)} = \Stk(j)$ by
 Lemma~\ref{lem:enter-loc}, so \inv{S2} for $\sigma$ gives $j \le i$. The second case is impossible,
 since $\refs(E)$ is empty.
 \end{proof}
@@ -168,10 +165,10 @@ $\sigma' \vdash \inv{S3}$.
 \begin{proof}
 Let $(G, i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G)$ and
 $\loc{\sigma'}{\OId(oid)} = \Rgn(rid_1)$. As in the proof of \inv{S2}, $\refs(E)$ being empty,
-$(G, i)$ is a frame of $\sigma$, and $\loc{\sigma}{\OId(oid)} = \Rgn(rid_1)$ by
-Lemma~\ref{lem:enter-loc}. \inv{S3} for $\sigma$ gives a frame $(G'', k)$ of $\sigma$ with
-$G''.\rid = rid_1$ and $k \le i$. By Lemma~\ref{lem:enter-frames}, $(G'', k)$ is also a frame of
-$\sigma'$, which is the required witness.
+$(G, i)$ is an indexed frame of $\sigma$, and $\loc{\sigma}{\OId(oid)} = \Rgn(rid_1)$ by
+Lemma~\ref{lem:enter-loc}. \inv{S3} for $\sigma$ gives an indexed frame $(G'', k)$ of $\sigma$ with
+$G''.\rid = rid_1$ and $k \le i$. By Lemma~\ref{lem:enter-frames}, $(G'', k)$ is also an indexed
+frame of $\sigma'$, which is the required witness.
 \end{proof}
 
 \begin{lemma}[\inv{HS1}] \lean{enter\_HS1}
@@ -189,7 +186,7 @@ $\sigma' \vdash \inv{HS2}$.
 \begin{proof}
 If $\RId(rid_1) \in \refs(\sigma')$ then $\RId(rid_1) \in \refs(\sigma)$ by
 Lemma~\ref{lem:enter-contents}(b), so $rid_1 \in \dom(H) = \dom(H')$ by \inv{HS2} for $\sigma$ and
-Lemma~\ref{lem:status-update}(a).
+Lemma~\ref{lem:heap-insert}(a).
 \end{proof}
 
 \begin{theorem} \lean{enter\_valid}
