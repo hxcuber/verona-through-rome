@@ -1,3 +1,10 @@
 %======================================================================
 \section{\texttt{makeObjRegion}}
 %======================================================================
+
+\begin{mathpar}
+  \inferrule* [lab=make-obj-region]
+    {H(F.\rid) = R \\ R.\status = \Open \\ o^* = \mathit{freshObjectId}(\langle S :: F, H\rangle)}
+    {\langle S :: F, H \rangle \xrightarrow{\texttt{makeObjRegion}\ x} \langle S :: F',\ H[F.\rid \mapsto R'] \rangle}
+\end{mathpar}
+where $F' = F$ with $\vmap[x \mapsto \OId(o^*)]$ and $R' = R$ with $\omap[o^* \mapsto \emptyset]$.
