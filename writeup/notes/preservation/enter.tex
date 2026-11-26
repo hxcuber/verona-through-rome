@@ -5,6 +5,197 @@
 \begin{mathpar}
   \inferrule* [lab=enter]
     {\mathit{resolveFA}(xf, \langle S, H\rangle) = \RId(rid) \\ H(rid) = R \\ R.\status = \Closed}
-    {\langle S, H \rangle \xrightarrow{\texttt{enter}\ xf\ a} \langle S :: (rid, a, \emptyset, \emptyset),\ H[rid \mapsto R'] \rangle}
+    {\langle S, H \rangle \xrightarrow{\texttt{enter}\ xf\ a} \langle S :: (rid, a, \emptyset, \emptyset),\ H[rid \mapsto R'] \rangle
+     \quad\text{where } R' = R \text{ with } \status := \Open}
 \end{mathpar}
-where $R' = R$ with $\status := \Open$.
+
+\texttt{enter} opens a $\Closed$ region and pushes a frame for it. Throughout this section fix
+$\sigma = \langle S, H\rangle$ with $\sigma \vdash \inv{ValidConfig}$, and
+$\sigma' = \langle S :: E, H'\rangle$, where $E = (rid, a, \emptyset, \emptyset)$ is the pushed
+frame (region id $rid$, bridge variable $a$, empty $\omap$, empty $\vmap$),
+$H' = H[rid \mapsto R']$, and $rid$, $R$, $R'$ are as in the rule:
+$\mathit{resolveFA}(xf, \sigma) = \RId(rid)$, $H(rid) = R$ and $R.\status = \Closed$. Let $n = |S|$,
+the index of $E$ in $\sigma'$. This is exactly what \texttt{enter\_cases} extracts from
+$\texttt{enter}\ xf\ a\ \sigma = \mathsf{some}\ \sigma'$. Lemma~\ref{lem:status-update} applies with
+$rid_0 = rid$ and $s = \Open$.
+
+The proof has three parts: the observation that \texttt{enter} changes no location
+(Lemma~\ref{lem:enter-loc}), the facts that the pushed frame is empty and that the region it opens is
+used by no existing frame (Lemmas~\ref{lem:enter-contents}--\ref{lem:enter-rid}), and the ten
+invariants.
+
+\subsection{Supporting lemmas}
+
+\begin{lemma}[Locations after \texttt{enter}]
+\label{lem:enter-loc}
+\lean{enter\_loc}
+For every reference $r$, $\loc{\sigma'}{r} = \loc{\sigma}{r}$.
+\leanpart{enter\_corollary\_2}
+\leanform{\texttt{enter\_corollary\_2} is the case $r = \OId(oid)$, with the equation written the
+other way round.}
+\end{lemma}
+\begin{proof}
+For $r = \RId(rid_1)$: the location depends only on whether $rid_1$ is in the domain of the heap, and
+$\dom(H') = \dom(H)$ by Lemma~\ref{lem:status-update}(a).
+
+For $r = \OId(oid)$: the stack search in $\sigma'$ looks first at $(E, n)$. Since $E.\omap$ is empty,
+it passes over this frame and continues with the frames of $S$, which keep their indices
+(Lemma~\ref{lem:stack-split}(a)). So it gives the same answer as the stack search in $\sigma$. By
+Lemma~\ref{lem:status-update}(d), which uses \inv{L1} for $\sigma$, the heap search gives the same
+answer in $H'$ as in $H$. By Lemma~\ref{lem:loc-searches}, the two locations agree.
+\end{proof}
+
+\begin{lemma}[Stored references and object ids after \texttt{enter}]
+\label{lem:enter-contents}
+The stored references and object ids do not change:
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item $\refs(S :: E) = \refs(S)$ \leanpart{enter\_stack\_refs}\\
+    and $\refs(H') \perm \refs(H)$. \leanpart{enter\_heap\_refs\_perm}
+  \item Every element of $\refs(\sigma')$ is an element of $\refs(\sigma)$.
+    \leanpart{enter\_refs\_mem}
+  \item $\oids(\sigma') \perm \oids(\sigma)$. \leanpart{enter\_objectIds\_perm}
+\end{enumerate}
+\end{lemma}
+\begin{proof}
+(a) $E$ has an empty $\omap$ and an empty $\vmap$, so $\refs(E)$ is empty, and the first equation
+follows from Lemma~\ref{lem:stack-split}(c). The second is Lemma~\ref{lem:status-update}(b).
+
+(b) By (a), $\refs(\sigma') = \refs(S) \cat \refs(H') \perm \refs(S) \cat \refs(H) = \refs(\sigma)$.
+
+(c) Since $E.\omap$ is empty, Lemma~\ref{lem:stack-split}(c) gives $\oids(S :: E) = \oids(S)$. With
+$\oids(H') \perm \oids(H)$ (Lemma~\ref{lem:status-update}(b)), this gives
+\[ \oids(\sigma') = \oids(S) \cat \oids(H') \perm \oids(S) \cat \oids(H) = \oids(\sigma). \qedhere \]
+\end{proof}
+
+\begin{lemma}[Indexed frames after \texttt{enter}]
+\label{lem:enter-frames}
+\lean{enter\_swi}
+The indexed frames of $\sigma'$ are those of $\sigma$, with unchanged indices, followed by $(E, n)$,
+and $\refs(E)$ is empty.
+\end{lemma}
+\begin{proof}
+The first claim is Lemma~\ref{lem:stack-split}(a); the second holds because $E.\omap$ and $E.\vmap$
+are empty.
+\end{proof}
+
+\begin{lemma}[The entered region is on no frame]
+\label{lem:enter-rid}
+\lean{regionId\_ne}
+For every $G \in S$, $G.\rid \ne rid$.
+\end{lemma}
+\begin{proof}
+By \inv{L2} for $\sigma$, $H(G.\rid)$ is an $\Open$ region. If $G.\rid = rid$, that region is
+$H(rid) = R$, which is $\Closed$.
+\end{proof}
+
+\subsection{The invariants}
+
+\begin{lemma}[\inv{L1}] \lean{enter\_L1}
+$\sigma' \vdash \inv{L1}$.
+\end{lemma}
+\begin{proof}
+$\oids(\sigma') \perm \oids(\sigma)$ by Lemma~\ref{lem:enter-contents}(c), and $\oids(\sigma)$ is
+duplicate-free by \inv{L1} for $\sigma$.
+\end{proof}
+
+\begin{lemma}[\inv{L2}] \lean{enter\_L2}
+$\sigma' \vdash \inv{L2}$.
+\end{lemma}
+\begin{proof}
+Let $G \in S :: E$.
+\begin{itemize}[nosep]
+  \item If $G \in S$, then $G.\rid \ne rid$ by Lemma~\ref{lem:enter-rid}, so
+    $H'(G.\rid) = H(G.\rid)$, which by \inv{L2} for $\sigma$ is an $\Open$ region.
+  \item If $G = E$, then $H'(E.\rid) = H'(rid) = R'$, which is $\Open$. \qedhere
+\end{itemize}
+\end{proof}
+
+\begin{lemma}[\inv{H1}] \lean{enter\_H1}
+$\sigma' \vdash \inv{H1}$.
+\end{lemma}
+\begin{proof}
+A region of $H'$ is either $R'$ or a region of $H$. In the second case \inv{H1} for $\sigma$ applies
+directly. In the first, $R'$ has the same $\bridge$ and $\omap$ as $R$, and $R$ satisfies \inv{H1}
+since it is a region of $H$.
+\end{proof}
+
+\begin{lemma}[\inv{H2}] \lean{enter\_H2}
+$\sigma' \vdash \inv{H2}$.
+\end{lemma}
+\begin{proof}
+Fix $rid_1$ and write $\#\ell$ for the number of occurrences of $\RId(rid_1)$ in $\ell$. By
+Lemma~\ref{lem:enter-contents}(a), $\#\refs(S :: E) = \#\refs(S)$ and $\#\refs(H') = \#\refs(H)$, so
+$\#\refs(S :: E) + \#\refs(H') = \#\refs(S) + \#\refs(H) \le 1$ by \inv{H2} for $\sigma$.
+\end{proof}
+
+\begin{lemma}[\inv{H3}] \lean{enter\_H3}
+$\sigma' \vdash \inv{H3}$.
+\end{lemma}
+\begin{proof}
+Let $H'(rid_1) = Q$ and $\OId(oid) \in \refs(Q)$. By Lemma~\ref{lem:enter-loc} it suffices to show
+$\loc{\sigma}{\OId(oid)} = \Rgn(rid_1)$.
+\begin{itemize}[nosep]
+  \item If $rid_1 = rid$, then $Q = R'$, which has the same $\omap$ as $R$, so
+    $\OId(oid) \in \refs(R)$. Apply \inv{H3} for $\sigma$ to $H(rid) = R$.
+  \item If $rid_1 \ne rid$, then $H(rid_1) = H'(rid_1) = Q$, and \inv{H3} for $\sigma$ applies
+    directly. \qedhere
+\end{itemize}
+\end{proof}
+
+\begin{lemma}[\inv{S1}] \lean{enter\_S1}
+$\sigma' \vdash \inv{S1}$.
+\end{lemma}
+\begin{proof}
+The list of region ids of $S :: E$ is $[G.\rid \mid G \in S] \cat [rid]$. The first part is
+duplicate-free by \inv{S1} for $\sigma$, and $rid$ does not occur in it by
+Lemma~\ref{lem:enter-rid}.
+\end{proof}
+
+\begin{lemma}[\inv{S2}] \lean{enter\_S2}
+$\sigma' \vdash \inv{S2}$.
+\end{lemma}
+\begin{proof}
+Let $(G, i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G)$ and
+$\loc{\sigma'}{\OId(oid)} = \Stk(j)$. By Lemma~\ref{lem:enter-frames}, either $(G, i)$ is a frame of
+$\sigma$ or $(G, i) = (E, n)$. In the first case $\loc{\sigma}{\OId(oid)} = \Stk(j)$ by
+Lemma~\ref{lem:enter-loc}, so \inv{S2} for $\sigma$ gives $j \le i$. The second case is impossible,
+since $\refs(E)$ is empty.
+\end{proof}
+
+\begin{lemma}[\inv{S3}] \lean{enter\_S3}
+$\sigma' \vdash \inv{S3}$.
+\end{lemma}
+\begin{proof}
+Let $(G, i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G)$ and
+$\loc{\sigma'}{\OId(oid)} = \Rgn(rid_1)$. As in the proof of \inv{S2}, $\refs(E)$ being empty,
+$(G, i)$ is a frame of $\sigma$, and $\loc{\sigma}{\OId(oid)} = \Rgn(rid_1)$ by
+Lemma~\ref{lem:enter-loc}. \inv{S3} for $\sigma$ gives a frame $(G'', k)$ of $\sigma$ with
+$G''.\rid = rid_1$ and $k \le i$. By Lemma~\ref{lem:enter-frames}, $(G'', k)$ is also a frame of
+$\sigma'$, which is the required witness.
+\end{proof}
+
+\begin{lemma}[\inv{HS1}] \lean{enter\_HS1}
+$\sigma' \vdash \inv{HS1}$.
+\end{lemma}
+\begin{proof}
+Let $\OId(oid) \in \refs(\sigma')$. By Lemma~\ref{lem:enter-contents}(b) it is in $\refs(\sigma)$, so
+$oid \in \oids(\sigma)$ by \inv{HS1} for $\sigma$, and hence $oid \in \oids(\sigma')$ by
+Lemma~\ref{lem:enter-contents}(c).
+\end{proof}
+
+\begin{lemma}[\inv{HS2}] \lean{enter\_HS2}
+$\sigma' \vdash \inv{HS2}$.
+\end{lemma}
+\begin{proof}
+If $\RId(rid_1) \in \refs(\sigma')$ then $\RId(rid_1) \in \refs(\sigma)$ by
+Lemma~\ref{lem:enter-contents}(b), so $rid_1 \in \dom(H) = \dom(H')$ by \inv{HS2} for $\sigma$ and
+Lemma~\ref{lem:status-update}(a).
+\end{proof}
+
+\begin{theorem} \lean{enter\_valid}
+If $\sigma \vdash \inv{ValidConfig}$ and $\sigma \xrightarrow{\texttt{enter}\ xf\ a} \sigma'$, then
+$\sigma' \vdash \inv{ValidConfig}$.
+\end{theorem}
+\begin{proof}
+The ten lemmas above.
+\end{proof}
