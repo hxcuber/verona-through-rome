@@ -1,9 +1,8 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Mutation.Stmt
-import Gc.Reachability.Reachable.Semantics
-import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Def
+module
+
+public import Gc.Reachability.Reachable.FrameReachableAtLaterFrame.Def
+
+@[expose] public section
 
 def StackReachable_invariant_for_suspended_region_objects (cmd : Stmt) : Prop :=
   ∀ cfg cfg' : RuntimeConfig, ValidConfig cfg → step cmd cfg = some cfg' →

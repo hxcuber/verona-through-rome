@@ -1,8 +1,10 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
-import Gc.Model.Validity
-import Gc.Model.Mutation.Stmt
-import Gc.Reachability.Reachable.Semantics
+module
+
+public import Gc.Model.Validity
+public import Gc.Model.Mutation.Stmt
+public import Gc.Reachability.Reachable.Semantics
+
+@[expose] public section
 
 def FrameReachable_at_later_frame_implies_FrameReachable_at_frame (cfg : RuntimeConfig) : Prop :=
   ∀ frame ∈ cfg.stackWithIndex, ∀ frame' ∈ cfg.stackWithIndex,

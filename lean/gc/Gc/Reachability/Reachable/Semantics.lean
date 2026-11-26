@@ -1,5 +1,9 @@
-import Gc.Model.Types
-import Gc.Model.Helpers
+module
+
+public import Gc.Model.Helpers
+public import Mathlib.Logic.Relation
+
+@[expose] public section
 
 def ReachableStep (cfg : RuntimeConfig) : Reference → Reference → Prop
   | Reference.RId rid, b =>
@@ -44,12 +48,8 @@ theorem RegionReachable_implies_FrameReachable (cfg : RuntimeConfig) (rid : Regi
     (h : RegionReachable cfg rid ref) :
     FrameReachable cfg frame.index ref := by
   induction h with
-  | bridge hlookup hbridge =>
-    subst hrid
-    exact FrameReachable.bridge hframe hlookup hbridge
-  | step hstep _ ih =>
-    subst hrid
-    exact FrameReachable.step hstep (ih hframe rfl)
+  | bridge hlookup hbridge => exact .bridge hframe (hrid ▸ hlookup) hbridge
+  | step hstep _ ih => exact .step hstep (ih hframe hrid)
 
 def StackReachable (cfg : RuntimeConfig) (ref : Reference) : Prop :=
     ∃ frame ∈ cfg.stackWithIndex, FrameReachable cfg frame.index ref
@@ -68,17 +68,12 @@ theorem RegionReachable_iff_reflTransGen (cfg : RuntimeConfig) (rid : RegionId) 
   constructor
   · intro h
     induction h with
-    | bridge hlookup hbridge =>
-      subst hbridge
-      exact ⟨_, hlookup, Relation.ReflTransGen.refl⟩
-    | step hstep _ ih =>
-      obtain ⟨region, hlookup, hrtg⟩ := ih
-      exact ⟨region, hlookup, hrtg.tail hstep⟩
+    | bridge hlookup hbridge => exact ⟨_, hlookup, hbridge ▸ .refl⟩
+    | step hstep _ ih => exact ih.imp fun _ ⟨hl, hr⟩ => ⟨hl, hr.tail hstep⟩
   · rintro ⟨region, hlookup, hrtg⟩
     induction hrtg with
-    | refl => exact RegionReachable.bridge hlookup rfl
-    | tail _ hstep ih =>
-      exact RegionReachable.step hstep ih
+    | refl => exact .bridge hlookup rfl
+    | tail _ hstep ih => exact .step hstep ih
 
 -- Same idea for `FrameReachable`, but with two possible roots (captured by `FrameRoot`) instead of one.
 theorem FrameReachable_iff_reflTransGen (cfg : RuntimeConfig) (fid : Index) (ref : Reference) :
@@ -87,19 +82,13 @@ theorem FrameReachable_iff_reflTransGen (cfg : RuntimeConfig) (fid : Index) (ref
   constructor
   · intro h
     induction h with
-    | var hmem hlookup =>
-      exact ⟨_, Or.inl ⟨_, hmem, rfl, _, hlookup⟩, Relation.ReflTransGen.refl⟩
-    | bridge hmem hlookup hbridge =>
-      subst hbridge
-      exact ⟨_, Or.inr ⟨_, hmem, rfl, _, hlookup, rfl⟩, Relation.ReflTransGen.refl⟩
-    | step hstep _ ih =>
-      obtain ⟨region, hlookup, hrtg⟩ := ih
-      exact ⟨region, hlookup, hrtg.tail hstep⟩
+    | var hmem hlookup => exact ⟨_, .inl ⟨_, hmem, rfl, _, hlookup⟩, .refl⟩
+    | bridge hmem hlookup hbridge => exact ⟨_, .inr ⟨_, hmem, rfl, _, hlookup, hbridge ▸ rfl⟩, .refl⟩
+    | step hstep _ ih => exact ih.imp fun _ ⟨hr, ht⟩ => ⟨hr, ht.tail hstep⟩
   · rintro ⟨start, hroot, hrtg⟩
     induction hrtg with
     | refl =>
-      rcases hroot with ⟨frame, hmem, hfid, var, hlookup⟩ | ⟨frame, hmem, hfid, region, hlookup, hstart⟩
-      · subst hfid; exact FrameReachable.var hmem hlookup
-      · subst hfid; subst hstart; exact FrameReachable.bridge hmem hlookup rfl
-    | tail _ hstep ih =>
-      exact FrameReachable.step hstep ih
+      rcases hroot with ⟨frame, hmem, rfl, var, hlookup⟩ | ⟨frame, hmem, rfl, region, hlookup, rfl⟩
+      · exact .var hmem hlookup
+      · exact .bridge hmem hlookup rfl
+    | tail _ hstep ih => exact .step hstep ih

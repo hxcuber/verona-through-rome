@@ -1,5 +1,8 @@
-import Gc.Model.Helpers
-import Gc.Model.Types
+module
+
+public import Gc.Model.Helpers
+
+@[expose] public section
 
 def makeRegion (x : VarName) (cfg : RuntimeConfig) : Option (RuntimeConfig) := do
   let frame ← cfg.stack.getLast?
@@ -27,10 +30,4 @@ theorem makeRegion_cases {cfg cfg' : RuntimeConfig} (h : makeRegion x cfg = some
           bridgeObjectId := cfg.freshObjectId
         } } := by
   unfold makeRegion at h
-  cases hframe : cfg.stack.getLast? with
-  | none => rw [hframe] at h; contradiction
-  | some frame =>
-    rw [hframe] at h
-    dsimp at h
-    rw [Option.some_inj] at h
-    exact ⟨frame, rfl, h.symm⟩
+  rcases hframe : cfg.stack.getLast? with _ | frame <;> simp_all
