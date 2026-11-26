@@ -7,13 +7,13 @@ In both rules $\sigma = \langle S :: F, H\rangle$ and $n = |S|$, the index of $F
   \inferrule* [lab=field-asgn-stack]
     {\mathit{resolveV}(x, \sigma) = \OId(oid) \\ \mathit{resolveV}(y, \sigma) = \OId(oid_y) \\
      \loc{\sigma}{\OId(oid)} = \Stk(n) \\ F.\omap(oid) = o}
-    {\sigma \xrightarrow{\texttt{x.f := y}} \langle S :: F',\ H \rangle}
+    {\sigma \xrightarrow{\texttt{fieldAsgn}\ (x.f)\ y} \langle S :: F',\ H \rangle}
   \\
   \inferrule* [lab=field-asgn-region]
     {\mathit{resolveV}(x, \sigma) = \OId(oid) \\ \mathit{resolveV}(y, \sigma) = \OId(oid_y) \\
      \loc{\sigma}{\OId(oid)} = \Rgn(F.\rid) \\ \loc{\sigma}{\OId(oid_y)} = \Rgn(F.\rid) \\
      H(F.\rid) = R \\ R.\status = \Open \\ R.\omap(oid) = o}
-    {\sigma \xrightarrow{\texttt{x.f := y}} \langle S :: F,\ H[F.\rid \mapsto R'] \rangle}
+    {\sigma \xrightarrow{\texttt{fieldAsgn}\ (x.f)\ y} \langle S :: F,\ H[F.\rid \mapsto R'] \rangle}
 \end{mathpar}
 where $F' = F$ with $\omap[oid \mapsto o[f \mapsto \OId(oid_y)]]$, and $R' = R$ with
 $\omap[oid \mapsto o[f \mapsto \OId(oid_y)]]$.
@@ -303,7 +303,7 @@ $\loc{\sigma}{\OId(oid_1)} = \Rgn(rid')$.
 
 First, any indexed frame $(G_0, k)$ of $\sigma$ with $G_0.\rid = rid'$ and $k \le i$ yields the
 required witness in $\sigma'$: by Lemma~\ref{lem:fieldAsgn-shape}(a) the two stacks agree position by
-position on region ids, so Lemma~\ref{lem:frame-index}(d) gives an indexed frame $(G_1, k)$ of
+position on region ids, so Lemma~\ref{lem:frame-index}(b) gives an indexed frame $(G_1, k)$ of
 $\sigma'$ with $G_1.\rid = G_0.\rid = rid'$. It remains to find such a $(G_0, k)$. Apply
 Lemma~\ref{lem:fieldAsgn-frames}:
 \begin{itemize}[nosep]
@@ -336,7 +336,7 @@ $rid \in \dom(H)$, which equals the heap domain of $\sigma'$ by Lemma~\ref{lem:f
 \end{proof}
 
 \begin{theorem} \lean{fieldAsgn\_valid}
-If $\sigma \vdash \inv{ValidConfig}$ and $\sigma \xrightarrow{\texttt{x.f := y}} \sigma'$, then
+If $\sigma \vdash \inv{ValidConfig}$ and $\sigma \xrightarrow{\texttt{fieldAsgn}\ (x.f)\ y} \sigma'$, then
 $\sigma' \vdash \inv{ValidConfig}$.
 \end{theorem}
 \begin{proof}

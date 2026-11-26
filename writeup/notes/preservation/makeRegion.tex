@@ -28,7 +28,6 @@ references stored in frames (Lemma~\ref{lem:makeRegion-stack-oid}), and the ten 
 
 \begin{lemma}[Frames after \texttt{makeRegion}]
 \label{lem:makeRegion-frames}
-\lean{Gc/Model/Preservation/MakeRegion.lean}
 \begin{enumerate}[nosep,label=(\alph*)]
   \item For every indexed frame $(G', i)$ of $\sigma'$ there is an indexed frame $(G, i)$ of $\sigma$
     such that every element of $\refs(G')$ is in $\refs(G)$ or equals $\RId(\rho^*)$;
@@ -50,7 +49,6 @@ has the same region id.
 
 \begin{lemma}[The heap after \texttt{makeRegion}]
 \label{lem:makeRegion-heap}
-\lean{Gc/Model/Preservation/MakeRegion.lean}
 \begin{enumerate}[nosep,label=(\alph*)]
   \item The entries of $H'$ are $(\rho^*, R^*)$ followed by the entries of $H$;
     \leanpart{heap\_entries}
