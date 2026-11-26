@@ -8,3 +8,238 @@
     {\langle S :: F, H \rangle \xrightarrow{\texttt{makeObjStack}\ x} \langle S :: F',\ H \rangle}
 \end{mathpar}
 where $F' = F$ with $\vmap[x \mapsto \OId(o^*)]$ and $\omap[o^* \mapsto \emptyset]$.
+
+\texttt{makeObjStack} allocates an empty object in the $\omap$ of the top frame and binds $x$ to it.
+Throughout this section fix $\sigma = \langle S :: F, H\rangle$ with
+$\sigma \vdash \inv{ValidConfig}$, and $\sigma' = \langle S :: F', H\rangle$ with
+$o^* = \mathit{freshObjectId}(\sigma)$ and $F'$ as above. Let $n = |S|$, the index of $F$ in $\sigma$
+and of $F'$ in $\sigma'$. This is exactly what \texttt{makeObjStack\_cases} extracts from
+$\texttt{makeObjStack}\ x\ \sigma = \mathsf{some}\ \sigma'$. By Lemma~\ref{lem:fresh}(b),
+$o^* \notin \dom(F.\omap)$.
+
+The proof has three parts: lemmas relating the top frame, the indexed frames, the object ids and the
+stored references of $\sigma'$ to those of $\sigma$; one lemma that describes every object location of
+$\sigma'$ in terms of $\sigma$ (Lemma~\ref{lem:makeObjStack-loc}); and the ten invariants.
+
+\subsection{Supporting lemmas}
+
+\begin{lemma}[References of the new top frame]
+\label{lem:makeObjStack-frame-refs}
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item there is a list $\ell \sublist \refs(F)$ with $\refs(F') \perm \OId(o^*) :: \ell$;
+    \leanpart{newFrame\_refs\_perm}
+  \item every element of $\refs(F')$ is $\OId(o^*)$ or is in $\refs(F)$.
+    \leanpart{newFrame\_refs\_mem}
+\end{enumerate}
+\leanform{Both are stated for any $o \notin \dom(F.\omap)$ in place of $o^*$.}
+\end{lemma}
+\begin{proof}
+(a) Since $o^* \notin \dom(F.\omap)$, the write $\omap[o^* \mapsto \emptyset]$ adds a new entry and
+removes none, and the empty object has no references. So the objects of $F'.\omap$ contribute the same
+references as those of $F.\omap$. The values of $F'.\vmap$ are $\OId(o^*)$ followed by the values of
+$F.\vmap$ with the entry at $x$, if there is one, removed. Taking $\ell$ to be the references of the
+objects of $F.\omap$ followed by these remaining values gives $\ell \sublist \refs(F)$ and
+$\refs(F') \perm \OId(o^*) :: \ell$.
+
+(b) Immediate from (a), as every element of $\ell$ is in $\refs(F)$.
+\end{proof}
+
+\begin{lemma}[Indexed frames]
+\label{lem:makeObjStack-frames}
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item For every indexed frame $(G', i)$ of $\sigma'$ there is an indexed frame $(G, i)$ of $\sigma$
+    with $G.\rid = G'.\rid$ such that every $r \in \refs(G')$ either is in $\refs(G)$, or satisfies
+    $r = \OId(o^*)$ and $i = n$; \leanpart{swi\_down}
+  \item for every indexed frame $(G, i)$ of $\sigma$ there is an indexed frame $(G', i)$ of $\sigma'$
+    with $G'.\rid = G.\rid$. \leanpart{swi\_up}
+\end{enumerate}
+\end{lemma}
+\begin{proof}
+By Lemma~\ref{lem:stack-split}(a), the indexed frames of $\sigma$ are those of $S$ followed by
+$(F, n)$, and those of $\sigma'$ are those of $S$ followed by $(F', n)$. A frame of $S$ is its own
+counterpart in both directions. The remaining frames $(F, n)$ and $(F', n)$ are counterparts of each
+other, since $F'.\rid = F.\rid$. For the references in (a) in this case, apply
+Lemma~\ref{lem:makeObjStack-frame-refs}(b): an $r \in \refs(F')$ is in $\refs(F)$, or is
+$\OId(o^*)$, and the index is $n$.
+\end{proof}
+
+\begin{lemma}[Object ids]
+\label{lem:makeObjStack-oids}
+\lean{objectIds\_perm}
+$\oids(\sigma') \perm o^* :: \oids(\sigma)$.
+\end{lemma}
+\begin{proof}
+Since $o^* \notin \dom(F.\omap)$, we have $\dom(F'.\omap) \perm o^* :: \dom(F.\omap)$. Hence, by
+Lemma~\ref{lem:stack-split}(c),
+\begin{align*}
+  \oids(\sigma') &\perm \oids(S) \cat (o^* :: \dom(F.\omap)) \cat \oids(H) \\
+    &\perm o^* :: \bigl(\oids(S) \cat \dom(F.\omap) \cat \oids(H)\bigr) \\
+    &= o^* :: \oids(\sigma). \qedhere
+\end{align*}
+\end{proof}
+
+\begin{lemma}[Stored references]
+\label{lem:makeObjStack-refs}
+\lean{refs\_mem}
+Every element of $\refs(\sigma')$ is $\OId(o^*)$ or is an element of $\refs(\sigma)$.
+\end{lemma}
+\begin{proof}
+Let $r \in \refs(\sigma')$. By Lemma~\ref{lem:stack-split}(d) there are three cases. If
+$r \in \refs(S)$ or $r \in \refs(H)$, then $r \in \refs(\sigma)$, both being parts of $\sigma$. If
+$r \in \refs(F')$, then by Lemma~\ref{lem:makeObjStack-frame-refs}(b) either $r = \OId(o^*)$ or
+$r \in \refs(F)$, and in the latter case $r \in \refs(\sigma)$.
+\end{proof}
+
+\begin{lemma}[No region holds the fresh object]
+\label{lem:makeObjStack-fresh-heap}
+\lean{fresh\_heap\_find\_none}
+The heap search of Definition~\ref{def:loc} for $o^*$ fails in $H$.
+\end{lemma}
+\begin{proof}
+A region $R$ of $H$ with $o^* \in \dom(R.\omap)$ would put $o^*$ in $\oids(H)$
+(Lemma~\ref{lem:stored}(e)), hence in $\oids(\sigma)$, contradicting Lemma~\ref{lem:fresh}(a).
+\end{proof}
+
+\begin{lemma}[Locations after \texttt{makeObjStack}]
+\label{lem:makeObjStack-loc}
+\lean{loc\_eq}
+For every $oid$,
+\[
+  \loc{\sigma'}{\OId(oid)} =
+  \begin{cases}
+    \Stk(n) & \text{if } oid = o^*,\\
+    \loc{\sigma}{\OId(oid)} & \text{otherwise.}
+  \end{cases}
+\]
+\end{lemma}
+\begin{proof}
+The heap is unchanged, so the heap search is the same in $\sigma$ and $\sigma'$. The stack search in
+$\sigma'$ looks first at $(F', n)$, and in $\sigma$ first at $(F, n)$; both then continue through the
+indexed frames of $S$.
+\begin{itemize}[nosep]
+  \item If $oid = o^*$, then $oid \in \dom(F'.\omap)$, so the stack search in $\sigma'$ returns
+    $(F', n)$. The heap search fails by Lemma~\ref{lem:makeObjStack-fresh-heap}. So
+    $\loc{\sigma'}{\OId(oid)} = \Stk(n)$.
+  \item If $oid \ne o^*$, then $oid \in \dom(F'.\omap)$ iff $oid \in \dom(F.\omap)$. If it is in
+    both, the stack searches return $(F', n)$ and $(F, n)$, with the same index. If it is in neither,
+    both searches continue through $S$ and return the same result. Either way the two locations agree
+    by Lemma~\ref{lem:loc-searches}. \qedhere
+\end{itemize}
+\end{proof}
+
+\subsection{The invariants}
+
+\begin{lemma}[\inv{L1}] \lean{makeObjStack\_L1}
+$\sigma' \vdash \inv{L1}$.
+\end{lemma}
+\begin{proof}
+$o^* \notin \oids(\sigma)$ by Lemma~\ref{lem:fresh}(a), and $\oids(\sigma)$ is duplicate-free by
+\inv{L1} for $\sigma$, so $o^* :: \oids(\sigma)$ is duplicate-free. By
+Lemma~\ref{lem:makeObjStack-oids}, so is $\oids(\sigma')$.
+\end{proof}
+
+\begin{lemma}[\inv{L2}] \lean{makeObjStack\_L2}
+$\sigma' \vdash \inv{L2}$.
+\end{lemma}
+\begin{proof}
+Let $G$ be a frame of $S :: F'$. If $G \in S$, then $G$ is a frame of $S :: F$ and \inv{L2} for
+$\sigma$ applies, the heap being unchanged. If $G = F'$, then $G.\rid = F.\rid$, and \inv{L2} for
+$\sigma$ applied to $F$ shows that $H(F.\rid)$ is an $\Open$ region.
+\end{proof}
+
+\begin{lemma}[\inv{H1}] \lean{makeObjStack\_H1}
+$\sigma' \vdash \inv{H1}$.
+\end{lemma}
+\begin{proof}
+\inv{H1} depends only on the heap, which is unchanged.
+\end{proof}
+
+\begin{lemma}[\inv{H2}] \lean{makeObjStack\_H2}
+$\sigma' \vdash \inv{H2}$.
+\end{lemma}
+\begin{proof}
+Fix $rid$, let $\#$ count the occurrences of $\RId(rid)$ in a list, and take $\ell$ as in
+Lemma~\ref{lem:makeObjStack-frame-refs}(a). Since $\OId(o^*) \ne \RId(rid)$,
+$\#\refs(F') = \#\ell \le \#\refs(F)$. Hence, using Lemma~\ref{lem:stack-split}(c),
+\[
+  \#\refs(S :: F') + \#\refs(H) = \#\refs(S) + \#\refs(F') + \#\refs(H)
+  \le \#\refs(S :: F) + \#\refs(H) \le 1
+\]
+by \inv{H2} for $\sigma$.
+\end{proof}
+
+\begin{lemma}[\inv{H3}] \lean{makeObjStack\_H3}
+$\sigma' \vdash \inv{H3}$.
+\end{lemma}
+\begin{proof}
+Let $H(rid) = R$ and $\OId(oid) \in \refs(R)$. Then $\OId(oid) \in \refs(\sigma)$
+(Lemma~\ref{lem:stored}(b)), so $oid \ne o^*$ by Lemma~\ref{lem:fresh}(c). By
+Lemma~\ref{lem:makeObjStack-loc} and \inv{H3} for $\sigma$,
+$\loc{\sigma'}{\OId(oid)} = \loc{\sigma}{\OId(oid)} = \Rgn(rid)$.
+\end{proof}
+
+\begin{lemma}[\inv{S1}] \lean{makeObjStack\_S1}
+$\sigma' \vdash \inv{S1}$.
+\end{lemma}
+\begin{proof}
+$F'.\rid = F.\rid$, so $[G.\rid \mid G \in S :: F']$ is the same list as
+$[G.\rid \mid G \in S :: F]$, which is duplicate-free by \inv{S1} for $\sigma$.
+\end{proof}
+
+\begin{lemma}[\inv{S2}] \lean{makeObjStack\_S2}
+$\sigma' \vdash \inv{S2}$.
+\end{lemma}
+\begin{proof}
+Let $(G', i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G')$ and
+$\loc{\sigma'}{\OId(oid)} = \Stk(j)$. Take the counterpart $(G, i)$ of
+Lemma~\ref{lem:makeObjStack-frames}(a), and split on $oid$ as in
+Lemma~\ref{lem:makeObjStack-loc}.
+\begin{itemize}[nosep]
+  \item $oid = o^*$. Then $j = n$. It cannot be that $\OId(oid) \in \refs(G)$: that would give
+    $\OId(oid) \in \refs(\sigma)$ (Lemma~\ref{lem:stored}(d)) and so $oid \ne o^*$
+    (Lemma~\ref{lem:fresh}(c)). Hence the other alternative of
+    Lemma~\ref{lem:makeObjStack-frames}(a) holds, giving $i = n$. So $j \le i$.
+  \item $oid \ne o^*$. Then $\loc{\sigma}{\OId(oid)} = \Stk(j)$. Since $\OId(oid) \ne \OId(o^*)$,
+    Lemma~\ref{lem:makeObjStack-frames}(a) gives $\OId(oid) \in \refs(G)$, and \inv{S2} for $\sigma$
+    gives $j \le i$. \qedhere
+\end{itemize}
+\end{proof}
+
+\begin{lemma}[\inv{S3}] \lean{makeObjStack\_S3}
+$\sigma' \vdash \inv{S3}$.
+\end{lemma}
+\begin{proof}
+Let $(G', i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G')$ and
+$\loc{\sigma'}{\OId(oid)} = \Rgn(rid)$. By Lemma~\ref{lem:makeObjStack-loc}, $oid \ne o^*$ (otherwise
+the location would be a stack location), so $\loc{\sigma}{\OId(oid)} = \Rgn(rid)$. Take the
+counterpart $(G, i)$ of Lemma~\ref{lem:makeObjStack-frames}(a); as $oid \ne o^*$,
+$\OId(oid) \in \refs(G)$. \inv{S3} for $\sigma$ gives an indexed frame $(G'', k)$ of $\sigma$ with
+$G''.\rid = rid$ and $k \le i$. Lemma~\ref{lem:makeObjStack-frames}(b) gives an indexed frame of
+$\sigma'$ at index $k$ with region id $rid$, which is the required witness.
+\end{proof}
+
+\begin{lemma}[\inv{HS1}] \lean{makeObjStack\_HS1}
+$\sigma' \vdash \inv{HS1}$.
+\end{lemma}
+\begin{proof}
+Let $\OId(oid) \in \refs(\sigma')$. By Lemma~\ref{lem:makeObjStack-oids} it is enough to show
+$oid \in o^* :: \oids(\sigma)$. By Lemma~\ref{lem:makeObjStack-refs}, either $oid = o^*$, or
+$\OId(oid) \in \refs(\sigma)$, in which case $oid \in \oids(\sigma)$ by \inv{HS1} for $\sigma$.
+\end{proof}
+
+\begin{lemma}[\inv{HS2}] \lean{makeObjStack\_HS2}
+$\sigma' \vdash \inv{HS2}$.
+\end{lemma}
+\begin{proof}
+Let $\RId(rid) \in \refs(\sigma')$. It is not $\OId(o^*)$, so by
+Lemma~\ref{lem:makeObjStack-refs} it is in $\refs(\sigma)$. \inv{HS2} for $\sigma$ gives
+$rid \in \dom(H)$, and the heap of $\sigma'$ is $H$.
+\end{proof}
+
+\begin{theorem} \lean{makeObjStack\_valid}
+If $\sigma \vdash \inv{ValidConfig}$ and $\sigma \xrightarrow{\texttt{makeObjStack}\ x} \sigma'$, then
+$\sigma' \vdash \inv{ValidConfig}$.
+\end{theorem}
+\begin{proof}
+The ten lemmas above.
+\end{proof}
