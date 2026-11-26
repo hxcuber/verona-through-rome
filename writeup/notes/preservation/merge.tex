@@ -1,3 +1,12 @@
 %======================================================================
 \section{\texttt{merge}}
 %======================================================================
+
+\begin{mathpar}
+  \inferrule* [lab=merge]
+    {F.\vmap(x) = \RId(rid') \\ H(F.\rid) = R \\ H(rid') = R' \\ R.\status = \Open \\ R'.\status = \Closed}
+    {\langle S :: F, H \rangle \xrightarrow{\texttt{merge}\ x}
+     \langle S :: F',\ (H \setminus rid')[F.\rid \mapsto R_m] \rangle}
+\end{mathpar}
+where $F' = F$ with $\vmap[x \mapsto \OId(R'.\bridge)]$, $R_m = R$ with
+$\omap := R.\omap \cup R'.\omap$, and $H \setminus rid'$ is $H$ with the key $rid'$ removed.

@@ -1,3 +1,11 @@
 %======================================================================
 \section{\texttt{makeRegion}}
 %======================================================================
+
+\begin{mathpar}
+  \inferrule* [lab=make-region]
+    {o^* = \mathit{freshObjectId}(\langle S :: F, H\rangle) \\ \rho^* = \mathit{freshRegionId}(\langle S :: F, H\rangle)}
+    {\langle S :: F, H \rangle \xrightarrow{\texttt{makeRegion}\ x} \langle S :: F',\ H[\rho^* \mapsto R^*] \rangle}
+\end{mathpar}
+where $F' = F$ with $\vmap[x \mapsto \RId(\rho^*)]$ and
+$R^* = (o^*, [o^* \mapsto \emptyset], \Closed)$.

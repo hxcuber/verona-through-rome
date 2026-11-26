@@ -1,3 +1,36 @@
 %======================================================================
 \section{\texttt{swap}}
 %======================================================================
+
+In all four rules $\sigma = \langle S :: F, H\rangle$, $n = |S|$ is the index of $F$,
+$\mathit{resolveV}(y, \sigma) = \OId(yoid)$ and $\mathit{resolveFA}(y.f, \sigma) = \mathit{yfRef}$, and
+both $\loc{\sigma}{\OId(yoid)}$ and $\loc{\sigma}{\mathit{yfRef}}$ are defined.
+\begin{mathpar}
+  \inferrule* [lab=swap-stack]
+    {x \ne F.\mathit{bridgeVar} \\ F.\vmap(x) = \mathit{xRef} \\
+     \loc{\sigma}{\OId(yoid)} = \Stk(n) \\ F.\omap(yoid) = o}
+    {\sigma \xrightarrow{\texttt{swap x y.f}} \langle S :: F_s,\ H \rangle}
+  \\
+  \inferrule* [lab=swap-region-object]
+    {x \ne F.\mathit{bridgeVar} \\ F.\vmap(x) = \OId(xoid) \\ \loc{\sigma}{\OId(xoid)} = \Rgn(F.\rid) \\
+     \loc{\sigma}{\OId(yoid)} = \Rgn(F.\rid) \\ H(F.\rid) = R \\ R.\status = \Open \\ R.\omap(yoid) = o}
+    {\sigma \xrightarrow{\texttt{swap x y.f}} \langle S :: F_r,\ H[F.\rid \mapsto R_r(\OId(xoid))] \rangle}
+  \\
+  \inferrule* [lab=swap-region-region]
+    {x \ne F.\mathit{bridgeVar} \\ F.\vmap(x) = \RId(xrid) \\
+     \loc{\sigma}{\OId(yoid)} = \Rgn(F.\rid) \\ H(F.\rid) = R \\ R.\status = \Open \\ R.\omap(yoid) = o}
+    {\sigma \xrightarrow{\texttt{swap x y.f}} \langle S :: F_r,\ H[F.\rid \mapsto R_r(\RId(xrid))] \rangle}
+  \\
+  \inferrule* [lab=swap-region-bridge]
+    {x = F.\mathit{bridgeVar} \\ \loc{\sigma}{\OId(yoid)} = \Rgn(F.\rid) \\
+     \mathit{yfRef} = \OId(yfoid) \\ \loc{\sigma}{\OId(yfoid)} = \Rgn(F.\rid) \\
+     H(F.\rid) = R \\ R.\omap(yoid) = o}
+    {\sigma \xrightarrow{\texttt{swap x y.f}} \langle S :: F,\ H[F.\rid \mapsto R_b] \rangle}
+\end{mathpar}
+where
+\begin{itemize}[nosep]
+  \item $F_s = F$ with $\vmap[x \mapsto \mathit{yfRef}]$ and $\omap[yoid \mapsto o[f \mapsto \mathit{xRef}]]$;
+  \item $F_r = F$ with $\vmap[x \mapsto \mathit{yfRef}]$;
+  \item $R_r(v) = R$ with $\omap[yoid \mapsto o[f \mapsto v]]$;
+  \item $R_b = R$ with $\bridge := yfoid$ and $\omap[yoid \mapsto o[f \mapsto \OId(R.\bridge)]]$.
+\end{itemize}

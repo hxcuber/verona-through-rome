@@ -1,3 +1,10 @@
 %======================================================================
 \section{\texttt{makeObjStack}}
 %======================================================================
+
+\begin{mathpar}
+  \inferrule* [lab=make-obj-stack]
+    {o^* = \mathit{freshObjectId}(\langle S :: F, H\rangle)}
+    {\langle S :: F, H \rangle \xrightarrow{\texttt{makeObjStack}\ x} \langle S :: F',\ H \rangle}
+\end{mathpar}
+where $F' = F$ with $\vmap[x \mapsto \OId(o^*)]$ and $\omap[o^* \mapsto \emptyset]$.

@@ -1,3 +1,17 @@
 %======================================================================
 \section{\texttt{varAsgn}}
 %======================================================================
+
+In both rules $\sigma = \langle S :: F, H\rangle$.
+\begin{mathpar}
+  \inferrule* [lab=var-asgn-bridge]
+    {\mathit{resolveFA}(y.f, \sigma) = \OId(oid) \\ x = F.\mathit{bridgeVar} \\
+     \loc{\sigma}{\OId(oid)} = \Rgn(F.\rid) \\ H(F.\rid) = R}
+    {\sigma \xrightarrow{\texttt{x := y.f}} \langle S :: F,\ H[F.\rid \mapsto R'] \rangle}
+  \\
+  \inferrule* [lab=var-asgn-stack]
+    {\mathit{resolveFA}(y.f, \sigma) = \OId(oid) \\ x \ne F.\mathit{bridgeVar} \\
+     \mathit{resolveV}(x, \sigma) = \noloc}
+    {\sigma \xrightarrow{\texttt{x := y.f}} \langle S :: F',\ H \rangle}
+\end{mathpar}
+where $R' = R$ with $\bridge := oid$, and $F' = F$ with $\vmap[x \mapsto \OId(oid)]$.

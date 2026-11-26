@@ -1,3 +1,10 @@
 %======================================================================
 \section{\texttt{enter}}
 %======================================================================
+
+\begin{mathpar}
+  \inferrule* [lab=enter]
+    {\mathit{resolveFA}(xf, \langle S, H\rangle) = \RId(rid) \\ H(rid) = R \\ R.\status = \Closed}
+    {\langle S, H \rangle \xrightarrow{\texttt{enter}\ xf\ a} \langle S :: (rid, a, \emptyset, \emptyset),\ H[rid \mapsto R'] \rangle}
+\end{mathpar}
+where $R' = R$ with $\status := \Open$.
