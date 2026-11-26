@@ -66,15 +66,15 @@ $\OId(o^*)$, and the index is $n$.
 \begin{lemma}[Object ids]
 \label{lem:makeObjStack-oids}
 \lean{objectIds\_perm}
-$\oids(\sigma') \perm o^* :: \oids(\sigma)$.
+$\oids(\sigma') \perm [o^*] \cat \oids(\sigma)$.
 \end{lemma}
 \begin{proof}
-Since $o^* \notin \dom(F.\omap)$, we have $\dom(F'.\omap) \perm o^* :: \dom(F.\omap)$. Hence, by
+Since $o^* \notin \dom(F.\omap)$, we have $\dom(F'.\omap) \perm [o^*] \cat \dom(F.\omap)$. Hence, by
 Lemma~\ref{lem:stack-split}(c),
 \begin{align*}
-  \oids(\sigma') &\perm \oids(S) \cat (o^* :: \dom(F.\omap)) \cat \oids(H) \\
-    &\perm o^* :: \bigl(\oids(S) \cat \dom(F.\omap) \cat \oids(H)\bigr) \\
-    &= o^* :: \oids(\sigma). \qedhere
+  \oids(\sigma') &\perm \oids(S) \cat ([o^*] \cat \dom(F.\omap)) \cat \oids(H) \\
+    &\perm [o^*] \cat \bigl(\oids(S) \cat \dom(F.\omap) \cat \oids(H)\bigr) \\
+    &= [o^*] \cat \oids(\sigma). \qedhere
 \end{align*}
 \end{proof}
 
@@ -134,7 +134,7 @@ $\sigma' \vdash \inv{L1}$.
 \end{lemma}
 \begin{proof}
 $o^* \notin \oids(\sigma)$ by Lemma~\ref{lem:fresh}(a), and $\oids(\sigma)$ is duplicate-free by
-\inv{L1} for $\sigma$, so $o^* :: \oids(\sigma)$ is duplicate-free. By
+\inv{L1} for $\sigma$, so $[o^*] \cat \oids(\sigma)$ is duplicate-free. By
 Lemma~\ref{lem:makeObjStack-oids}, so is $\oids(\sigma')$.
 \end{proof}
 
@@ -223,7 +223,7 @@ $\sigma' \vdash \inv{HS1}$.
 \end{lemma}
 \begin{proof}
 Let $\OId(oid) \in \refs(\sigma')$. By Lemma~\ref{lem:makeObjStack-oids} it is enough to show
-$oid \in o^* :: \oids(\sigma)$. By Lemma~\ref{lem:makeObjStack-refs}, either $oid = o^*$, or
+$oid \in [o^*] \cat \oids(\sigma)$. By Lemma~\ref{lem:makeObjStack-refs}, either $oid = o^*$, or
 $\OId(oid) \in \refs(\sigma)$, in which case $oid \in \oids(\sigma)$ by \inv{HS1} for $\sigma$.
 \end{proof}
 

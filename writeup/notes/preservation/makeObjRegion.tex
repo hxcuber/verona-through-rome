@@ -61,18 +61,18 @@ $\OId(o^*)$ or in $\refs(F)$, and $F'.\rid = F.\rid$.
 \begin{lemma}[Object ids after \texttt{makeObjRegion}]
 \label{lem:makeObjRegion-oids}
 \lean{objectIds\_perm}
-$\oids(\sigma') \perm o^* :: \oids(\sigma)$, where $::$ here adds an element at the front of a list.
+$\oids(\sigma') \perm [o^*] \cat \oids(\sigma)$.
 \end{lemma}
 \begin{proof}
 On the stack, $F'.\omap = F.\omap$, so $\oids(S :: F') = \oids(S :: F)$. On the heap, let
 $H_0 = H[F.\rid \mapsto R]$. The heaps $H'$ and $H_0$ both have the entry for $F.\rid$ at the front,
 followed by the same other entries, and by Lemma~\ref{lem:makeObjRegion-region}
-$\dom(R'.\omap) = o^* :: \dom(R.\omap)$. Hence $\oids(H') = o^* :: \oids(H_0)$. By
+$\dom(R'.\omap) = [o^*] \cat \dom(R.\omap)$. Hence $\oids(H') = [o^*] \cat \oids(H_0)$. By
 Lemma~\ref{lem:heap-insert}(c), $\oids(H_0) \perm \oids(H)$. Therefore
 \begin{align*}
-  \oids(\sigma') &= \oids(S :: F) \cat (o^* :: \oids(H_0)) \\
-    &\perm \oids(S :: F) \cat (o^* :: \oids(H))
-     \perm o^* :: \oids(\sigma). \qedhere
+  \oids(\sigma') &= \oids(S :: F) \cat ([o^*] \cat \oids(H_0)) \\
+    &\perm \oids(S :: F) \cat ([o^*] \cat \oids(H))
+     \perm [o^*] \cat \oids(\sigma). \qedhere
 \end{align*}
 \end{proof}
 
@@ -147,7 +147,7 @@ $\sigma' \vdash \inv{L1}$.
 \end{lemma}
 \begin{proof}
 By Lemma~\ref{lem:fresh}(a), $o^* \notin \oids(\sigma)$, and $\oids(\sigma)$ is duplicate-free by
-\inv{L1}, so $o^* :: \oids(\sigma)$ is duplicate-free. By Lemma~\ref{lem:makeObjRegion-oids} so is
+\inv{L1}, so $[o^*] \cat \oids(\sigma)$ is duplicate-free. By Lemma~\ref{lem:makeObjRegion-oids} so is
 $\oids(\sigma')$.
 \end{proof}
 
@@ -245,7 +245,7 @@ $\sigma' \vdash \inv{HS1}$.
 \begin{proof}
 Let $\OId(oid) \in \refs(\sigma')$. By Lemma~\ref{lem:makeObjRegion-refs}, either $oid = o^*$, or
 $\OId(oid) \in \refs(\sigma)$ and then $oid \in \oids(\sigma)$ by \inv{HS1} for $\sigma$. In both
-cases $oid \in o^* :: \oids(\sigma)$, so $oid \in \oids(\sigma')$ by
+cases $oid \in [o^*] \cat \oids(\sigma)$, so $oid \in \oids(\sigma')$ by
 Lemma~\ref{lem:makeObjRegion-oids}.
 \end{proof}
 

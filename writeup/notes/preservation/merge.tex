@@ -31,7 +31,6 @@ invariants follow from these.
 
 \begin{lemma}[The two merged regions]
 \label{lem:merge-regions}
-\lean{Gc/Model/Preservation/Merge.lean}
 \begin{enumerate}[nosep,label=(\alph*)]
   \item $rid' \ne F.\rid$; \leanpart{merge\_corollary\_rid\_ne\_regionId}
   \item $\dom(R.\omap)$ and $\dom(R'.\omap)$ are disjoint;
@@ -57,7 +56,6 @@ concatenation in (c).
 
 \begin{lemma}[The merged heap]
 \label{lem:merge-heap}
-\lean{Gc/Model/Preservation/Merge.lean}
 Let $T$ be the list of entries of $H$ with the entries at keys $rid'$ and $F.\rid$ removed.
 \begin{enumerate}[nosep,label=(\alph*)]
   \item For every $r$: $H'(r) = R_m$ if $r = F.\rid$; $H'(r)$ is undefined if $r = rid'$; and
@@ -77,7 +75,7 @@ Let $T$ be the list of entries of $H$ with the entries at keys $rid'$ and $F.\ri
 \leanform{(d) and (e) take $rid' \ne F.\rid$ as hypothesis; (f) also takes
 $\langle S :: F, H\rangle \vdash \inv{L1}$. (a) is stated for any heap $K$, keys $rid, rid'$ and region
 $m$, as $((K \setminus rid')[rid \mapsto m])(r) = \mathsf{if}\ r = rid\ \mathsf{then}\ m\
-\mathsf{else\ if}\ r = rid'\ \mathsf{then}\ \noloc\ \mathsf{else}\ K(r)$. In (b), $T$ is
+\mathsf{else\ if}\ r = rid'\ \mathsf{then}\ \mathsf{none}\ \mathsf{else}\ K(r)$. In (b), $T$ is
 $\mathtt{kerase}\ F.\rid\ (\mathtt{kerase}\ rid'\ H.\mathit{entries})$; (b) has no lemma of its own: it is \texttt{AList.entries\_insert} and
 \texttt{List.kerase\_sublist}, used inline in \texttt{merge\_heap\_flatten\_perm} and
 \texttt{merge\_H1}. (c) is $l \perm (a, b) :: \mathtt{kerase}\ a\ l$ for $(a,b) \in l$ with
@@ -103,7 +101,6 @@ $f = \refs$.
 
 \begin{lemma}[Frames after \texttt{merge}]
 \label{lem:merge-frames}
-\lean{Gc/Model/Preservation/Merge.lean}
 \begin{enumerate}[nosep,label=(\alph*)]
   \item $[G.\rid \mid G \in S :: F'] = [G.\rid \mid G \in S :: F]$
     \leanpart{merge\_stack\_regionIds}\\
@@ -114,10 +111,11 @@ $f = \refs$.
   \item for every $oid$, the stack search of Definition~\ref{def:loc} succeeds in $\sigma'$ iff it
     succeeds in $\sigma$, and then both return the same index;
     \leanpart{merge\_findRev\_index}
-  \item for every $(G', i) \in S :: F'$ there is $(G, i) \in S :: F$ with $G.\rid = G'.\rid$ such
-    that every element of $\refs(G')$ is in $\refs(G)$, or is $\OId(b)$ with $G'.\rid = F.\rid$;
+  \item for every indexed frame $(G', i)$ of $\sigma'$ there is an indexed frame $(G, i)$ of $\sigma$
+    with $G.\rid = G'.\rid$ such that every element of $\refs(G')$ is in $\refs(G)$, or is $\OId(b)$ with $G'.\rid = F.\rid$;
     \leanpart{merge\_swi\_down}
-  \item for every $(G, i) \in S :: F$ there is $(G', i) \in S :: F'$ with $G'.\rid = G.\rid$.
+  \item for every indexed frame $(G, i)$ of $\sigma$ there is an indexed frame $(G', i)$ of $\sigma'$
+    with $G'.\rid = G.\rid$.
     \leanpart{merge\_swi\_up}
 \end{enumerate}
 \leanform{(a), (d) and (e) are stated for any value written at $x$ in place of $\OId(b)$; (b) for any
@@ -135,7 +133,6 @@ counterpart is $(F', n)$.
 
 \begin{lemma}[Object ids and references after \texttt{merge}]
 \label{lem:merge-count}
-\lean{Gc/Model/Preservation/Merge.lean}
 \begin{enumerate}[nosep,label=(\alph*)]
   \item $\oids(\sigma') \perm \oids(\sigma)$; \leanpart{merge\_objectIds\_perm}
   \item for every reference $t$, with $\#$ and $[\cdot = t]$ as in Lemma~\ref{lem:write-count},
@@ -145,7 +142,9 @@ counterpart is $(F', n)$.
 \end{enumerate}
 \end{lemma}
 \begin{proof}
-(a) $\oids(\sigma') = \oids(S :: F') \cat \oids(H')$, and Lemma~\ref{lem:merge-frames}(a) and
+(a) We have
+\[ \oids(\sigma') = \oids(S :: F') \cat \oids(H'), \]
+and Lemma~\ref{lem:merge-frames}(a) and
 Lemma~\ref{lem:merge-heap}(f) rewrite the two parts to $\oids(S :: F)$ and a permutation of
 $\oids(H)$.
 
@@ -159,7 +158,6 @@ $\#\mathit{values}(F.\vmap[x \mapsto \OId(b)]) + [\RId(rid') = t] = \#\mathit{va
 
 \begin{lemma}[Locations after \texttt{merge}]
 \label{lem:merge-loc}
-\lean{Gc/Model/Preservation/Merge.lean}
 Parts (a)--(c) hold for any configuration $\tau$ with heap $K$, and do not need validity.
 \begin{enumerate}[nosep,label=(\alph*)]
   \item If $\loc{\tau}{\OId(oid)} = \Rgn(r)$, then the stack search for $oid$ in $\tau$ fails;
@@ -276,8 +274,8 @@ duplicate-free by \inv{S1} for $\sigma$.
 $\sigma' \vdash \inv{S2}$.
 \end{lemma}
 \begin{proof}
-Let $(G', i) \in S :: F'$, $\OId(oid) \in \refs(G')$ and $\loc{\sigma'}{\OId(oid)} = \Stk(j)$. By
-Lemma~\ref{lem:merge-loc}(e), $\loc{\sigma}{\OId(oid)} = \Stk(j)$. Take $(G, i) \in S :: F$ as in
+Let $(G', i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G')$ and $\loc{\sigma'}{\OId(oid)} = \Stk(j)$. By
+Lemma~\ref{lem:merge-loc}(e), $\loc{\sigma}{\OId(oid)} = \Stk(j)$. Take $(G, i)$ as in
 Lemma~\ref{lem:merge-frames}(d).
 \begin{itemize}[nosep]
   \item If $\OId(oid) \in \refs(G)$, \inv{S2} for $\sigma$ gives $j \le i$.
@@ -291,8 +289,8 @@ Lemma~\ref{lem:merge-frames}(d).
 $\sigma' \vdash \inv{S3}$.
 \end{lemma}
 \begin{proof}
-Let $(G', i) \in S :: F'$, $\OId(oid) \in \refs(G')$ and $\loc{\sigma'}{\OId(oid)} = \Rgn(r_0)$. By
-Lemma~\ref{lem:merge-loc}(b), $H'(r_0) = Q$ with $oid \in \dom(Q.\omap)$. Take $(G, i) \in S :: F$
+Let $(G', i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G')$ and $\loc{\sigma'}{\OId(oid)} = \Rgn(r_0)$. By
+Lemma~\ref{lem:merge-loc}(b), $H'(r_0) = Q$ with $oid \in \dom(Q.\omap)$. Take $(G, i)$
 as in Lemma~\ref{lem:merge-frames}(d).
 
 \emph{Case $\OId(oid) \in \refs(G)$.} First we find $r_1$ with $\loc{\sigma}{\OId(oid)} = \Rgn(r_1)$
@@ -303,10 +301,10 @@ and $r_1 \in \{r_0, rid'\}$. Split by Lemma~\ref{lem:merge-heap}(a):
   \item $r_0 = rid'$ is impossible, as $H'(rid')$ is undefined;
   \item otherwise $H(r_0) = Q$, and Lemma~\ref{lem:loc-l1}(a) gives $r_1 = r_0$.
 \end{itemize}
-\inv{S3} for $\sigma$ gives $(G'', k) \in S :: F$ with $G''.\rid = r_1$ and $k \le i$.
+\inv{S3} for $\sigma$ gives an indexed frame $(G'', k)$ of $\sigma$ with $G''.\rid = r_1$ and $k \le i$.
 \begin{itemize}[nosep]
-  \item If $r_1 = r_0$, Lemma~\ref{lem:merge-frames}(e) gives $(G''', k) \in S :: F'$ with
-    $G'''.\rid = r_0$, the required witness.
+  \item If $r_1 = r_0$, Lemma~\ref{lem:merge-frames}(e) gives an indexed frame
+    $(G''', k)$ of $\sigma'$ with $G'''.\rid = r_0$, the required witness.
   \item If $r_1 = rid'$, then $G'' \in S :: F$ and \inv{L2} for $\sigma$ make $H(rid') = R'$ an
     $\Open$ region, but $R'.\status = \Closed$.
 \end{itemize}

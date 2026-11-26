@@ -60,13 +60,17 @@ structure of its Lean counterpart, whose name is given in brackets on the right.
 \section{Preliminaries}
 %======================================================================
 
+Each part of a lemma below is tagged with the Lean theorem that proves it. Where the Lean statement is
+more general than what we need, or phrased differently, a \textit{Lean form} note gives the exact
+shape.
+
 \subsection{Configurations}
 
 A configuration is $\sigma = \langle S, H\rangle$. The stack $S = [F_0, \dots, F_{n-1}]$ is a list of
 frames whose \emph{top is the end of the list}; we write $S :: F$ for the stack with $F$ pushed on top
 of $S$, i.e.\ the list $S \cat [F]$. The \emph{index} of a frame is its position, so $F_i$ has index
 $i$ and a larger index is a later frame. The Lean \texttt{stackWithIndex} is the list of pairs
-$(F_i, i)$; we write $(G, i) \in S$ for ``$i < |S|$ and $S[i] = G$''. In $S :: F$ the top frame $F$
+$(F_i, i)$; we write $(G, i) \in S$ for ``$i < |S|$ and $S[i] = G$'', and call such a pair an \emph{indexed frame} of $\sigma$. In $S :: F$ the top frame $F$
 has index $|S|$, and every frame of $S$ keeps the index it has in $S$.
 
 The heap $H$ is a finite map from region ids to regions; a region $R$ has a $R.\bridge$, an
@@ -108,19 +112,71 @@ For a reference $r$, $\loc{\sigma}{r}$ is a location $\Rgn(rid)$ or $\Stk(i)$, o
 \end{itemize}
 \end{definition}
 
-The ten invariants \inv{L1}, \inv{L2}, \inv{H1}, \inv{H2}, \inv{H3}, \inv{S1}, \inv{S2},
-\inv{S3}, \inv{HS1}, \inv{HS2} are as in \texttt{main.tex}; $\sigma \vdash \inv{ValidConfig}$ is
-their conjunction. The two we use most are:
+\begin{definition}[Invariants]
+\label{def:invariants}
+\lean{Gc/Model/Validity.lean}
+Let $\sigma = \langle S, H\rangle$. Each invariant $\sigma \vdash I$ is defined as follows.
 \begin{itemize}[nosep]
-  \item \inv{L1}: $\oids(\sigma)$ is duplicate-free;
+  \item \inv{L1}: $\oids(\sigma)$ is duplicate-free.
+  \item \inv{L2}: for every $G \in S$, $H(G.\rid)$ is defined and its status is $\Open$.
+  \item \inv{H1}: every region $R$ of $H$ has $R.\bridge \in \dom(R.\omap)$.
+  \item \inv{H2}: for every $rid$, $\RId(rid)$ occurs at most once in $\refs(S) \cat \refs(H)$.
+  \item \inv{H3}: if $H(rid) = R$ and $\OId(oid) \in \refs(R)$, then
+    $\loc{\sigma}{\OId(oid)} = \Rgn(rid)$.
   \item \inv{S1}: the list $[G.\rid \mid G \in S]$ is duplicate-free.
+  \item \inv{S2}: if $(G, i)$ is an indexed frame of $\sigma$, $\OId(oid) \in \refs(G)$ and
+    $\loc{\sigma}{\OId(oid)} = \Stk(j)$, then $j \le i$.
+  \item \inv{S3}: if $(G, i)$ is an indexed frame of $\sigma$, $\OId(oid) \in \refs(G)$ and
+    $\loc{\sigma}{\OId(oid)} = \Rgn(rid)$, then some indexed frame $(G', k)$ of $\sigma$ has
+    $G'.\rid = rid$ and $k \le i$.
+  \item \inv{HS1}: if $\OId(oid) \in \refs(\sigma)$, then $oid \in \oids(\sigma)$.
+  \item \inv{HS2}: if $\RId(rid) \in \refs(\sigma)$, then $rid \in \dom(H)$.
 \end{itemize}
+$\sigma \vdash \inv{ValidConfig}$ is the conjunction of the ten.
+\end{definition}
+
+\subsection{Variable resolution and fresh identifiers}
+
+\begin{definition}[Resolution]
+\label{def:resolve}
+\lean{Gc/Model/Helpers.lean: resolveV, resolveFA}
+$\mathit{resolveV}(x, \sigma)$ takes the \emph{last} frame $G$ of $\sigma$ with
+$x \in \dom(G.\vmap)$ or $x = G.\mathit{bridgeVar}$. It returns $G.\vmap(x)$ if that is defined, and
+otherwise $\OId(H(G.\rid).\bridge)$. It is undefined if there is no such frame, or if the bridge case
+applies and $G.\rid \notin \dom(H)$.
+
+$\mathit{resolveFA}(x.f, \sigma)$ requires $\mathit{resolveV}(x, \sigma) = \OId(oid)$ with
+$\loc{\sigma}{\OId(oid)}$ defined. It looks up the object $oid$ at that location (in the $\omap$ of
+the frame with that index, or of that region) and returns the value of its field $f$. It is undefined
+if any of these steps fails.
+\end{definition}
+
+\begin{definition}[Fresh identifiers]
+\label{def:fresh}
+\lean{Gc/Model/Helpers.lean: RuntimeConfig.freshObjectId, RuntimeConfig.freshRegionId}
+$\mathit{freshObjectId}(\sigma)$ is one more than the largest element of $\oids(\sigma)$, and $0$ if
+there is none. $\mathit{freshRegionId}(\sigma)$ is defined in the same way from $\dom(H)$.
+\end{definition}
+
+\begin{lemma}[Freshness]
+\label{lem:fresh}
+\lean{Gc/Model/Helpers.lean, Gc/Model/Preservation/Common.lean}
+Let $o^* = \mathit{freshObjectId}(\sigma)$ and $\rho^* = \mathit{freshRegionId}(\sigma)$.
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item $o^* \notin \oids(\sigma)$ \leanpart{RuntimeConfig.freshObjectId\_not\_mem}\\
+    and $\rho^* \notin \dom(H)$; \leanpart{RuntimeConfig.freshRegionId\_not\_mem}
+  \item $o^* \notin \dom(G.\omap)$ for every frame $G$ of $\sigma$;
+    \leanpart{freshObjectId\_not\_mem\_frame}
+  \item if $\sigma \vdash \inv{ValidConfig}$ and $\OId(oid) \in \refs(\sigma)$ then $oid \ne o^*$.
+    \leanpart{ne\_freshObjectId\_of\_mem\_refs}
+\end{enumerate}
+\end{lemma}
+\begin{proof}
+(a) Each is strictly larger than every element of the list it avoids. (b) $\dom(G.\omap)$ is part of
+$\oids(\sigma)$. (c) By \inv{HS1}, $oid \in \oids(\sigma)$, and (a) applies.
+\end{proof}
 
 \subsection{Shared lemmas}
-
-Each part of a lemma below is tagged with the Lean theorem that proves it. Where the Lean statement is
-more general than what we need, or phrased differently, a \textit{Lean form} note gives the exact
-shape.
 
 \begin{lemma}[Locations under \inv{L1}]
 \label{lem:loc-l1}
@@ -143,6 +199,16 @@ in Definition~\ref{def:loc}. For ``if'' in (a): the heap search must find $(rid,
 region contains $oid$, and the stack search fails, because no frame contains it either; so the
 location is $\Rgn(rid)$. Part (b) is symmetric: the stack search finds $(G,i)$ and the heap search
 fails.
+\end{proof}
+
+\begin{lemma}[One region per object id]
+\label{lem:region-unique}
+\lean{heap\_region\_unique}
+If $\sigma \vdash \inv{L1}$, and $(rid_1, R_1)$ and $(rid_2, R_2)$ are entries of $H$ with
+$oid \in \dom(R_1.\omap)$ and $oid \in \dom(R_2.\omap)$, then $rid_1 = rid_2$.
+\end{lemma}
+\begin{proof}
+Otherwise $oid$ would occur twice in $\oids(H)$.
 \end{proof}
 
 \begin{lemma}[Status update]
@@ -175,51 +241,9 @@ $oid \in \dom(Q.\omap)$.}
 other key it does not change. (b) Inserting at a present key moves that entry to the front and
 replaces its value with one of the same $\omap$; the derived lists are therefore rearranged but have
 the same elements. (d) By (c) the regions of $H'$ containing $oid$ sit at exactly the keys of the
-regions of $H$ containing $oid$. By \inv{L1} there is at most one such key, so the first-match search
-returns it in both heaps, even though the entry order differs.
+regions of $H$ containing $oid$. By Lemma~\ref{lem:region-unique} there is at most one such key, so the
+first-match search returns it in both heaps, even though the entry order differs.
 \end{proof}
-
-\subsection{Variable resolution and fresh identifiers}
-
-\begin{definition}[Resolution]
-\label{def:resolve}
-\lean{Gc/Model/Helpers.lean: resolveV, resolveFA}
-$\mathit{resolveV}(x, \sigma)$ takes the \emph{last} frame $G$ of $\sigma$ with
-$x \in \dom(G.\vmap)$ or $x = G.\mathit{bridgeVar}$. It returns $G.\vmap(x)$ if that is defined, and
-otherwise $\OId(H(G.\rid).\bridge)$. It is undefined if there is no such frame, or if the bridge case
-applies and $G.\rid \notin \dom(H)$.
-
-$\mathit{resolveFA}(x.f, \sigma)$ requires $\mathit{resolveV}(x, \sigma) = \OId(oid)$ with
-$\loc{\sigma}{\OId(oid)}$ defined. It looks up the object $oid$ at that location (in the $\omap$ of
-the frame with that index, or of that region) and returns the value of its field $f$. It is undefined
-if any of these steps fails.
-\end{definition}
-
-\begin{definition}[Fresh identifiers]
-\label{def:fresh}
-\lean{Gc/Model/Helpers.lean: RuntimeConfig.freshObjectId, RuntimeConfig.freshRegionId}
-$\mathit{freshObjectId}(\sigma)$ is one more than the largest element of $\oids(\sigma)$, and $0$ if
-there is none. $\mathit{freshRegionId}(\sigma)$ is defined in the same way from $\dom(H)$.
-\end{definition}
-
-\begin{lemma}[Freshness]
-\label{lem:fresh}
-Let $o^* = \mathit{freshObjectId}(\sigma)$ and $\rho^* = \mathit{freshRegionId}(\sigma)$.
-\begin{enumerate}[nosep,label=(\alph*)]
-  \item $o^* \notin \oids(\sigma)$ \leanpart{RuntimeConfig.freshObjectId\_not\_mem}\\
-    and $\rho^* \notin \dom(H)$; \leanpart{RuntimeConfig.freshRegionId\_not\_mem}
-  \item $o^* \notin \dom(G.\omap)$ for every frame $G$ of $\sigma$;
-    \leanpart{freshObjectId\_not\_mem\_frame}
-  \item if $\sigma \vdash \inv{ValidConfig}$ and $\OId(oid) \in \refs(\sigma)$ then $oid \ne o^*$.
-    \leanpart{ne\_freshObjectId\_of\_mem\_refs}
-\end{enumerate}
-\end{lemma}
-\begin{proof}
-(a) Each is strictly larger than every element of the list it avoids. (b) $\dom(G.\omap)$ is part of
-$\oids(\sigma)$. (c) By \inv{HS1}, $oid \in \oids(\sigma)$, and (a) applies.
-\end{proof}
-
-\subsection{Shared lemmas on stacks, heaps and writes}
 
 \begin{lemma}[Splitting off the top frame]
 \label{lem:stack-split}
@@ -248,10 +272,6 @@ Each is immediate from the definitions of $S :: F$ and of the derived lists.
     \leanpart{swap\_corollary\_stackWithIndex\_index\_inj}\\
     so searching for the index of $(G,i)$ returns $(G,i)$;
     \leanpart{swap\_corollary\_stackWithIndex\_find\_eq}
-  \item the frame found at position $i$ has index $i$;
-    \leanpart{stackWithIndex\_getElem\_index\_eq}
-  \item under \inv{S1}, two frames with the same region id have the same index;
-    \leanpart{merge\_corollary\_regionId\_unique\_index}
   \item if two stacks agree, position by position, on some projection of their frames (such as the
     region id), then every indexed frame of one has a counterpart in the other with the same index and
     the same value of the projection.
@@ -260,8 +280,7 @@ Each is immediate from the definitions of $S :: F$ and of the derived lists.
 \end{enumerate}
 \end{lemma}
 \begin{proof}
-An index is a position in the stack, which gives (a), (b) and (d). For (c), the list of region ids is
-duplicate-free by \inv{S1}, so equal entries are at equal positions.
+An index is a position in the stack, which gives both parts.
 \end{proof}
 
 \begin{lemma}[Stored references and object ids]
@@ -358,16 +377,6 @@ $\loc{\sigma}{\OId(oid)} = \loc{\sigma'}{\OId(oid)}$. \leanpart{loc\_eq\_of\_fin
 \end{lemma}
 \begin{proof}
 Definition~\ref{def:loc} uses nothing else about the frame or region found.
-\end{proof}
-
-\begin{lemma}[One region per object id]
-\label{lem:region-unique}
-\lean{heap\_region\_unique}
-If $\sigma \vdash \inv{L1}$, and $(rid_1, R_1)$ and $(rid_2, R_2)$ are entries of $H$ with
-$oid \in \dom(R_1.\omap)$ and $oid \in \dom(R_2.\omap)$, then $rid_1 = rid_2$.
-\end{lemma}
-\begin{proof}
-Otherwise $oid$ would occur twice in $\oids(H)$.
 \end{proof}
 
 \input{preservation/exit}

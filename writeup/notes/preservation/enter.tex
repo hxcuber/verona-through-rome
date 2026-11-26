@@ -4,19 +4,19 @@
 
 \begin{mathpar}
   \inferrule* [lab=enter]
-    {\mathit{resolveFA}(xf, \langle S, H\rangle) = \RId(rid) \\ H(rid) = R \\ R.\status = \Closed}
-    {\langle S, H \rangle \xrightarrow{\texttt{enter}\ xf\ a} \langle S :: (rid, a, \emptyset, \emptyset),\ H[rid \mapsto R'] \rangle
-     \quad\text{where } R' = R \text{ with } \status := \Open}
+    {\mathit{resolveFA}(x.f, \langle S, H\rangle) = \RId(rid) \\ H(rid) = R \\ R.\status = \Closed}
+    {\langle S, H \rangle \xrightarrow{\texttt{enter}\ (x.f)\ a} \langle S :: (rid, a, \emptyset, \emptyset),\ H[rid \mapsto R'] \rangle}
 \end{mathpar}
+where $R' = R$ with $\status := \Open$.
 
 \texttt{enter} opens a $\Closed$ region and pushes a frame for it. Throughout this section fix
 $\sigma = \langle S, H\rangle$ with $\sigma \vdash \inv{ValidConfig}$, and
 $\sigma' = \langle S :: E, H'\rangle$, where $E = (rid, a, \emptyset, \emptyset)$ is the pushed
 frame (region id $rid$, bridge variable $a$, empty $\omap$, empty $\vmap$),
 $H' = H[rid \mapsto R']$, and $rid$, $R$, $R'$ are as in the rule:
-$\mathit{resolveFA}(xf, \sigma) = \RId(rid)$, $H(rid) = R$ and $R.\status = \Closed$. Let $n = |S|$,
+$\mathit{resolveFA}(x.f, \sigma) = \RId(rid)$, $H(rid) = R$ and $R.\status = \Closed$. Let $n = |S|$,
 the index of $E$ in $\sigma'$. This is exactly what \texttt{enter\_cases} extracts from
-$\texttt{enter}\ xf\ a\ \sigma = \mathsf{some}\ \sigma'$. Lemma~\ref{lem:status-update} applies with
+$\texttt{enter}\ (x.f)\ a\ \sigma = \mathsf{some}\ \sigma'$. Lemma~\ref{lem:status-update} applies with
 $rid_0 = rid$ and $s = \Open$.
 
 The proof has three parts: the observation that \texttt{enter} changes no location
@@ -193,7 +193,7 @@ Lemma~\ref{lem:status-update}(a).
 \end{proof}
 
 \begin{theorem} \lean{enter\_valid}
-If $\sigma \vdash \inv{ValidConfig}$ and $\sigma \xrightarrow{\texttt{enter}\ xf\ a} \sigma'$, then
+If $\sigma \vdash \inv{ValidConfig}$ and $\sigma \xrightarrow{\texttt{enter}\ (x.f)\ a} \sigma'$, then
 $\sigma' \vdash \inv{ValidConfig}$.
 \end{theorem}
 \begin{proof}

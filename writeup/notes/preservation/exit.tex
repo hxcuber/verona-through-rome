@@ -5,9 +5,9 @@
 \begin{mathpar}
   \inferrule* [lab=exit]
     {|S| \ge 1 \\ H(F.\rid) = R \\ R.\status = \Open}
-    {\langle S :: F, H \rangle \xrightarrow{\texttt{exit}} \langle S,\ H[F.\rid \mapsto R'] \rangle
-     \quad\text{where } R' = R \text{ with } \status := \Closed}
+    {\langle S :: F, H \rangle \xrightarrow{\texttt{exit}} \langle S,\ H[F.\rid \mapsto R'] \rangle}
 \end{mathpar}
+where $R' = R$ with $\status := \Closed$.
 
 \texttt{exit} pops the top frame $F$ and closes its region. Throughout this section fix
 $\sigma = \langle S :: F, H\rangle$ with $\sigma \vdash \inv{ValidConfig}$, and
@@ -80,7 +80,8 @@ Lemma~\ref{lem:status-update}(b).
 $\sigma' \vdash \inv{L1}$.
 \end{lemma}
 \begin{proof}
-$\oids(\sigma') = \oids(S) \cat \oids(H') \perm \oids(S) \cat \oids(H)$ by
+\[ \oids(\sigma') = \oids(S) \cat \oids(H') \perm \oids(S) \cat \oids(H) \]
+by
 Lemma~\ref{lem:status-update}(b), and this is a sublist of
 $\oids(S) \cat \dom(F.\omap) \cat \oids(H) = \oids(\sigma)$, which is duplicate-free by \inv{L1}.
 \end{proof}
@@ -135,8 +136,8 @@ $[G.\rid \mid G \in S]$ is a sublist of $[G.\rid \mid G \in S :: F]$, which is d
 $\sigma' \vdash \inv{S2}$.
 \end{lemma}
 \begin{proof}
-Let $(G, i) \in S$, $\OId(oid) \in \refs(G)$ and $\loc{\sigma'}{\OId(oid)} = \Stk(j)$. The pair
-$(G,i)$ is also a frame of $\sigma$, at the same index. By Corollary~\ref{cor:exit-loc}(b),
+Let $(G, i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G)$ and
+$\loc{\sigma'}{\OId(oid)} = \Stk(j)$. Then $(G,i)$ is also an indexed frame of $\sigma$. By Corollary~\ref{cor:exit-loc}(b),
 $\loc{\sigma}{\OId(oid)} = \Stk(j)$, so \inv{S2} for $\sigma$ gives $j \le i$.
 \end{proof}
 
@@ -144,11 +145,11 @@ $\loc{\sigma}{\OId(oid)} = \Stk(j)$, so \inv{S2} for $\sigma$ gives $j \le i$.
 $\sigma' \vdash \inv{S3}$.
 \end{lemma}
 \begin{proof}
-Let $(G, i) \in S$, $\OId(oid) \in \refs(G)$ and $\loc{\sigma'}{\OId(oid)} = \Rgn(rid')$. As in the
-proof of \inv{S2}, $(G, i)$ is a frame of $\sigma$, and by Corollary~\ref{cor:exit-loc}(a)
-$\loc{\sigma}{\OId(oid)} = \Rgn(rid')$. \inv{S3} for $\sigma$ gives a frame $(G'', k)$ of $\sigma$
+Let $(G, i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G)$ and
+$\loc{\sigma'}{\OId(oid)} = \Rgn(rid')$. As in the proof of \inv{S2}, $(G, i)$ is an indexed frame of $\sigma$, and by Corollary~\ref{cor:exit-loc}(a)
+$\loc{\sigma}{\OId(oid)} = \Rgn(rid')$. \inv{S3} for $\sigma$ gives an indexed frame $(G'', k)$ of $\sigma$
 with $G''.\rid = rid'$ and $k \le i$. Since $i < n$ we have $k < n$, so $(G'', k)$ is not the popped
-frame: $(G'', k) \in S$, which is the required witness in $\sigma'$.
+frame: it is an indexed frame of $\sigma'$, the required witness.
 \end{proof}
 
 \begin{lemma}[\inv{HS1}] \lean{exit\_HS1}
@@ -165,7 +166,7 @@ It remains to rule out $oid \in \dom(F.\omap)$: the popped frame's objects must 
 referenced. Suppose $oid \in \dom(F.\omap)$. By Lemma~\ref{lem:loc-l1}(b),
 $\loc{\sigma}{\OId(oid)} = \Stk(n)$. Now $\OId(oid)$ is in $\refs(\sigma') = \refs(S) \cat \refs(H')$:
 \begin{itemize}[nosep]
-  \item If $\OId(oid) \in \refs(G)$ for some $(G, m) \in S$, then $(G, m)$ is a frame of $\sigma$ and
+  \item If $\OId(oid) \in \refs(G)$ for some indexed frame $(G, m)$ of $\sigma'$, then $(G, m)$ is also one of $\sigma$ and
     \inv{S2} for $\sigma$ gives $n \le m$, contradicting $m < n$.
   \item If $\OId(oid) \in \refs(H')$, then by Lemma~\ref{lem:status-update}(b) it is in $\refs(Q)$
     for some $H(rid) = Q$. \inv{H3} for $\sigma$ gives $\loc{\sigma}{\OId(oid)} = \Rgn(rid)$,

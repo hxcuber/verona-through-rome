@@ -7,12 +7,12 @@ In both rules $\sigma = \langle S :: F, H\rangle$.
   \inferrule* [lab=var-asgn-bridge]
     {\mathit{resolveFA}(y.f, \sigma) = \OId(oid) \\ x = F.\mathit{bridgeVar} \\
      \loc{\sigma}{\OId(oid)} = \Rgn(F.\rid) \\ H(F.\rid) = R}
-    {\sigma \xrightarrow{\texttt{x := y.f}} \langle S :: F,\ H[F.\rid \mapsto R'] \rangle}
+    {\sigma \xrightarrow{\texttt{varAsgn}\ x\ (y.f)} \langle S :: F,\ H[F.\rid \mapsto R'] \rangle}
   \\
   \inferrule* [lab=var-asgn-stack]
     {\mathit{resolveFA}(y.f, \sigma) = \OId(oid) \\ x \ne F.\mathit{bridgeVar} \\
-     \mathit{resolveV}(x, \sigma) = \noloc}
-    {\sigma \xrightarrow{\texttt{x := y.f}} \langle S :: F',\ H \rangle}
+     \mathit{resolveV}(x, \sigma)\ \text{undefined}}
+    {\sigma \xrightarrow{\texttt{varAsgn}\ x\ (y.f)} \langle S :: F',\ H \rangle}
 \end{mathpar}
 where $R' = R$ with $\bridge := oid$, and $F' = F$ with $\vmap[x \mapsto \OId(oid)]$.
 
@@ -23,16 +23,16 @@ section fix $\sigma = \langle S :: F, H\rangle$ with $\sigma \vdash \inv{ValidCo
 $\mathit{resolveFA}(y.f, \sigma) = \OId(oid)$. Let $n = |S|$, the index of $F$ in $\sigma$. There are
 two cases:
 \begin{itemize}[nosep]
-  \item[(B)] \textsc{var-asgn-bridge}: $x = F.\mathit{bridgeVar}$,
-    $\loc{\sigma}{\OId(oid)} = \Rgn(F.\rid)$, $H(F.\rid) = R$, and $\sigma' = \langle S :: F, H'\rangle$
-    with $H' = H[F.\rid \mapsto R']$;
-  \item[(V)] \textsc{var-asgn-stack}: $x \ne F.\mathit{bridgeVar}$, $\mathit{resolveV}(x, \sigma)$ is
+  \item \emph{bridge case} (\textsc{var-asgn-bridge}): $x = F.\mathit{bridgeVar}$,\\
+    $\loc{\sigma}{\OId(oid)} = \Rgn(F.\rid)$, $H(F.\rid) = R$, and
+    $\sigma' = \langle S :: F, H'\rangle$ with $H' = H[F.\rid \mapsto R']$;
+  \item \emph{stack case} (\textsc{var-asgn-stack}): $x \ne F.\mathit{bridgeVar}$, $\mathit{resolveV}(x, \sigma)$ is
     undefined, and $\sigma' = \langle S :: F', H\rangle$.
 \end{itemize}
 This is exactly what \texttt{varAsgn\_cases} extracts from
-$\texttt{varAsgn}\ x\ (y.f)\ \sigma = \mathsf{some}\ \sigma'$. In case (B), $R'$ has the same $\omap$
+$\texttt{varAsgn}\ x\ (y.f)\ \sigma = \mathsf{some}\ \sigma'$. In the bridge case, $R'$ has the same $\omap$
 as $R$, hence the same $\refs$ and $\oids$, and Lemma~\ref{lem:heap-insert} applies with
-$rid_0 = F.\rid$, $R_0 = R$ and $R_1 = R'$. In case (V), $F'$ has the same $\rid$ and $\omap$ as $F$.
+$rid_0 = F.\rid$, $R_0 = R$ and $R_1 = R'$. In the stack case, $F'$ has the same $\rid$ and $\omap$ as $F$.
 
 The proof has four parts: one lemma saying that no object changes location
 (Lemma~\ref{lem:varAsgn-loc}), a description of where the written value $\OId(oid)$ was already stored
@@ -64,7 +64,7 @@ the old entries, so the values of $G^+.\vmap$ are $v$ followed by those of $G.\v
 the middle of the list to its front is a permutation.
 \end{proof}
 
-In case (V), Lemmas~\ref{lem:varAsgn-fresh} and~\ref{lem:varAsgn-frame-refs} give
+In the stack case, Lemmas~\ref{lem:varAsgn-fresh} and~\ref{lem:varAsgn-frame-refs} give
 $\refs(F') \perm [\OId(oid)] \cat \refs(F)$.
 
 \begin{lemma}[Replacing a region without changing its objects]
@@ -94,13 +94,13 @@ $\ell_1 \cat \ell_2$, and the entries of $H_1$ are $[(rid_0, R_1)] \cat \ell_1 \
 \lean{varAsgn\_corollary\_loc\_eq}
 For every $oid'$, $\loc{\sigma}{\OId(oid')} = \loc{\sigma'}{\OId(oid')}$.
 \leanform{Takes $\mathit{ValidConfig}\ \sigma$ as hypothesis but uses only its \inv{L1} field, and only
-in case (B).}
+in the bridge case.}
 \end{lemma}
 \begin{proof}
-Case (B): Lemma~\ref{lem:varAsgn-heap-loc} with $S_0 = S :: F$, $H_0 = H$, $rid_0 = F.\rid$, $R_0 = R$
+Bridge case: Lemma~\ref{lem:varAsgn-heap-loc} with $S_0 = S :: F$, $H_0 = H$, $rid_0 = F.\rid$, $R_0 = R$
 and $R_1 = R'$.
 
-Case (V): the heap is unchanged, so by Lemma~\ref{lem:loc-searches} it suffices to compare the stack
+Stack case: the heap is unchanged, so by Lemma~\ref{lem:loc-searches} it suffices to compare the stack
 searches. By Lemma~\ref{lem:stack-split}(a) the indexed frames of $\sigma$ are those of $S$ followed by
 $(F, n)$, and those of $\sigma'$ are those of $S$ followed by $(F', n)$. Searching from the top, both
 first look at the frame of index $n$; since $F'.\omap = F.\omap$, either both return a frame of index
@@ -175,15 +175,15 @@ $oid_0 = R_V.\bridge$.
 \end{enumerate}
 \end{lemma}
 \begin{proof}
-(a) Case (B): the stack is unchanged and $\oids(H') \perm \oids(H)$ by
-Lemma~\ref{lem:heap-insert}(c). Case (V): the heap is unchanged and $\dom(F'.\omap) = \dom(F.\omap)$,
+(a) Bridge case: the stack is unchanged and $\oids(H') \perm \oids(H)$ by
+Lemma~\ref{lem:heap-insert}(c). Stack case: the heap is unchanged and $\dom(F'.\omap) = \dom(F.\omap)$,
 so by Lemma~\ref{lem:stack-split}(c) $\oids(S :: F') = \oids(S :: F)$.
 
-(b) Case (B): the stack is unchanged. By Lemma~\ref{lem:heap-insert}(d) an element of $\refs(H')$ is
+(b) Bridge case: the stack is unchanged. By Lemma~\ref{lem:heap-insert}(d) an element of $\refs(H')$ is
 in $\refs(H)$ or in $\refs(R') = \refs(R)$, and $\refs(R)$ is contained in $\refs(H)$ by
 Lemma~\ref{lem:stored}(b).
 
-Case (V): the heap is unchanged, and by Lemma~\ref{lem:stack-split}(c)
+Stack case: the heap is unchanged, and by Lemma~\ref{lem:stack-split}(c)
 $\refs(S :: F') = \refs(S) \cat \refs(F')$. Elements of $\refs(S)$ are in $\refs(S :: F)$. By
 Lemmas~\ref{lem:varAsgn-fresh} and~\ref{lem:varAsgn-frame-refs} an element of $\refs(F')$ is either
 in $\refs(F)$, hence in $\refs(S :: F)$ (Lemma~\ref{lem:stored}(c)), or equal to $\OId(oid)$, which is
@@ -203,10 +203,10 @@ in $\refs(\sigma)$ by Lemma~\ref{lem:varAsgn-resolve}(b).
 the top frame.}
 \end{lemma}
 \begin{proof}
-Case (B): the stacks of $\sigma$ and $\sigma'$ are equal; take the same frame, and in (a) the first
+Bridge case: the stacks of $\sigma$ and $\sigma'$ are equal; take the same frame, and in (a) the first
 alternative always holds.
 
-Case (V): by Lemma~\ref{lem:stack-split}(a) the indexed frames of $\sigma$ are those of $S$ followed by
+Stack case: by Lemma~\ref{lem:stack-split}(a) the indexed frames of $\sigma$ are those of $S$ followed by
 $(F, n)$, and those of $\sigma'$ are those of $S$ followed by $(F', n)$. A frame of $S$ is its own
 counterpart in both directions. The frames $(F, n)$ and $(F', n)$ are each other's counterparts, as
 $F'.\rid = F.\rid$. For (a) with $(G', i) = (F', n)$: by Lemmas~\ref{lem:varAsgn-fresh}
@@ -228,11 +228,11 @@ duplicate-free by \inv{L1} for $\sigma$.
 $\sigma' \vdash \inv{L2}$.
 \end{lemma}
 \begin{proof}
-Case (B): let $G \in S :: F$. By \inv{L2} for $\sigma$, $H(G.\rid) = Q$ for some $\Open$ region $Q$.
+Bridge case: let $G \in S :: F$. By \inv{L2} for $\sigma$, $H(G.\rid) = Q$ for some $\Open$ region $Q$.
 If $G.\rid = F.\rid$ then $Q = R$ and $H'(G.\rid) = R'$, whose status is that of $R$, namely $\Open$.
 Otherwise $H'(G.\rid) = H(G.\rid) = Q$.
 
-Case (V): the heap is unchanged. A frame of $S :: F'$ is a frame of $S$, hence of $S :: F$, or it is
+Stack case: the heap is unchanged. A frame of $S :: F'$ is a frame of $S$, hence of $S :: F$, or it is
 $F'$, whose region id is $F.\rid$. In both cases \inv{L2} for $\sigma$ applies.
 \end{proof}
 
@@ -240,9 +240,9 @@ $F'$, whose region id is $F.\rid$. In both cases \inv{L2} for $\sigma$ applies.
 $\sigma' \vdash \inv{H1}$.
 \end{lemma}
 \begin{proof}
-Case (V): the heap is unchanged.
+Stack case: the heap is unchanged.
 
-Case (B): a region of $H'$ is either $R'$ or a region of $H$ stored at some key other than $F.\rid$.
+Bridge case: a region of $H'$ is either $R'$ or a region of $H$ stored at some key other than $F.\rid$.
 In the second case \inv{H1} for $\sigma$ applies directly. In the first, we need
 $oid \in \dom(R'.\omap) = \dom(R.\omap)$. By Lemma~\ref{lem:loc-l1}(a),
 $\loc{\sigma}{\OId(oid)} = \Rgn(F.\rid)$ gives $H(F.\rid) = Q$ for some $Q$ with
@@ -255,10 +255,10 @@ $\sigma' \vdash \inv{H2}$.
 \begin{proof}
 Fix $rid'$ and write $\#\ell$ for the number of occurrences of $\RId(rid')$ in $\ell$.
 
-Case (B): the stack is unchanged and $\refs(H') \perm \refs(H)$ by Lemma~\ref{lem:heap-insert}(b),
+Bridge case: the stack is unchanged and $\refs(H') \perm \refs(H)$ by Lemma~\ref{lem:heap-insert}(b),
 since $\refs(R') = \refs(R)$. So both counts are unchanged and \inv{H2} for $\sigma$ applies.
 
-Case (V): the heap is unchanged. By Lemma~\ref{lem:stack-split}(c) and
+Stack case: the heap is unchanged. By Lemma~\ref{lem:stack-split}(c) and
 Lemmas~\ref{lem:varAsgn-fresh} and~\ref{lem:varAsgn-frame-refs},
 \begin{align*}
   \#\refs(S :: F') &= \#\refs(S) + \#\refs(F') \\
@@ -271,10 +271,10 @@ since $\OId(oid) \ne \RId(rid')$. So \inv{H2} for $\sigma$ applies.
 $\sigma' \vdash \inv{H3}$.
 \end{lemma}
 \begin{proof}
-Let $H'(rid_1) = Q'$ (in case (V), $H' = H$) and $\OId(oid_1) \in \refs(Q')$. By
-Lemma~\ref{lem:varAsgn-loc} it suffices to show $\loc{\sigma}{\OId(oid_1)} = \Rgn(rid_1)$. In case (V),
-and in case (B) with $rid_1 \ne F.\rid$, $H(rid_1) = Q'$ and \inv{H3} for $\sigma$ gives this. In case
-(B) with $rid_1 = F.\rid$, $Q' = R'$, so $\OId(oid_1) \in \refs(R') = \refs(R)$ with $H(rid_1) = R$, and
+Let $H'(rid_1) = Q'$ (in the stack case, $H' = H$) and $\OId(oid_1) \in \refs(Q')$. By
+Lemma~\ref{lem:varAsgn-loc} it suffices to show $\loc{\sigma}{\OId(oid_1)} = \Rgn(rid_1)$. In the stack case,
+and in the bridge case with $rid_1 \ne F.\rid$, $H(rid_1) = Q'$ and \inv{H3} for $\sigma$ gives this. In the bridge case
+with $rid_1 = F.\rid$, $Q' = R'$, so $\OId(oid_1) \in \refs(R') = \refs(R)$ with $H(rid_1) = R$, and
 \inv{H3} for $\sigma$ again applies.
 \end{proof}
 
@@ -282,7 +282,7 @@ and in case (B) with $rid_1 \ne F.\rid$, $H(rid_1) = Q'$ and \inv{H3} for $\sigm
 $\sigma' \vdash \inv{S1}$.
 \end{lemma}
 \begin{proof}
-In case (B) the stack is unchanged. In case (V), $F'.\rid = F.\rid$, so
+In the bridge case the stack is unchanged. In the stack case, $F'.\rid = F.\rid$, so
 $[G.\rid \mid G \in S :: F'] = [G.\rid \mid G \in S :: F]$. In both cases \inv{S1} for $\sigma$
 applies.
 \end{proof}
@@ -335,12 +335,12 @@ $\sigma' \vdash \inv{HS2}$.
 \end{lemma}
 \begin{proof}
 If $\RId(rid_1) \in \refs(\sigma')$ then $\RId(rid_1) \in \refs(\sigma)$ by
-Lemma~\ref{lem:varAsgn-refs}(b), so $rid_1 \in \dom(H)$ by \inv{HS2} for $\sigma$. In case (V) the heap
-is unchanged; in case (B), $\dom(H') = \dom(H)$ by Lemma~\ref{lem:heap-insert}(a).
+Lemma~\ref{lem:varAsgn-refs}(b), so $rid_1 \in \dom(H)$ by \inv{HS2} for $\sigma$. In the stack case the heap
+is unchanged; in the bridge case, $\dom(H') = \dom(H)$ by Lemma~\ref{lem:heap-insert}(a).
 \end{proof}
 
 \begin{theorem} \lean{varAsgn\_valid}
-If $\sigma \vdash \inv{ValidConfig}$ and $\sigma \xrightarrow{\texttt{x := y.f}} \sigma'$, then
+If $\sigma \vdash \inv{ValidConfig}$ and $\sigma \xrightarrow{\texttt{varAsgn}\ x\ (y.f)} \sigma'$, then
 $\sigma' \vdash \inv{ValidConfig}$.
 \end{theorem}
 \begin{proof}
