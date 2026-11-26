@@ -179,6 +179,197 @@ regions of $H$ containing $oid$. By \inv{L1} there is at most one such key, so t
 returns it in both heaps, even though the entry order differs.
 \end{proof}
 
+\subsection{Variable resolution and fresh identifiers}
+
+\begin{definition}[Resolution]
+\label{def:resolve}
+\lean{Gc/Model/Helpers.lean: resolveV, resolveFA}
+$\mathit{resolveV}(x, \sigma)$ takes the \emph{last} frame $G$ of $\sigma$ with
+$x \in \dom(G.\vmap)$ or $x = G.\mathit{bridgeVar}$. It returns $G.\vmap(x)$ if that is defined, and
+otherwise $\OId(H(G.\rid).\bridge)$. It is undefined if there is no such frame, or if the bridge case
+applies and $G.\rid \notin \dom(H)$.
+
+$\mathit{resolveFA}(x.f, \sigma)$ requires $\mathit{resolveV}(x, \sigma) = \OId(oid)$ with
+$\loc{\sigma}{\OId(oid)}$ defined. It looks up the object $oid$ at that location (in the $\omap$ of
+the frame with that index, or of that region) and returns the value of its field $f$. It is undefined
+if any of these steps fails.
+\end{definition}
+
+\begin{definition}[Fresh identifiers]
+\label{def:fresh}
+\lean{Gc/Model/Helpers.lean: RuntimeConfig.freshObjectId, RuntimeConfig.freshRegionId}
+$\mathit{freshObjectId}(\sigma)$ is one more than the largest element of $\oids(\sigma)$, and $0$ if
+there is none. $\mathit{freshRegionId}(\sigma)$ is defined in the same way from $\dom(H)$.
+\end{definition}
+
+\begin{lemma}[Freshness]
+\label{lem:fresh}
+Let $o^* = \mathit{freshObjectId}(\sigma)$ and $\rho^* = \mathit{freshRegionId}(\sigma)$.
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item $o^* \notin \oids(\sigma)$ \leanpart{RuntimeConfig.freshObjectId\_not\_mem}\\
+    and $\rho^* \notin \dom(H)$; \leanpart{RuntimeConfig.freshRegionId\_not\_mem}
+  \item $o^* \notin \dom(G.\omap)$ for every frame $G$ of $\sigma$;
+    \leanpart{freshObjectId\_not\_mem\_frame}
+  \item if $\sigma \vdash \inv{ValidConfig}$ and $\OId(oid) \in \refs(\sigma)$ then $oid \ne o^*$.
+    \leanpart{ne\_freshObjectId\_of\_mem\_refs}
+\end{enumerate}
+\end{lemma}
+\begin{proof}
+(a) Each is strictly larger than every element of the list it avoids. (b) $\dom(G.\omap)$ is part of
+$\oids(\sigma)$. (c) By \inv{HS1}, $oid \in \oids(\sigma)$, and (a) applies.
+\end{proof}
+
+\subsection{Shared lemmas on stacks, heaps and writes}
+
+\begin{lemma}[Splitting off the top frame]
+\label{lem:stack-split}
+\lean{Gc/Model/Preservation/Common.lean}
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item The indexed frames of $S :: F$ are those of $S$, with unchanged indices, followed by
+    $(F, |S|)$. \leanpart{stackWithIndex\_eq\_of\_getLast?}
+    \leanpart{stackWithIndex\_mk\_append\_singleton}
+  \item If the last indexed frame of $\sigma$ is $(F, n)$, then the stack of $\sigma$ is $S :: F$ for
+    some $S$ with $n = |S|$. \leanpart{stack\_eq\_of\_stackWithIndex\_getLast?}
+  \item $\refs(S :: F) = \refs(S) \cat \refs(F)$ \leanpart{stack\_refs\_append\_singleton}\\
+    and $\oids(S :: F) = \oids(S) \cat \oids(F)$. \leanpart{stack\_objectIds\_append\_singleton}
+  \item $r \in \refs(\langle S :: F, H\rangle)$ iff $r \in \refs(S)$, $r \in \refs(F)$ or
+    $r \in \refs(H)$. \leanpart{mem\_refs\_of\_stack\_eq}
+\end{enumerate}
+\end{lemma}
+\begin{proof}
+Each is immediate from the definitions of $S :: F$ and of the derived lists.
+\end{proof}
+
+\begin{lemma}[Frames and their indices]
+\label{lem:frame-index}
+\lean{Gc/Model/Preservation/Common.lean}
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item Two indexed frames of $\sigma$ with the same index are equal,
+    \leanpart{swap\_corollary\_stackWithIndex\_index\_inj}\\
+    so searching for the index of $(G,i)$ returns $(G,i)$;
+    \leanpart{swap\_corollary\_stackWithIndex\_find\_eq}
+  \item the frame found at position $i$ has index $i$;
+    \leanpart{stackWithIndex\_getElem\_index\_eq}
+  \item under \inv{S1}, two frames with the same region id have the same index;
+    \leanpart{merge\_corollary\_regionId\_unique\_index}
+  \item if two stacks agree, position by position, on some projection of their frames (such as the
+    region id), then every indexed frame of one has a counterpart in the other with the same index and
+    the same value of the projection.
+    \leanpart{stackWithIndex\_frame\_transport\_down\_of\_shape\_eq}
+    \leanpart{stackWithIndex\_frame\_transport\_up\_of\_shape\_eq}
+\end{enumerate}
+\end{lemma}
+\begin{proof}
+An index is a position in the stack, which gives (a), (b) and (d). For (c), the list of region ids is
+duplicate-free by \inv{S1}, so equal entries are at equal positions.
+\end{proof}
+
+\begin{lemma}[Stored references and object ids]
+\label{lem:stored}
+\lean{Gc/Model/Preservation/Common.lean}
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item If $m$ is an $\omap$ with $m(oid) = o$, then every element of $\refs(o)$ is a reference of
+    some object in $m$; \leanpart{objMap\_bind\_refs\_mem\_of\_lookup}
+  \item if $H(rid) = R$ then every element of $\refs(R)$ is in $\refs(H)$;
+    \leanpart{heap\_refs\_mem\_of\_lookup}
+  \item if $G \in S$ then every element of $\refs(G)$ is in $\refs(S)$;
+    \leanpart{stack\_refs\_mem}
+  \item if $(G, i)$ is an indexed frame of $\sigma$ then every element of $\refs(G)$ is in
+    $\refs(\sigma)$; \leanpart{refs\_mem\_of\_stackWithIndex}
+  \item if $(rid, R)$ is an entry of $H$ and $oid \in \dom(R.\omap)$ then $oid \in \oids(H)$.
+    \leanpart{heap\_objectIds\_of\_mem}
+\end{enumerate}
+\end{lemma}
+\begin{proof}
+The derived lists are concatenations that include the list in question.
+\end{proof}
+
+\begin{lemma}[Replacing a region]
+\label{lem:heap-insert}
+\lean{Gc/Model/Preservation/Common.lean}
+Let $H(rid_0) = R_0$ and $H' = H[rid_0 \mapsto R_1]$.
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item $\dom(H') = \dom(H)$; \leanpart{heap\_insert\_keys\_mem}
+  \item if $\refs(R_1) = \refs(R_0)$ then $\refs(H') \perm \refs(H)$;
+    \leanpart{heap\_insert\_refs\_perm}
+  \item if $\dom(R_1.\omap) \perm \dom(R_0.\omap)$ then $\oids(H') \perm \oids(H)$;
+    \leanpart{heap\_insert\_objectIds\_perm}
+  \item every element of $\refs(H')$ is in $\refs(R_1)$ or in $\refs(H)$.
+    \leanpart{heap\_insert\_refs\_mem}
+\end{enumerate}
+\end{lemma}
+\begin{proof}
+Inserting at a present key moves that entry to the front and replaces its value; every other entry is
+unchanged. So the keys are the same set, and each derived list of $H'$ consists of the part
+contributed by $R_1$ together with the parts contributed by the regions of $H$ at other keys.
+\end{proof}
+
+\begin{lemma}[References after a write]
+\label{lem:write-mem}
+\lean{Gc/Model/Preservation/Common.lean}
+In each case, every reference present after the write is the written one or was present before.
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item For a map $m$ with reference values: every value of $m[k \mapsto v]$ is $v$ or a value of $m$;
+    \leanpart{alist\_insert\_refs\_mem}
+  \item for an object $o$: every element of $\refs(o[f \mapsto v])$ is $v$ or in $\refs(o)$;
+    \leanpart{object\_insert\_refs\_mem}
+  \item for an $\omap$ $m$: every reference of an object in $m[oid \mapsto o']$ is in $\refs(o')$ or
+    is a reference of an object in $m$; \leanpart{objMap\_insert\_bind\_refs\_mem}
+  \item for an $\omap$ $m$ with $m(oid) = o$: every reference of an object in
+    $m[oid \mapsto o[f \mapsto v]]$ is $v$ or a reference of an object in $m$;
+    \leanpart{objMap\_insert\_field\_refs\_mem}
+  \item for a frame $F$: every element of $\refs$ of $F$ with $\vmap[x \mapsto v]$ is $v$ or in
+    $\refs(F)$. \leanpart{frame\_varMap\_insert\_refs\_mem}
+\end{enumerate}
+\end{lemma}
+\begin{proof}
+A write at one key leaves the values at all other keys unchanged. (d) follows from (b), (c) and
+Lemma~\ref{lem:stored}(a).
+\end{proof}
+
+\begin{lemma}[Counting after a write]
+\label{lem:write-count}
+\lean{Gc/Model/Preservation/Common.lean}
+Write $\#\ell$ for the number of occurrences of a fixed reference $t$ in $\ell$, and
+$[v = t]$ for $1$ if $v = t$ and $0$ otherwise.
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item If $m$ has reference values and $m(k) = v$, then
+    $\#\mathit{values}(m[k \mapsto v']) + [v = t] = \#\mathit{values}(m) + [v' = t]$;
+    \leanpart{alist\_insert\_count\_eq}
+  \item if $m(k) = a$ and $g$ maps each value of $m$ to a list of references, then writing
+    $g(m)$ for the concatenation of $g$ over the values of $m$,
+    $\#g(m[k \mapsto b]) + \#g(a) = \#g(m) + \#g(b)$. \leanpart{alist\_insert\_bind\_count\_eq}
+\end{enumerate}
+\end{lemma}
+\begin{proof}
+In both, the map after the write has the same entries as $m$ except that the value at $k$ is replaced,
+so the two counts differ exactly by the contributions of the old and new values. The equations are
+stated additively to avoid subtraction.
+\end{proof}
+
+\begin{lemma}[Location is determined by the two searches]
+\label{lem:loc-searches}
+\lean{Gc/Model/Preservation/Common.lean}
+$\loc{\sigma}{\OId(oid)}$ depends only on the index of the frame returned by the stack search and the
+key of the region returned by the heap search, including whether each search succeeds.
+\leanpart{loc\_match\_eq}
+Consequently, if $\sigma$ and $\sigma'$ agree on both, then
+$\loc{\sigma}{\OId(oid)} = \loc{\sigma'}{\OId(oid)}$. \leanpart{loc\_eq\_of\_find\_map\_eq}
+\end{lemma}
+\begin{proof}
+Definition~\ref{def:loc} uses nothing else about the frame or region found.
+\end{proof}
+
+\begin{lemma}[One region per object id]
+\label{lem:region-unique}
+\lean{heap\_region\_unique}
+If $\sigma \vdash \inv{L1}$, and $(rid_1, R_1)$ and $(rid_2, R_2)$ are entries of $H$ with
+$oid \in \dom(R_1.\omap)$ and $oid \in \dom(R_2.\omap)$, then $rid_1 = rid_2$.
+\end{lemma}
+\begin{proof}
+Otherwise $oid$ would occur twice in $\oids(H)$.
+\end{proof}
+
 \input{preservation/exit}
 \input{preservation/enter}
 \input{preservation/makeObjStack}
