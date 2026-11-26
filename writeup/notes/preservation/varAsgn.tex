@@ -75,18 +75,9 @@ $R_1.\omap = R_0.\omap$. Then for every $oid'$,
 $\loc{\langle S_0, H_0[rid_0 \mapsto R_1]\rangle}{\OId(oid')} = \loc{\langle S_0, H_0\rangle}{\OId(oid')}$.
 \end{lemma}
 \begin{proof}
-The stack is the same, so by Lemma~\ref{lem:loc-searches} it suffices to show that the heap searches
-in $H_0$ and $H_1 = H_0[rid_0 \mapsto R_1]$ both fail or both return the same key. Since the keys of
-$H_0$ are distinct, its entries are $\ell_1 \cat [(rid_0, R_0)] \cat \ell_2$ with $rid_0$ not a key of
-$\ell_1 \cat \ell_2$, and the entries of $H_1$ are $[(rid_0, R_1)] \cat \ell_1 \cat \ell_2$.
-\begin{itemize}[nosep]
-  \item Suppose $oid' \in \dom(R_0.\omap)$. As $\dom(R_1.\omap) = \dom(R_0.\omap)$, the search in
-    $H_1$ returns its first entry, with key $rid_0$. The search in $H_0$ succeeds, since $(rid_0, R_0)$ matches, and by
-    Lemma~\ref{lem:region-unique} every matching entry of $H_0$ has key $rid_0$, so it also returns
-    key $rid_0$.
-  \item If $oid' \notin \dom(R_0.\omap)$, neither $(rid_0, R_0)$ nor $(rid_0, R_1)$ matches, so both
-    searches reduce to the search of $\ell_1 \cat \ell_2$ and return the same result. \qedhere
-\end{itemize}
+The stack is the same, and the heap searches in $H_0$ and $H_0[rid_0 \mapsto R_1]$ agree by
+Lemma~\ref{lem:heap-search}, since $R_1.\omap = R_0.\omap$. So the locations agree by
+Lemma~\ref{lem:loc-searches}.
 \end{proof}
 
 \begin{lemma}[Locations after \texttt{varAsgn}]
@@ -100,11 +91,8 @@ in the bridge case.}
 Bridge case: Lemma~\ref{lem:varAsgn-heap-loc} with $S_0 = S :: F$, $H_0 = H$, $rid_0 = F.\rid$, $R_0 = R$
 and $R_1 = R'$.
 
-Stack case: the heap is unchanged, so by Lemma~\ref{lem:loc-searches} it suffices to compare the stack
-searches. By Lemma~\ref{lem:stack-split}(a) the indexed frames of $\sigma$ are those of $S$ followed by
-$(F, n)$, and those of $\sigma'$ are those of $S$ followed by $(F', n)$. Searching from the top, both
-first look at the frame of index $n$; since $F'.\omap = F.\omap$, either both return a frame of index
-$n$, or both continue with the same search through the frames of $S$.
+Stack case: the heap is unchanged, and the stack searches agree by Lemma~\ref{lem:stack-search},
+since $F'.\omap = F.\omap$. So the locations agree by Lemma~\ref{lem:loc-searches}.
 \end{proof}
 
 \begin{lemma}[Resolved values are stored]
@@ -132,38 +120,21 @@ the second.
 
 \begin{lemma}[Owning frames of resolved objects]
 \label{lem:varAsgn-owner}
-Let $rid'$ be a region id.
-\begin{enumerate}[nosep,label=(\alph*)]
-  \item If $\mathit{resolveV}(z, \sigma) = \OId(oid_0)$ for some variable $z$ and
-    $\loc{\sigma}{\OId(oid_0)} = \Rgn(rid')$, then some indexed frame $(G'', k)$ of $\sigma$ has
-    $G''.\rid = rid'$ and $k < n + 1$; \leanpart{varAsgn\_corollary\_resolveV\_loc\_ancestor}
-  \item if $\mathit{resolveFA}(y.f, \sigma) = \OId(oid)$ and $\loc{\sigma}{\OId(oid)} = \Rgn(rid')$,
-    then the same conclusion holds. \leanpart{resolveFA\_loc\_ancestor}
-\end{enumerate}
+\lean{resolveFA\_loc\_ancestor}
+If $\mathit{resolveFA}(y.f, \sigma) = \OId(oid)$ and $\loc{\sigma}{\OId(oid)} = \Rgn(rid')$, then some
+indexed frame $(G'', k)$ of $\sigma$ has $G''.\rid = rid'$ and $k < n + 1$.
 \leanform{The bound $k < n + 1$ is \texttt{frame''.index < cfg.stack.length}; it holds for every
 indexed frame and is recorded for use in \inv{S3}.}
 \end{lemma}
 \begin{proof}
-(a) By Definition~\ref{def:resolve}, the search for $z$ finds an indexed frame $(G_V, i)$ of
-$\sigma$, and either $G_V.\vmap(z) = \OId(oid_0)$, or $H(G_V.\rid) = R_V$ and
-$oid_0 = R_V.\bridge$.
-\begin{itemize}[nosep]
-  \item In the first case $\OId(oid_0)$ is a value of $G_V.\vmap$, so $\OId(oid_0) \in \refs(G_V)$.
-    \inv{S3} for $\sigma$ gives an indexed frame $(G'', k)$ with $G''.\rid = rid'$ and $k \le i$, and
-    $i < n + 1$.
-  \item In the second case, $oid_0 \in \dom(R_V.\omap)$ by \inv{H1} for $\sigma$. Then
-    Lemma~\ref{lem:loc-l1}(a) gives $\loc{\sigma}{\OId(oid_0)} = \Rgn(G_V.\rid)$. Hence
-    $rid' = G_V.\rid$, and $(G_V, i)$ itself is the witness.
-\end{itemize}
-
-(b) Apply Lemma~\ref{lem:varAsgn-resolve}(a) to $r = \OId(oid)$.
+Apply Lemma~\ref{lem:varAsgn-resolve}(a) to $r = \OId(oid)$.
 \begin{itemize}[nosep]
   \item If $\OId(oid) \in \refs(G)$ for an indexed frame $(G, i)$, \inv{S3} for $\sigma$ gives
     $(G'', k)$ with $G''.\rid = rid'$ and $k \le i < n + 1$.
   \item Otherwise $\mathit{resolveV}(y, \sigma) = \OId(oid_0)$,
     $\loc{\sigma}{\OId(oid_0)} = \Rgn(rid_0)$, $H(rid_0) = R_0$ and $\OId(oid) \in \refs(R_0)$.
-    \inv{H3} for $\sigma$ gives $\loc{\sigma}{\OId(oid)} = \Rgn(rid_0)$, so $rid_0 = rid'$, and (a)
-    applies to $z = y$. \qedhere
+    \inv{H3} for $\sigma$ gives $\loc{\sigma}{\OId(oid)} = \Rgn(rid_0)$, so $rid_0 = rid'$, and
+    Lemma~\ref{lem:resolveV}(c), applied to $y$, gives the frame. \qedhere
 \end{itemize}
 \end{proof}
 
@@ -195,12 +166,12 @@ in $\refs(\sigma)$ by Lemma~\ref{lem:varAsgn-resolve}(b).
 \begin{enumerate}[nosep,label=(\alph*)]
   \item For every indexed frame $(G', i)$ of $\sigma'$ there is an indexed frame $(G, i)$ of $\sigma$
     with $G.\rid = G'.\rid$ such that every $r \in \refs(G')$ satisfies $r \in \refs(G)$, or
-    $\mathit{resolveFA}(y.f, \sigma) = r$ and $n + 1 \le i + 1$; \leanpart{swi\_down}
+    $\mathit{resolveFA}(y.f, \sigma) = r$ and $i = n$; \leanpart{swi\_down}
   \item for every indexed frame $(G, i)$ of $\sigma$ there is an indexed frame $(G', i)$ of $\sigma'$
     with $G'.\rid = G.\rid$. \leanpart{swi\_up}
 \end{enumerate}
-\leanform{The bound $n + 1 \le i + 1$ is \texttt{cfg.stack.length} $\le$ \texttt{f'.index + 1}, i.e.\ $(G', i)$ is
-the top frame.}
+\leanform{``$i = n$'' is \texttt{cfg.stack.length} $\le$ \texttt{f'.index + 1}, which says that
+$(G', i)$ is the top frame.}
 \end{lemma}
 \begin{proof}
 Bridge case: the stacks of $\sigma$ and $\sigma'$ are equal; take the same frame, and in (a) the first
@@ -242,7 +213,7 @@ $\sigma' \vdash \inv{H1}$.
 \begin{proof}
 Stack case: the heap is unchanged.
 
-Bridge case: a region of $H'$ is either $R'$ or a region of $H$ stored at some key other than $F.\rid$.
+Bridge case: by Lemma~\ref{lem:heap-insert}(e), a region of $H'$ is $R'$ or a region of $H$.
 In the second case \inv{H1} for $\sigma$ applies directly. In the first, we need
 $oid \in \dom(R'.\omap) = \dom(R.\omap)$. By Lemma~\ref{lem:loc-l1}(a),
 $\loc{\sigma}{\OId(oid)} = \Rgn(F.\rid)$ gives $H(F.\rid) = Q$ for some $Q$ with
@@ -297,8 +268,8 @@ $\loc{\sigma}{\OId(oid_1)} = \Stk(j)$. Lemma~\ref{lem:varAsgn-swi}(a) gives an i
 of $\sigma$.
 \begin{itemize}[nosep]
   \item If $\OId(oid_1) \in \refs(G)$, \inv{S2} for $\sigma$ gives $j \le i$.
-  \item Otherwise $n + 1 \le i + 1$. By Lemma~\ref{lem:loc-l1}(b) there is an indexed frame of
-    $\sigma$ with index $j$, so $j < n + 1 \le i + 1$, i.e.\ $j \le i$. \qedhere
+  \item Otherwise $i = n$. By Lemma~\ref{lem:loc-l1}(b) there is an indexed frame of $\sigma$ with
+    index $j$, so $j < n + 1$, i.e.\ $j \le n = i$. \qedhere
 \end{itemize}
 \end{proof}
 
@@ -313,9 +284,9 @@ of $\sigma$.
 \begin{itemize}[nosep]
   \item If $\OId(oid_1) \in \refs(G)$, \inv{S3} for $\sigma$ gives an indexed frame $(G'', k)$ of
     $\sigma$ with $G''.\rid = rid'$ and $k \le i$.
-  \item Otherwise $\mathit{resolveFA}(y.f, \sigma) = \OId(oid_1)$ and $n + 1 \le i + 1$.
-    Lemma~\ref{lem:varAsgn-owner}(b) gives an indexed frame $(G'', k)$ of $\sigma$ with
-    $G''.\rid = rid'$ and $k < n + 1 \le i + 1$, so $k \le i$.
+  \item Otherwise $\mathit{resolveFA}(y.f, \sigma) = \OId(oid_1)$ and $i = n$.
+    Lemma~\ref{lem:varAsgn-owner} gives an indexed frame $(G'', k)$ of $\sigma$ with
+    $G''.\rid = rid'$ and $k < n + 1$, so $k \le n = i$.
 \end{itemize}
 In both cases Lemma~\ref{lem:varAsgn-swi}(b) turns $(G'', k)$ into an indexed frame of $\sigma'$ with
 the same index and region id, which is the required witness.

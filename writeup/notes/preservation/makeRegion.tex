@@ -109,10 +109,9 @@ Lemma~\ref{lem:makeRegion-heap}(a), so at $(\rho^*, R^*)$ first.
     search stops at $(\rho^*, R^*)$, since $o^* \in \dom(R^*.\omap)$. Hence the location is
     $\Rgn(\rho^*)$.
   \item If $oid \ne o^*$: $oid \notin \dom(R^*.\omap) = \{o^*\}$, so the heap search passes over
-    $(\rho^*, R^*)$ and continues exactly as the search of $H$. The stack search first looks at
-    $(F', n)$, where it succeeds iff it succeeds at $(F, n)$ in $\sigma$, because the two frames have
-    the same $\omap$; in that case both searches return index $n$, and otherwise both continue
-    identically through $S$. By Lemma~\ref{lem:loc-searches} the two locations agree. \qedhere
+    $(\rho^*, R^*)$ and continues exactly as the search of $H$. The stack searches agree by
+    Lemma~\ref{lem:stack-search}, as $F'.\omap = F.\omap$. By Lemma~\ref{lem:loc-searches} the two
+    locations agree. \qedhere
 \end{itemize}
 \end{proof}
 
@@ -216,9 +215,9 @@ duplicate-free by \inv{S1} for $\sigma$.
 $\sigma' \vdash \inv{S2}$.
 \end{lemma}
 \begin{proof}
-Let $(G', i)$ be a frame of $\sigma'$, $\OId(oid) \in \refs(G')$ and
-$\loc{\sigma'}{\OId(oid)} = \Stk(j)$. Lemma~\ref{lem:makeRegion-stack-oid} gives a frame $(G, i)$ of
-$\sigma$ with $\OId(oid) \in \refs(G)$ and $\loc{\sigma}{\OId(oid)} = \Stk(j)$. By \inv{S2} for
+Let $(G', i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G')$ and
+$\loc{\sigma'}{\OId(oid)} = \Stk(j)$. Lemma~\ref{lem:makeRegion-stack-oid} gives an indexed frame
+$(G, i)$ of $\sigma$ with $\OId(oid) \in \refs(G)$ and $\loc{\sigma}{\OId(oid)} = \Stk(j)$. By \inv{S2} for
 $\sigma$, $j \le i$.
 \end{proof}
 
@@ -226,11 +225,11 @@ $\sigma$, $j \le i$.
 $\sigma' \vdash \inv{S3}$.
 \end{lemma}
 \begin{proof}
-Let $(G', i)$ be a frame of $\sigma'$, $\OId(oid) \in \refs(G')$ and
-$\loc{\sigma'}{\OId(oid)} = \Rgn(rid')$. Lemma~\ref{lem:makeRegion-stack-oid} gives a frame $(G, i)$
-of $\sigma$ with $\OId(oid) \in \refs(G)$ and $\loc{\sigma}{\OId(oid)} = \Rgn(rid')$. \inv{S3} for
-$\sigma$ gives a frame $(G'', k)$ of $\sigma$ with $G''.\rid = rid'$ and $k \le i$. By
-Lemma~\ref{lem:makeRegion-frames}(b), $\sigma'$ has a frame with index $k$ and region id $rid'$,
+Let $(G', i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G')$ and
+$\loc{\sigma'}{\OId(oid)} = \Rgn(rid')$. Lemma~\ref{lem:makeRegion-stack-oid} gives an indexed frame
+$(G, i)$ of $\sigma$ with $\OId(oid) \in \refs(G)$ and $\loc{\sigma}{\OId(oid)} = \Rgn(rid')$. \inv{S3} for
+$\sigma$ gives an indexed frame $(G'', k)$ of $\sigma$ with $G''.\rid = rid'$ and $k \le i$. By
+Lemma~\ref{lem:makeRegion-frames}(b), $\sigma'$ has an indexed frame with index $k$ and region id $rid'$,
 which is the required witness.
 \end{proof}
 

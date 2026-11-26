@@ -2,7 +2,8 @@
 \section{\texttt{swap}}
 %======================================================================
 
-In all four rules $\sigma = \langle S :: F, H\rangle$, $n = |S|$ is the index of $F$,
+In all four rules $\sigma = \langle S :: F, H\rangle$, $n = |S|$ is the index of $F$ in $\sigma$
+(Lemma~\ref{lem:stack-split}(b)),
 $\mathit{resolveV}(y, \sigma) = \OId(yoid)$ and $\mathit{resolveFA}(y.f, \sigma) = \mathit{yfRef}$, and
 both $\loc{\sigma}{\OId(yoid)}$ and $\loc{\sigma}{\mathit{yfRef}}$ are defined.
 \begin{mathpar}
@@ -36,13 +37,11 @@ where
 \end{itemize}
 
 Throughout this section fix $\sigma = \langle S :: F, H\rangle$ with $\sigma \vdash \inv{ValidConfig}$
-and $\sigma' = \langle S', H'\rangle$ with $\sigma \xrightarrow{\texttt{swap}\ x\ (y.f)} \sigma'$;
-$(F, n)$ is the last indexed frame of $\sigma$ and $n = |S|$ (Lemma~\ref{lem:stack-split}(b)). The four rules are exactly what
+and $\sigma' = \langle S', H'\rangle$ with $\sigma \xrightarrow{\texttt{swap}\ x\ (y.f)} \sigma'$.
+The four rules are exactly what
 \texttt{swap\_cases} extracts from $\texttt{swap}\ x\ (y.f)\ \sigma = \mathsf{some}\ \sigma'$. The
 proofs below do not use them directly but the three cases of Lemma~\ref{lem:swap-cases}, which merges
 \textsc{swap-region-object} with \textsc{swap-region-region} and records the overwritten field value.
-For an $\omap$ $m$ we write $\refs(m)$ for the concatenation of the $\refs$ of its objects, so that
-$\refs(R) = \refs(R.\omap)$ and $\refs(G) = \refs(G.\omap) \cat \mathit{values}(G.\vmap)$.
 
 \texttt{swap} creates nothing and moves no object between frames and regions: it exchanges two stored
 values (or, in \textsc{swap-region-bridge}, a field value and the bridge object id). The proof
@@ -81,12 +80,10 @@ object is $F.\omap(yoid) = o$. In the other two cases the location is $\Rgn(F.\r
 $R.\omap(yoid) = o$. In all cases $\mathit{yfRef} = o(f)$.
 \end{proof}
 
-\begin{lemma}[Maps and heaps]
+\begin{lemma}[Values and counts]
 \label{lem:swap-maps}
 \begin{enumerate}[nosep,label=(\alph*)]
   \item If $m(k) = v$ then $v$ is a value of $m$; \leanpart{alist\_lookup\_mem\_values}
-  \item every region of $H[rid \mapsto R_1]$ is $R_1$ or a region of $H$;
-    \leanpart{heap\_insert\_regions\_mem}
   \item if $m$ is an $\omap$ with $m(oid) = o$ and $o(k) = v$, then, counting a fixed reference $t$ as
     in Lemma~\ref{lem:write-count},
     $\#\refs(m[oid \mapsto o[k \mapsto v']]) + [v = t] = \#\refs(m) + [v' = t]$.
@@ -94,8 +91,7 @@ $R.\omap(yoid) = o$. In all cases $\mathit{yfRef} = o(f)$.
 \end{enumerate}
 \end{lemma}
 \begin{proof}
-(a) A lookup returns the value of an entry. (b) The entries of $H[rid \mapsto R_1]$ are
-$(rid, R_1)$ followed by a sublist of the entries of $H$ (those with key $\ne rid$). (c) Let
+(a) A lookup returns the value of an entry. (b) Let
 $o' = o[k \mapsto v']$. Lemma~\ref{lem:write-count}(a) on $o$ gives
 $\#\refs(o') + [v = t] = \#\refs(o) + [v' = t]$, and Lemma~\ref{lem:write-count}(b) on $m$ with
 $g = \refs$ gives $\#\refs(m[oid \mapsto o']) + \#\refs(o) = \#\refs(m) + \#\refs(o')$. Adding the two
@@ -116,11 +112,9 @@ Let $G$ be a frame and $H_0$ a heap.
 \begin{proof}
 (a) By Lemma~\ref{lem:stack-split}(a), the indexed frames of a configuration with stack $S :: G$ are
 those of $S$ followed by $(G, n)$, and those of $\sigma$ are those of $S$ followed by $(F, n)$.
-(b) The heaps agree, so the heap searches agree. The stack search of either configuration first looks
-at its top frame, at index $n$; it succeeds there in $\tau$ iff $oid \in \dom(G.\omap)$, iff
-$oid \in \dom(F.\omap)$, iff it succeeds there in $\rho$, and both then return index $n$. Otherwise
-both continue through the same frames of $S$ and return the same result.
-Lemma~\ref{lem:loc-searches} concludes.
+(b) The heaps agree, so the heap searches agree, and the stack searches agree by
+Lemma~\ref{lem:stack-search}, as $\dom(G.\omap) \perm \dom(F.\omap)$. Lemma~\ref{lem:loc-searches}
+concludes.
 \end{proof}
 
 \begin{lemma}[Frame references in \textsc{swap-stack}]
@@ -131,19 +125,19 @@ In the stack case, every element of $\refs(F_s)$ is in $\refs(F)$.
 $o(k) = \mathit{yfRef}$.}
 \end{lemma}
 \begin{proof}
-The $\omap$ of $F_s$ is $F.\omap[yoid \mapsto o[f \mapsto \mathit{xRef}]]$, so by
-Lemma~\ref{lem:write-mem}(d) an element of $\refs(F_s.\omap)$ is either $\mathit{xRef}$, which is a
-value of $F.\vmap$ (Lemma~\ref{lem:swap-maps}(a)), or in $\refs(F.\omap)$. An element of
-$\mathit{values}(F.\vmap[x \mapsto \mathit{yfRef}])$ is, by Lemma~\ref{lem:write-mem}(a), either a
-value of $F.\vmap$ or $\mathit{yfRef} = o(f)$, which is in $\refs(o)$ (Lemma~\ref{lem:swap-maps}(a))
-and hence in $\refs(F.\omap)$ by Lemma~\ref{lem:stored}(a).
+Let $G$ be $F$ with $\omap[yoid \mapsto o[f \mapsto \mathit{xRef}]]$, so that $F_s$ is $G$ with
+$\vmap[x \mapsto \mathit{yfRef}]$. By Lemma~\ref{lem:write-mem}(e), an element of $\refs(F_s)$ is
+$\mathit{yfRef}$ or in $\refs(G)$, and by Lemma~\ref{lem:write-mem}(f), an element of $\refs(G)$ is
+$\mathit{xRef}$ or in $\refs(F)$. Both written values are in $\refs(F)$: $\mathit{xRef}$ is a value of
+$F.\vmap$ (Lemma~\ref{lem:swap-maps}(a)), and $\mathit{yfRef} = o(f)$ is in $\refs(o)$
+(Lemma~\ref{lem:swap-maps}(a)), hence in $\refs(F.\omap)$ by Lemma~\ref{lem:stored}(a).
 \end{proof}
-
 
 \begin{lemma}[Locations after \texttt{swap}]
 \label{lem:swap-loc}
-In each of (a)--(c), the configurations $\rho$ and $\tau$ described there satisfy
-$\loc{\tau}{\OId(oid)} = \loc{\rho}{\OId(oid)}$ for every $oid$.
+Parts (a)--(c) each describe two configurations $\rho$ and $\tau$, for which
+$\loc{\tau}{\OId(oid)} = \loc{\rho}{\OId(oid)}$ for every $oid$. Part (d) applies them to $\sigma$
+and $\sigma'$.
 \begin{enumerate}[nosep,label=(\alph*)]
   \item If $F.\omap(yoid) = o$ and $G$ is $F$ with $\omap[yoid \mapsto o[f \mapsto v]]$ and any
     $\vmap$: $\rho = \langle S :: F, H_0\rangle$ and $\tau = \langle S :: G, H_0\rangle$ for any heap
@@ -165,18 +159,10 @@ $\mathit{ValidConfig}\ \sigma$ but use only its \inv{L1} field.}
 Lemma~\ref{lem:swap-top}(b) applies. (b) $\dom(G.\omap) = \dom(F.\omap)$; again
 Lemma~\ref{lem:swap-top}(b).
 
-(c) The stacks agree, so the stack searches agree; by Lemma~\ref{lem:loc-searches} it suffices that
-the heap searches return the same key. As $yoid$ is a key of $R.\omap$,
-$\dom(R_1.\omap) \perm \dom(R.\omap)$, so $oid \in \dom(R_1.\omap)$ iff $oid \in \dom(R.\omap)$. Write
-the entries of $H$ as $\ell_1 \cat [(rid, R)] \cat \ell_2$; those of $H[rid \mapsto R_1]$ are
-$[(rid, R_1)] \cat \ell_1 \cat \ell_2$.
-\begin{itemize}[nosep]
-  \item If $oid \in \dom(R.\omap)$, the search in $H[rid \mapsto R_1]$ returns key $rid$ at once. By
-    \inv{L1} and Lemma~\ref{lem:region-unique}, $(rid, R)$ is the only entry of $H$ whose region
-    contains $oid$, so the search in $H$ returns key $rid$ too.
-  \item Otherwise both searches skip the entry at $rid$ and search $\ell_1 \cat \ell_2$ in the same
-    order.
-\end{itemize}
+(c) The stacks agree, so the stack searches agree. The heap searches agree by
+Lemma~\ref{lem:heap-search}: $yoid$ is a key of $R.\omap$, so
+$\dom(R_1.\omap) \perm \dom(R.\omap)$.
+Lemma~\ref{lem:loc-searches} concludes.
 
 (d) In the stack case, $\sigma' = \langle S :: F_s, H\rangle$ and (a) applies with $H_0 = H$ and
 $v = \mathit{xRef}$. In the region case, let $H' = H[F.\rid \mapsto R_r(\mathit{xRef})]$. Then (c) with
@@ -184,7 +170,6 @@ $R_1 = R_r(\mathit{xRef})$ relates $\sigma$ to $\langle S :: F, H'\rangle$, and 
 and $G = F_r$ relates $\langle S :: F, H'\rangle$ to $\sigma'$. In the bridge case, (c) applies with
 $R_1 = R_b$, whose $\omap$ is $R.\omap[yoid \mapsto o[f \mapsto \OId(R.\bridge)]]$.
 \end{proof}
-
 
 \begin{lemma}[Unchanged shape]
 \label{lem:swap-shape}
@@ -253,7 +238,7 @@ $\refs(\sigma)$. We go through Lemma~\ref{lem:swap-cases}.
 \end{lemma}
 \begin{proof}
 (a) In the bridge case the stack is unchanged. In the stack and region cases, Lemma~\ref{lem:swap-top}(a) says
-$(G', i)$ is a frame of $\sigma$ or is $(F_s, n)$, resp.\ $(F_r, n)$; take $(G, i) = (F, n)$. In
+$(G', i)$ is an indexed frame of $\sigma$ or is $(F_s, n)$, resp.\ $(F_r, n)$; take $(G, i) = (F, n)$. In
 the stack case, $\refs(F_s)$ is contained in $\refs(F)$ (Lemma~\ref{lem:swap-stack-refs}). In the region case, an
 element of $\refs(F_r)$ is in $\refs(F)$ or is $\mathit{yfRef} = o(f)$ (Lemma~\ref{lem:write-mem}(e)),
 which is in $\refs(R)$ with $H(F.\rid) = R$ (Lemmas~\ref{lem:swap-maps}(a) and~\ref{lem:stored}(a)).
@@ -274,12 +259,12 @@ We use
 \[ \#\refs(S :: G) = \#\refs(S) + \#\refs(G.\omap) + \#\mathit{values}(G.\vmap) \]
 (Lemma~\ref{lem:stack-split}(c)), and go through Lemma~\ref{lem:swap-cases}.
 \begin{itemize}[nosep]
-  \item Stack case. The heap is unchanged. Lemma~\ref{lem:swap-maps}(c) on $F.\omap$ gives
+  \item Stack case. The heap is unchanged. Lemma~\ref{lem:swap-maps}(b) on $F.\omap$ gives
     $\#\refs(F_s.\omap) + [\mathit{yfRef} = t] = \#\refs(F.\omap) + [\mathit{xRef} = t]$, and
     Lemma~\ref{lem:write-count}(a) on $F.\vmap$ gives
     $\#\mathit{values}(F_s.\vmap) + [\mathit{xRef} = t] = \#\mathit{values}(F.\vmap) +
     [\mathit{yfRef} = t]$. Adding, $\#\refs(F_s) = \#\refs(F)$.
-  \item Region case. $F_r.\omap = F.\omap$. Lemma~\ref{lem:swap-maps}(c) on $R.\omap$,
+  \item Region case. $F_r.\omap = F.\omap$. Lemma~\ref{lem:swap-maps}(b) on $R.\omap$,
     Lemma~\ref{lem:write-count}(b) on $H$ with $g = \refs$, and Lemma~\ref{lem:write-count}(a) on
     $F.\vmap$ give, respectively,
     \[ \begin{aligned}
@@ -291,7 +276,7 @@ We use
     Adding the three and cancelling gives
     \[ \#\mathit{values}(F_r.\vmap) + \#\refs(H') = \#\mathit{values}(F.\vmap) + \#\refs(H), \]
     which is the claim, since the rest of the stack is unchanged.
-  \item Bridge case. The stack is unchanged. Lemma~\ref{lem:swap-maps}(c) on $R.\omap$, with old value
+  \item Bridge case. The stack is unchanged. Lemma~\ref{lem:swap-maps}(b) on $R.\omap$, with old value
     $\OId(yfoid)$ and new value $\OId(R.\bridge)$, gives $\#\refs(R_b) = \#\refs(R)$, since neither
     value equals $t$. Lemma~\ref{lem:write-count}(b) on $H$ then gives $\#\refs(H') = \#\refs(H)$.
     \qedhere
@@ -322,7 +307,7 @@ $\sigma' \vdash \inv{H1}$.
 \end{lemma}
 \begin{proof}
 By Lemma~\ref{lem:swap-cases}. In the stack case the heap is unchanged. In the other two, by
-Lemma~\ref{lem:swap-maps}(b) a region of $H'$ is a region of $H$, for which \inv{H1} for $\sigma$
+Lemma~\ref{lem:heap-insert}(e) a region of $H'$ is a region of $H$, for which \inv{H1} for $\sigma$
 applies, or the inserted region. Its $\omap$ is $R.\omap[yoid \mapsto \dots]$, whose keys include
 those of $R.\omap$, so it suffices that its bridge object is in $\dom(R.\omap)$.
 \begin{itemize}[nosep]
@@ -373,31 +358,36 @@ for $\sigma$.
 $\sigma' \vdash \inv{S2}$.
 \end{lemma}
 \begin{proof}
-Let $(G', i)$ be a frame of $\sigma'$ and $\OId(oid) \in \refs(G')$ with
+Let $(G', i)$ be an indexed frame of $\sigma'$ and $\OId(oid) \in \refs(G')$ with
 $\loc{\sigma'}{\OId(oid)} = \Stk(j)$. By Lemma~\ref{lem:swap-loc}(d), also
-$\loc{\sigma}{\OId(oid)} = \Stk(j)$. By Lemma~\ref{lem:swap-frames}(a), either $(G', i)$ is a frame
-of $\sigma$, and \inv{S2} for $\sigma$ gives $j \le i$, or there is a frame $(G, i)$ of $\sigma$ with
-$\OId(oid)$ in $\refs(G)$ or in $\refs(Q)$ where $H(G.\rid) = Q$. In the first case \inv{S2} for
-$\sigma$ at $(G, i)$ gives $j \le i$. In the second, \inv{H3} for $\sigma$ gives
-$\loc{\sigma}{\OId(oid)} = \Rgn(G.\rid)$, contradicting $\Stk(j)$.
+$\loc{\sigma}{\OId(oid)} = \Stk(j)$. By Lemma~\ref{lem:swap-frames}(a), one of three cases holds.
+\begin{itemize}[nosep]
+  \item $(G', i)$ is an indexed frame of $\sigma$: \inv{S2} for $\sigma$ gives $j \le i$.
+  \item There is an indexed frame $(G, i)$ of $\sigma$ with $\OId(oid) \in \refs(G)$: \inv{S2} for
+    $\sigma$ at $(G, i)$ gives $j \le i$.
+  \item There is an indexed frame $(G, i)$ of $\sigma$ with $\OId(oid) \in \refs(Q)$ where
+    $H(G.\rid) = Q$: \inv{H3} for $\sigma$ gives $\loc{\sigma}{\OId(oid)} = \Rgn(G.\rid)$,
+    contradicting $\Stk(j)$. So this case does not arise. \qedhere
+\end{itemize}
 \end{proof}
 
 \begin{lemma}[\inv{S3}] \lean{swap\_S3}
 $\sigma' \vdash \inv{S3}$.
 \end{lemma}
 \begin{proof}
-Let $(G', i)$ be a frame of $\sigma'$ and $\OId(oid) \in \refs(G')$ with
+Let $(G', i)$ be an indexed frame of $\sigma'$ and $\OId(oid) \in \refs(G')$ with
 $\loc{\sigma'}{\OId(oid)} = \Rgn(rid')$. By Lemma~\ref{lem:swap-loc}(d), also
-$\loc{\sigma}{\OId(oid)} = \Rgn(rid')$. It suffices to find a frame $(G_0, k)$ of $\sigma$ with
-$G_0.\rid = rid'$ and $k \le i$: by Lemma~\ref{lem:swap-frames}(b) it has a counterpart in $\sigma'$
-with the same index and region id. By Lemma~\ref{lem:swap-frames}(a):
+$\loc{\sigma}{\OId(oid)} = \Rgn(rid')$. It suffices to find an indexed frame $(G_0, k)$ of $\sigma$
+with $G_0.\rid = rid'$ and $k \le i$: by Lemma~\ref{lem:swap-frames}(b) it has a counterpart in
+$\sigma'$ with the same index and region id. By Lemma~\ref{lem:swap-frames}(a), one of three cases
+holds.
 \begin{itemize}[nosep]
-  \item if $(G', i)$ is a frame of $\sigma$, \inv{S3} for $\sigma$ gives $(G_0, k)$;
-  \item otherwise there is a frame $(G, i)$ of $\sigma$ with $\OId(oid) \in \refs(G)$, and \inv{S3}
-    for $\sigma$ at $(G, i)$ gives $(G_0, k)$;
-  \item or with $\OId(oid) \in \refs(Q)$ where $H(G.\rid) = Q$. Then \inv{H3} for $\sigma$ gives
-    $\loc{\sigma}{\OId(oid)} = \Rgn(G.\rid)$, so $rid' = G.\rid$ and $(G_0, k) = (G, i)$ works.
-    \qedhere
+  \item $(G', i)$ is an indexed frame of $\sigma$: \inv{S3} for $\sigma$ gives $(G_0, k)$.
+  \item There is an indexed frame $(G, i)$ of $\sigma$ with $\OId(oid) \in \refs(G)$: \inv{S3} for
+    $\sigma$ at $(G, i)$ gives $(G_0, k)$.
+  \item There is an indexed frame $(G, i)$ of $\sigma$ with $\OId(oid) \in \refs(Q)$ where
+    $H(G.\rid) = Q$: \inv{H3} for $\sigma$ gives $\loc{\sigma}{\OId(oid)} = \Rgn(G.\rid)$, so
+    $rid' = G.\rid$ and $(G_0, k) = (G, i)$ works. \qedhere
 \end{itemize}
 \end{proof}
 

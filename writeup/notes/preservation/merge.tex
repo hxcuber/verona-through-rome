@@ -60,11 +60,11 @@ Let $T$ be the list of entries of $H$ with the entries at keys $rid'$ and $F.\ri
 \begin{enumerate}[nosep,label=(\alph*)]
   \item For every $r$: $H'(r) = R_m$ if $r = F.\rid$; $H'(r)$ is undefined if $r = rid'$; and
     $H'(r) = H(r)$ otherwise. \leanpart{merge\_lookup}
-  \item The entries of $H'$ are $(F.\rid, R_m) :: T$, and $T \sublist H.\mathit{entries}$.
+  \item The entries of $H'$ are $[(F.\rid, R_m)] \cat T$, and $T \sublist H.\mathit{entries}$.
   \item In a list of entries with pairwise distinct keys, an entry $(k, v)$ of the list can be moved
     to the front, leaving the list with key $k$ removed behind it.
     \leanpart{perm\_cons\_kerase}
-  \item $H.\mathit{entries} \perm (F.\rid, R) :: (rid', R') :: T$.
+  \item $H.\mathit{entries} \perm [(F.\rid, R), (rid', R')] \cat T$.
     \leanpart{merge\_heap\_entries\_perm}
   \item If $f$ maps regions to lists and $f(R_m) = f(R) \cat f(R')$, then the concatenation of $f$
     over the regions of $H'$ is a permutation of the concatenation of $f$ over the regions of $H$.
@@ -78,7 +78,7 @@ $m$, as $((K \setminus rid')[rid \mapsto m])(r) = \mathsf{if}\ r = rid\ \mathsf{
 \mathsf{else\ if}\ r = rid'\ \mathsf{then}\ \mathsf{none}\ \mathsf{else}\ K(r)$. In (b), $T$ is
 $\mathtt{kerase}\ F.\rid\ (\mathtt{kerase}\ rid'\ H.\mathit{entries})$; (b) has no lemma of its own: it is \texttt{AList.entries\_insert} and
 \texttt{List.kerase\_sublist}, used inline in \texttt{merge\_heap\_flatten\_perm} and
-\texttt{merge\_H1}. (c) is $l \perm (a, b) :: \mathtt{kerase}\ a\ l$ for $(a,b) \in l$ with
+\texttt{merge\_H1}. (c) is $l \perm [(a, b)] \cat \mathtt{kerase}\ a\ l$ for $(a,b) \in l$ with
 \texttt{NodupKeys}.}
 \end{lemma}
 \begin{proof}
@@ -88,13 +88,13 @@ $H \setminus rid'$, which is undefined at $rid'$ and agrees with $H$ elsewhere.
 keys only deletes entries.
 (c) Keys are distinct, so the entry with key $k$ is the only one; removing it and putting it in front
 rearranges the list.
-(d) Apply (c) to $(rid', R')$ in $H$: $H.\mathit{entries} \perm (rid', R') :: L$ where $L$ are the
+(d) Apply (c) to $(rid', R')$ in $H$: $H.\mathit{entries} \perm [(rid', R')] \cat L$ where $L$ are the
 entries of $H \setminus rid'$. By (a) of Lemma~\ref{lem:merge-regions}, $(F.\rid, R)$ is an entry of
-$H \setminus rid'$, so (c) again gives $L \perm (F.\rid, R) :: T$. Swapping the two front entries
+$H \setminus rid'$, so (c) again gives $L \perm [(F.\rid, R)] \cat T$. Swapping the two front entries
 gives the claim.
 (e) By (b) and the hypothesis on $f$, the concatenation over $H'$ is
 $f(R) \cat f(R') \cat (\text{the concatenation over } T)$, which is the concatenation over
-$(F.\rid, R) :: (rid', R') :: T$. By (d), this is a permutation of the concatenation over $H$.
+$[(F.\rid, R), (rid', R')] \cat T$. By (d), this is a permutation of the concatenation over $H$.
 (f) Lemma~\ref{lem:merge-regions}(d) gives the hypothesis of (e) for $f = \dom(\cdot.\omap)$ and
 $f = \refs$.
 \end{proof}
@@ -123,9 +123,8 @@ new top frame; (c) for any new top frame with the same $\omap$ as $F$.}
 \end{lemma}
 \begin{proof}
 $F'$ differs from $F$ only in its $\vmap$, so $F'.\rid = F.\rid$ and $F'.\omap = F.\omap$. This gives
-(a). (b) is Lemma~\ref{lem:stack-split}(a) for both stacks. (c) By (b), searching from the top first
-tests $(F, n)$, resp.\ $(F', n)$, whose $\omap$s agree, so both searches succeed there or both move on
-to the same list $D$. (d) By (b), either $(G', i) \in D$, and $(G, i) = (G', i)$ works; or
+(a). (b) is Lemma~\ref{lem:stack-split}(a) for both stacks. (c) is
+Lemma~\ref{lem:stack-search}, as $F'.\omap = F.\omap$. (d) By (b), either $(G', i) \in D$, and $(G, i) = (G', i)$ works; or
 $(G', i) = (F', n)$, and $(F, n)$ works by Lemma~\ref{lem:write-mem}(e), since $F'.\rid = F.\rid$.
 (e) By (b), either $(G, i) \in D$, which is its own counterpart, or $(G, i) = (F, n)$, whose
 counterpart is $(F', n)$.
@@ -158,38 +157,27 @@ $\#\mathit{values}(F.\vmap[x \mapsto \OId(b)]) + [\RId(rid') = t] = \#\mathit{va
 
 \begin{lemma}[Locations after \texttt{merge}]
 \label{lem:merge-loc}
-Parts (a)--(c) hold for any configuration $\tau$ with heap $K$, and do not need validity.
 \begin{enumerate}[nosep,label=(\alph*)]
-  \item If $\loc{\tau}{\OId(oid)} = \Rgn(r)$, then the stack search for $oid$ in $\tau$ fails;
-    \leanpart{merge\_corollary\_loc\_rgn\_stack\_none}
-  \item if $\loc{\tau}{\OId(oid)} = \Rgn(r)$, then $K(r) = Q$ for some $Q$ with
-    $oid \in \dom(Q.\omap)$; \leanpart{merge\_loc\_rgn\_elim}
-  \item the heap search for $oid$ in $K$ fails iff $oid \notin \oids(K)$;
-    \leanpart{heap\_find\_none\_iff}
   \item if the stack search for $oid$ in $\sigma$ fails, and $H'(r_0) = Q$ with
     $oid \in \dom(Q.\omap)$, then $\loc{\sigma'}{\OId(oid)} = \Rgn(r_0)$;
     \leanpart{merge\_corollary\_loc\_of\_mem}
   \item if $\loc{\sigma'}{\OId(oid)} = \Stk(i)$ then $\loc{\sigma}{\OId(oid)} = \Stk(i)$.
     \leanpart{merge\_loc\_stk}
 \end{enumerate}
-\leanform{(d) and (e) are stated for $\sigma'$ with any top frame whose $\omap$ is $F.\omap$.}
+\leanform{Both are stated for $\sigma'$ with any top frame whose $\omap$ is $F.\omap$.}
 \end{lemma}
 \begin{proof}
-(a) and (b): by Definition~\ref{def:loc}, the location is $\Rgn(r)$ only if the stack search fails and
-the heap search returns an entry $(r, Q)$, which satisfies the search test $oid \in \dom(Q.\omap)$.
-Since $(r, Q)$ is an entry of $K$, $K(r) = Q$. (c) The heap search fails iff no region of $K$
-contains $oid$, i.e.\ iff $oid \notin \oids(K)$.
-
-(d) By Lemma~\ref{lem:merge-frames}(c), the stack search for $oid$ fails in $\sigma'$ too. By \inv{L1}
+(a) By Lemma~\ref{lem:merge-frames}(c), the stack search for $oid$ fails in $\sigma'$ too. By \inv{L1}
 for $\sigma$, $\oids(H)$ is duplicate-free, being a part of $\oids(\sigma)$, and so is $\oids(H') \perm \oids(H)$
 (Lemma~\ref{lem:merge-heap}(f)). The entry $(r_0, Q)$ of $H'$ passes the heap search test, and it is the
 only entry that does: two distinct entries passing it would put $oid$ twice in $\oids(H')$. So the
 heap search in $H'$ returns $(r_0, Q)$, and $\loc{\sigma'}{\OId(oid)} = \Rgn(r_0)$.
 
-(e) By Definition~\ref{def:loc}, the stack search in $\sigma'$ returns a frame of index $i$ and the
+(b) By Definition~\ref{def:loc}, the stack search in $\sigma'$ returns a frame of index $i$ and the
 heap search in $H'$ fails. By Lemma~\ref{lem:merge-frames}(c), the stack search in $\sigma$ returns a
-frame of index $i$. By (c), $oid \notin \oids(H')$, so $oid \notin \oids(H)$ by
-Lemma~\ref{lem:merge-heap}(f), and by (c) again the heap search in $H$ fails. Hence
+frame of index $i$. By Lemma~\ref{lem:loc-parts}(c), $oid \notin \oids(H')$, so $oid \notin \oids(H)$ by
+Lemma~\ref{lem:merge-heap}(f), and by Lemma~\ref{lem:loc-parts}(c) again the heap search in $H$
+fails. Hence
 $\loc{\sigma}{\OId(oid)} = \Stk(i)$.
 \end{proof}
 
@@ -258,8 +246,8 @@ Lemma~\ref{lem:merge-heap}(a):
 By \inv{H3} for $\sigma$, $\loc{\sigma}{\OId(oid)} = \Rgn(r_1)$. Then
 Lemma~\ref{lem:loc-l1}(a) gives $H(r_1) = Q_2$ with $oid \in \dom(Q_2.\omap)$; as $Q_2 = Q_1$, we
 get $oid \in \dom(Q.\omap)$. By
-Lemma~\ref{lem:merge-loc}(a), the stack search for $oid$ in $\sigma$ fails. Now
-Lemma~\ref{lem:merge-loc}(d) gives $\loc{\sigma'}{\OId(oid)} = \Rgn(r_0)$.
+Lemma~\ref{lem:loc-parts}(a), the stack search for $oid$ in $\sigma$ fails. Now
+Lemma~\ref{lem:merge-loc}(a) gives $\loc{\sigma'}{\OId(oid)} = \Rgn(r_0)$.
 \end{proof}
 
 \begin{lemma}[\inv{S1}] \lean{merge\_S1}
@@ -275,7 +263,7 @@ $\sigma' \vdash \inv{S2}$.
 \end{lemma}
 \begin{proof}
 Let $(G', i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G')$ and $\loc{\sigma'}{\OId(oid)} = \Stk(j)$. By
-Lemma~\ref{lem:merge-loc}(e), $\loc{\sigma}{\OId(oid)} = \Stk(j)$. Take $(G, i)$ as in
+Lemma~\ref{lem:merge-loc}(b), $\loc{\sigma}{\OId(oid)} = \Stk(j)$. Take $(G, i)$ as in
 Lemma~\ref{lem:merge-frames}(d).
 \begin{itemize}[nosep]
   \item If $\OId(oid) \in \refs(G)$, \inv{S2} for $\sigma$ gives $j \le i$.
@@ -290,7 +278,7 @@ $\sigma' \vdash \inv{S3}$.
 \end{lemma}
 \begin{proof}
 Let $(G', i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G')$ and $\loc{\sigma'}{\OId(oid)} = \Rgn(r_0)$. By
-Lemma~\ref{lem:merge-loc}(b), $H'(r_0) = Q$ with $oid \in \dom(Q.\omap)$. Take $(G, i)$
+Lemma~\ref{lem:loc-parts}(b), $H'(r_0) = Q$ with $oid \in \dom(Q.\omap)$. Take $(G, i)$
 as in Lemma~\ref{lem:merge-frames}(d).
 
 \emph{Case $\OId(oid) \in \refs(G)$.} First we find $r_1$ with $\loc{\sigma}{\OId(oid)} = \Rgn(r_1)$
