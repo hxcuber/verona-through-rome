@@ -1,0 +1,373 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{underscore}   % lets identifier_names appear in \texttt{} without escaping
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{mathpartir}
+
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\theoremstyle{remark}
+\newtheorem*{remark}{Remark}
+
+\newcommand{\inN}{\!\in\!}
+\newcommand{\lean}[1]{\hfill{\footnotesize\upshape\texttt{[#1]}}\par\noindent\ignorespaces}
+\newcommand{\leanpart}[1]{{\unskip\nobreak\hfil\penalty50\hskip1em\hbox{}\nobreak\hfill
+  \mbox{\footnotesize\upshape\texttt{[#1]}}}}
+\newcommand{\leanform}[1]{\par\smallskip\noindent{\upshape\small\textit{Lean form.} #1}}
+\newcommand{\RId}{\mathsf{RId}}
+\newcommand{\OId}{\mathsf{OId}}
+\newcommand{\Rgn}{\mathsf{Rgn}}
+\newcommand{\Stk}{\mathsf{Stk}}
+\newcommand{\Open}{\mathit{Open}}
+\newcommand{\Closed}{\mathit{Closed}}
+\newcommand{\loc}[2]{\mathrm{loc}_{#1}(#2)}
+\newcommand{\refs}{\mathit{refs}}
+\newcommand{\oids}{\mathit{objectIds}}
+\newcommand{\rid}{\mathit{regionId}}
+\newcommand{\omap}{\mathit{objMap}}
+\newcommand{\vmap}{\mathit{varMap}}
+\newcommand{\bridge}{\mathit{bridgeObjectId}}
+\newcommand{\status}{\mathit{status}}
+\newcommand{\dom}{\mathrm{dom}}
+\newcommand{\cat}{\mathbin{+\!\!+}}
+\newcommand{\perm}{\equiv}
+\newcommand{\sublist}{\sqsubseteq}
+\newcommand{\noloc}{\bot}
+\newcommand{\inv}[1]{\textit{#1}}
+
+\title{Preservation of \textit{ValidConfig}: human-readable proofs}
+\author{Hoang Nguyen}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Pen-and-paper versions of the proofs in \texttt{lean/gc/Gc/Model/Preservation/}: for each mutation
+operation, that it maps a \inv{ValidConfig} to a \inv{ValidConfig}. Each proof follows the
+structure of its Lean counterpart, whose name is given in brackets on the right.
+\end{abstract}
+
+\tableofcontents
+
+%======================================================================
+\section{Preliminaries}
+%======================================================================
+
+\subsection{Configurations}
+
+A configuration is $\sigma = \langle S, H\rangle$. The stack $S = [F_0, \dots, F_{n-1}]$ is a list of
+frames whose \emph{top is the end of the list}; we write $S :: F$ for the stack with $F$ pushed on top
+of $S$, i.e.\ the list $S \cat [F]$. The \emph{index} of a frame is its position, so $F_i$ has index
+$i$ and a larger index is a later frame. The Lean \texttt{stackWithIndex} is the list of pairs
+$(F_i, i)$; we write $(G, i) \in S$ for ``$i < |S|$ and $S[i] = G$''. In $S :: F$ the top frame $F$
+has index $|S|$, and every frame of $S$ keeps the index it has in $S$.
+
+The heap $H$ is a finite map from region ids to regions; a region $R$ has a $R.\bridge$, an
+$R.\omap$ and a $R.\status \in \{\Open, \Closed\}$. A frame $G$ has a $G.\rid$, a bridge variable,
+a $G.\omap$ of temporaries and a $G.\vmap$. In Lean, maps are association lists and the derived lists
+below are concatenations in list order. Every invariant either asks for a list to be duplicate-free or
+counts or tests membership in it, so all it sees of a list is its multiset of elements. We write
+$\ell \perm \ell'$ for ``$\ell$ is a permutation of $\ell'$'' and $\ell \sublist \ell'$ for ``$\ell$
+is a sublist of $\ell'$''; duplicate-freeness, counts and membership are invariant under $\perm$, and
+are inherited (duplicate-freeness, membership) or bounded (counts) along $\sublist$.
+
+\begin{definition}[References and object ids]
+\lean{Gc/Model/Helpers.lean: Object.refs, \dots, RuntimeConfig.refs; Frame.objectIds, \dots,
+RuntimeConfig.objectIds}
+\begin{itemize}[nosep]
+  \item $\refs(o)$ of an object $o$: its field values. $\refs(R)$ of a region: the $\refs$ of all its
+    objects. $\refs(G)$ of a frame: the $\refs$ of all objects in $G.\omap$, followed by the values
+    of $G.\vmap$.
+  \item $\refs(S)$, $\refs(H)$: concatenation over frames, resp.\ regions.
+    $\refs(\sigma) = \refs(S) \cat \refs(H)$.
+  \item $\oids(G) = \dom(G.\omap)$, $\oids(R) = \dom(R.\omap)$; $\oids(S)$, $\oids(H)$ by
+    concatenation; $\oids(\sigma) = \oids(S) \cat \oids(H)$.
+\end{itemize}
+Neither the bridge variable of a frame nor the $\bridge$ of a region counts as a reference.
+\end{definition}
+
+\begin{definition}[Location]
+\label{def:loc}
+\lean{Gc/Model/Helpers.lean: Reference.loc?}
+For a reference $r$, $\loc{\sigma}{r}$ is a location $\Rgn(rid)$ or $\Stk(i)$, or undefined
+($\noloc$):
+\begin{itemize}[nosep]
+  \item $\loc{\sigma}{\RId(rid)} = \Rgn(rid)$ if $rid \in \dom(H)$, and $\noloc$ otherwise.
+  \item For $\loc{\sigma}{\OId(oid)}$, two searches run independently. The stack search looks from
+    the top for the \emph{last} frame $(G,i)$ with $oid \in \dom(G.\omap)$. The heap search looks in
+    entry order for the \emph{first} region $(rid, R)$ with $oid \in \dom(R.\omap)$. If only the stack search succeeds the location is
+    $\Stk(i)$; if only the heap search succeeds it is $\Rgn(rid)$; if both or neither succeed it is
+    $\noloc$.
+\end{itemize}
+\end{definition}
+
+The ten invariants \inv{L1}, \inv{L2}, \inv{H1}, \inv{H2}, \inv{H3}, \inv{S1}, \inv{S2},
+\inv{S3}, \inv{HS1}, \inv{HS2} are as in \texttt{main.tex}; $\sigma \vdash \inv{ValidConfig}$ is
+their conjunction. The two we use most are:
+\begin{itemize}[nosep]
+  \item \inv{L1}: $\oids(\sigma)$ is duplicate-free;
+  \item \inv{S1}: the list $[G.\rid \mid G \in S]$ is duplicate-free.
+\end{itemize}
+
+\subsection{Shared lemmas}
+
+Each part of a lemma below is tagged with the Lean theorem that proves it. Where the Lean statement is
+more general than what we need, or phrased differently, a \textit{Lean form} note gives the exact
+shape.
+
+\begin{lemma}[Locations under \inv{L1}]
+\label{lem:loc-l1}
+\lean{Gc/Model/Validity.lean}
+If $\sigma \vdash \inv{L1}$ then for every $oid$:
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item $\loc{\sigma}{\OId(oid)} = \Rgn(rid)$ iff $H(rid) = R$ for some $R$ with
+    $oid \in \dom(R.\omap)$; \leanpart{oid\_loc\_rgn\_iff\_in\_heap}
+  \item $\loc{\sigma}{\OId(oid)} = \Stk(i)$ iff $(G, i) \in S$ for some $G$ with
+    $oid \in \dom(G.\omap)$. \leanpart{oid\_loc\_stk\_iff\_in\_stack}
+\end{enumerate}
+\leanform{Both take $\mathit{ValidConfig}\ \sigma$ as hypothesis but use only its \inv{L1} field.
+In (a), ``$H(rid) = R$'' is \texttt{cfg.heap.lookup rid = some R}; in (b), ``$(G,i) \in S$'' is
+\texttt{cfg.stackWithIndex[i]? = some G}.}
+\end{lemma}
+\begin{proof}
+By \inv{L1}, $oid$ occurs at most once in $\oids(S) \cat \oids(H)$, so it lies in the $\omap$ of at
+most one frame or region in total. The ``only if'' directions just read off the search that succeeded
+in Definition~\ref{def:loc}. For ``if'' in (a): the heap search must find $(rid, R)$, because no other
+region contains $oid$, and the stack search fails, because no frame contains it either; so the
+location is $\Rgn(rid)$. Part (b) is symmetric: the stack search finds $(G,i)$ and the heap search
+fails.
+\end{proof}
+
+\begin{lemma}[Status update]
+\label{lem:status-update}
+\lean{Gc/Model/Preservation/Common.lean}
+Let $H(rid_0) = R_0$, let $s$ be a status and $H' = H[rid_0 \mapsto R_0']$ where $R_0'$ is $R_0$ with
+its status set to $s$. Then:
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item $\dom(H') = \dom(H)$; \leanpart{heap\_insert\_keys\_mem}
+  \item $\refs(H') \perm \refs(H)$ \leanpart{heap\_insert\_refs\_perm}\\
+    and $\oids(H') \perm \oids(H)$; \leanpart{heap\_insert\_objectIds\_perm}
+  \item for every $rid$, $H'(rid)$ is defined iff $H(rid)$ is, and the two regions have the same
+    $\omap$ (so the same $\refs$ and $\oids$); \leanpart{heap\_status\_update\_entries\_mem\_iff}
+  \item if $\langle S, H\rangle \vdash \inv{L1}$, then for every $oid$ the heap search of
+    Definition~\ref{def:loc} succeeds in $H'$ iff it succeeds in $H$, and then returns the same
+    region id. \leanpart{heap\_status\_update\_find\_fst}
+\end{enumerate}
+\leanform{(a) and (b) hold for an insert of \emph{any} region at a present key, not just a status
+change: (a) needs nothing more, (b) needs the new region to have the same $\refs$ (resp.\ a
+permutation of the old $\omap$ keys), which a status change satisfies with equality. Other
+operations reuse them in that generality. (c) is stated over heap entries: for all $r$ and $m$,
+$\exists Q.\ (r, Q) \in H'.\mathit{entries} \wedge Q.\omap = m$ iff the same holds in $H$. (d) is
+stated as an equation on the search results projected to their keys:
+$(H'.\mathit{entries}.\mathtt{find?}\ p).\mathtt{map}\ \mathtt{fst} =
+(H.\mathit{entries}.\mathtt{find?}\ p).\mathtt{map}\ \mathtt{fst}$, where $p$ tests
+$oid \in \dom(Q.\omap)$.}
+\end{lemma}
+\begin{proof}
+(a) $rid_0$ is already a key of $H$. (c) At $rid_0$ the region changes only in its status; at every
+other key it does not change. (b) Inserting at a present key moves that entry to the front and
+replaces its value with one of the same $\omap$; the derived lists are therefore rearranged but have
+the same elements. (d) By (c) the regions of $H'$ containing $oid$ sit at exactly the keys of the
+regions of $H$ containing $oid$. By \inv{L1} there is at most one such key, so the first-match search
+returns it in both heaps, even though the entry order differs.
+\end{proof}
+
+%======================================================================
+\section{\texttt{exit}}
+%======================================================================
+
+\begin{mathpar}
+  \inferrule* [lab=exit]
+    {|S| \ge 1 \\ H(F.\rid) = R \\ R.\status = \Open}
+    {\langle S :: F, H \rangle \xrightarrow{\texttt{exit}} \langle S,\ H[F.\rid \mapsto R'] \rangle
+     \quad\text{where } R' = R \text{ with } \status := \Closed}
+\end{mathpar}
+
+\texttt{exit} pops the top frame $F$ and closes its region. Throughout this section fix
+$\sigma = \langle S :: F, H\rangle$ with $\sigma \vdash \inv{ValidConfig}$, and
+$\sigma' = \langle S, H'\rangle$ with $H' = H[F.\rid \mapsto R']$ as above. Let $n = |S|$, the
+index of $F$ in $\sigma$. This is exactly what \texttt{exit\_cases} extracts from
+$\texttt{exit}\ \sigma = \mathsf{some}\ \sigma'$. Lemma~\ref{lem:status-update} applies with
+$rid_0 = F.\rid$ and $s = \Closed$.
+
+The proof has three parts: one lemma that describes every location of $\sigma'$ in terms of $\sigma$
+(Lemma~\ref{lem:exit-loc}), the observation that nothing new is stored (Lemma~\ref{lem:exit-refs}),
+and the ten invariants.
+
+\subsection{Supporting lemmas}
+
+\begin{lemma}[Locations after \texttt{exit}]
+\label{lem:exit-loc}
+\lean{exit\_loc}
+For every reference $r$, either $\loc{\sigma'}{r} = \loc{\sigma}{r}$, or $\loc{\sigma'}{r} = \noloc$
+and $\loc{\sigma}{r} = \Stk(i)$ for some $i$.
+\end{lemma}
+\begin{proof}
+For $r = \RId(rid)$: the location depends only on $\dom$, which is unchanged by
+Lemma~\ref{lem:status-update}(a), so $\loc{\sigma'}{r} = \loc{\sigma}{r}$.
+
+For $r = \OId(oid)$: by Lemma~\ref{lem:status-update}(d), the heap search gives the same answer in
+$H'$ as in $H$, so only the stack search can differ. The frames of $\sigma'$ are those of $\sigma$
+minus the top one, with the same indices. Searching $\sigma$'s stack from the top therefore first
+looks at $(F, n)$, and if $oid \notin \dom(F.\omap)$ then continues exactly as the search of
+$\sigma'$'s stack.
+\begin{itemize}[nosep]
+  \item If $oid \notin \dom(F.\omap)$, both searches return the same result, so the two locations
+    agree.
+  \item If $oid \in \dom(F.\omap)$, the stack search in $\sigma$ returns $(F, n)$. By \inv{L1},
+    $oid$ is in no region of $H$, so the heap search fails and $\loc{\sigma}{r} = \Stk(n)$. Again by
+    \inv{L1}, $oid$ is in no frame of $S$, since $\oids(S :: F) = \oids(S) \cat \dom(F.\omap)$ is
+    duplicate-free. So in $\sigma'$ both searches fail, and $\loc{\sigma'}{r} = \noloc$. \qedhere
+\end{itemize}
+\end{proof}
+
+\begin{corollary}
+\label{cor:exit-loc}
+For every reference $r$:
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item $\loc{\sigma}{r} = \Rgn(rid)$ iff $\loc{\sigma'}{r} = \Rgn(rid)$;
+    \leanpart{exit\_corollary\_1}
+  \item if $\loc{\sigma'}{r} = \Stk(i)$ then $\loc{\sigma}{r} = \Stk(i)$.
+    \leanpart{exit\_corollary\_3}
+\end{enumerate}
+\end{corollary}
+\begin{proof}
+In the second case of Lemma~\ref{lem:exit-loc}, $\loc{\sigma'}{r}$ is undefined and
+$\loc{\sigma}{r}$ is a stack location, so neither side of (a) holds and the premise of (b) is false.
+In the first case both statements are trivial.
+\end{proof}
+
+\begin{lemma}[No new references]
+\label{lem:exit-refs}
+\lean{exit\_refs\_mem}
+Every element of $\refs(\sigma')$ is an element of $\refs(\sigma)$. More precisely,
+$\refs(S) \sublist \refs(S :: F)$ and $\refs(H') \perm \refs(H)$.
+\end{lemma}
+\begin{proof}
+$\refs(S :: F) = \refs(S) \cat \refs(F)$, and $\refs(H') \perm \refs(H)$ is
+Lemma~\ref{lem:status-update}(b).
+\end{proof}
+
+\subsection{The invariants}
+
+\begin{lemma}[\inv{L1}] \lean{exit\_L1}
+$\sigma' \vdash \inv{L1}$.
+\end{lemma}
+\begin{proof}
+$\oids(\sigma') = \oids(S) \cat \oids(H') \perm \oids(S) \cat \oids(H)$ by
+Lemma~\ref{lem:status-update}(b), and this is a sublist of
+$\oids(S) \cat \dom(F.\omap) \cat \oids(H) = \oids(\sigma)$, which is duplicate-free by \inv{L1}.
+\end{proof}
+
+\begin{lemma}[\inv{L2}] \lean{exit\_L2}
+$\sigma' \vdash \inv{L2}$.
+\end{lemma}
+\begin{proof}
+Let $G \in S$. By \inv{S1} for $\sigma$, the region ids of $S :: F$ are pairwise distinct, so
+$G.\rid \ne F.\rid$. Hence $H'(G.\rid) = H(G.\rid)$, which by \inv{L2} for $\sigma$ (as
+$G \in S :: F$) is an $\Open$ region.
+\end{proof}
+
+\begin{lemma}[\inv{H1}] \lean{exit\_H1}
+$\sigma' \vdash \inv{H1}$.
+\end{lemma}
+\begin{proof}
+A region of $H'$ is either $R'$ or a region of $H$ stored at some key other than $F.\rid$. In the
+second case \inv{H1} for $\sigma$ applies directly. In the first, $R'$ has the same $\bridge$ and
+$\omap$ as $R$, and $R$ satisfies \inv{H1} since it is a region of $H$.
+\end{proof}
+
+\begin{lemma}[\inv{H2}] \lean{exit\_H2}
+$\sigma' \vdash \inv{H2}$.
+\end{lemma}
+\begin{proof}
+Fix $rid$ and write $\#\ell$ for the number of occurrences of $\RId(rid)$ in $\ell$. By
+Lemma~\ref{lem:exit-refs}, $\#\refs(S) \le \#\refs(S :: F)$ and $\#\refs(H') = \#\refs(H)$, so
+$\#\refs(S) + \#\refs(H') \le \#\refs(S :: F) + \#\refs(H) \le 1$ by \inv{H2} for $\sigma$.
+\end{proof}
+
+\begin{lemma}[\inv{H3}] \lean{exit\_H3}
+$\sigma' \vdash \inv{H3}$.
+\end{lemma}
+\begin{proof}
+Let $H'(rid) = Q'$ and $\OId(oid) \in \refs(Q')$. By Lemma~\ref{lem:status-update}(c),
+$H(rid) = Q$ for some $Q$ with the same $\omap$ as $Q'$, and $\refs$ of a region depends only on its
+$\omap$, so $\OId(oid) \in \refs(Q)$. By \inv{H3} for $\sigma$,
+$\loc{\sigma}{\OId(oid)} = \Rgn(rid)$, and by Corollary~\ref{cor:exit-loc}(a),
+$\loc{\sigma'}{\OId(oid)} = \Rgn(rid)$.
+\end{proof}
+
+\begin{lemma}[\inv{S1}] \lean{exit\_S1}
+$\sigma' \vdash \inv{S1}$.
+\end{lemma}
+\begin{proof}
+$[G.\rid \mid G \in S]$ is a sublist of $[G.\rid \mid G \in S :: F]$, which is duplicate-free by
+\inv{S1} for $\sigma$.
+\end{proof}
+
+\begin{lemma}[\inv{S2}] \lean{exit\_S2}
+$\sigma' \vdash \inv{S2}$.
+\end{lemma}
+\begin{proof}
+Let $(G, i) \in S$, $\OId(oid) \in \refs(G)$ and $\loc{\sigma'}{\OId(oid)} = \Stk(j)$. The pair
+$(G,i)$ is also a frame of $\sigma$, at the same index. By Corollary~\ref{cor:exit-loc}(b),
+$\loc{\sigma}{\OId(oid)} = \Stk(j)$, so \inv{S2} for $\sigma$ gives $j \le i$.
+\end{proof}
+
+\begin{lemma}[\inv{S3}] \lean{exit\_S3}
+$\sigma' \vdash \inv{S3}$.
+\end{lemma}
+\begin{proof}
+Let $(G, i) \in S$, $\OId(oid) \in \refs(G)$ and $\loc{\sigma'}{\OId(oid)} = \Rgn(rid')$. As in the
+proof of \inv{S2}, $(G, i)$ is a frame of $\sigma$, and by Corollary~\ref{cor:exit-loc}(a)
+$\loc{\sigma}{\OId(oid)} = \Rgn(rid')$. \inv{S3} for $\sigma$ gives a frame $(G'', k)$ of $\sigma$
+with $G''.\rid = rid'$ and $k \le i$. Since $i < n$ we have $k < n$, so $(G'', k)$ is not the popped
+frame: $(G'', k) \in S$, which is the required witness in $\sigma'$.
+\end{proof}
+
+\begin{lemma}[\inv{HS1}] \lean{exit\_HS1}
+$\sigma' \vdash \inv{HS1}$.
+\end{lemma}
+\begin{proof}
+Let $\OId(oid) \in \refs(\sigma')$. By Lemma~\ref{lem:exit-refs} it is in $\refs(\sigma)$, so by
+\inv{HS1} for $\sigma$,
+\[ oid \in \oids(\sigma) = \oids(S) \cat \dom(F.\omap) \cat \oids(H). \]
+If $oid \in \oids(S)$ it is in $\oids(\sigma')$ directly; if $oid \in \oids(H)$ it is in
+$\oids(H') \perm \oids(H)$ (Lemma~\ref{lem:status-update}(b)).
+
+It remains to rule out $oid \in \dom(F.\omap)$: the popped frame's objects must not still be
+referenced. Suppose $oid \in \dom(F.\omap)$. By Lemma~\ref{lem:loc-l1}(b),
+$\loc{\sigma}{\OId(oid)} = \Stk(n)$. Now $\OId(oid)$ is in $\refs(\sigma') = \refs(S) \cat \refs(H')$:
+\begin{itemize}[nosep]
+  \item If $\OId(oid) \in \refs(G)$ for some $(G, m) \in S$, then $(G, m)$ is a frame of $\sigma$ and
+    \inv{S2} for $\sigma$ gives $n \le m$, contradicting $m < n$.
+  \item If $\OId(oid) \in \refs(H')$, then by Lemma~\ref{lem:status-update}(b) it is in $\refs(Q)$
+    for some $H(rid) = Q$. \inv{H3} for $\sigma$ gives $\loc{\sigma}{\OId(oid)} = \Rgn(rid)$,
+    contradicting $\loc{\sigma}{\OId(oid)} = \Stk(n)$. \qedhere
+\end{itemize}
+\end{proof}
+
+\begin{lemma}[\inv{HS2}] \lean{exit\_HS2}
+$\sigma' \vdash \inv{HS2}$.
+\end{lemma}
+\begin{proof}
+If $\RId(rid) \in \refs(\sigma')$ then $\RId(rid) \in \refs(\sigma)$ by Lemma~\ref{lem:exit-refs}, so
+$rid \in \dom(H) = \dom(H')$ by \inv{HS2} for $\sigma$ and Lemma~\ref{lem:status-update}(a).
+\end{proof}
+
+\begin{theorem} \lean{exit\_valid}
+If $\sigma \vdash \inv{ValidConfig}$ and $\sigma \xrightarrow{\texttt{exit}} \sigma'$, then
+$\sigma' \vdash \inv{ValidConfig}$.
+\end{theorem}
+\begin{proof}
+The ten lemmas above.
+\end{proof}
+
+\end{document}
