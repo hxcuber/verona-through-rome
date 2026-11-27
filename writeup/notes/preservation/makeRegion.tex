@@ -1,0 +1,260 @@
+%======================================================================
+\section{\texttt{makeRegion}}
+%======================================================================
+
+\begin{mathpar}
+  \inferrule* [lab=make-region]
+    {o^* = \mathit{freshObjectId}(\langle S :: F, H\rangle) \\ \rho^* = \mathit{freshRegionId}(\langle S :: F, H\rangle)}
+    {\langle S :: F, H \rangle \xrightarrow{\texttt{makeRegion}\ x} \langle S :: F',\ H[\rho^* \mapsto R^*] \rangle}
+\end{mathpar}
+where $F' = F$ with $\vmap[x \mapsto \RId(\rho^*)]$ and
+$R^* = (o^*, [o^* \mapsto \emptyset], \Closed)$.
+
+\texttt{makeRegion}~$x$ allocates a new $\Closed$ region, holding only an empty bridge object, and
+writes a reference to the region into the variable $x$ of the top frame. Throughout this section fix
+$\sigma = \langle S :: F, H\rangle$ with $\sigma \vdash \inv{ValidConfig}$, and
+$\sigma' = \langle S :: F', H'\rangle$ with $H' = H[\rho^* \mapsto R^*]$, where $o^*$, $\rho^*$,
+$F'$ and $R^*$ are as above. Let $n = |S|$, the index of $F$ in $\sigma$ and of $F'$ in $\sigma'$.
+This is exactly what \texttt{makeRegion\_cases} extracts from
+$\texttt{makeRegion}\ x\ \sigma = \mathsf{some}\ \sigma'$. Note that $F'$ has the same region id and
+the same $\omap$ as $F$.
+
+The proof has three parts: lemmas that describe the frames, heap, stored references, object ids and
+locations of $\sigma'$ in terms of $\sigma$
+(Lemmas~\ref{lem:makeRegion-frames}--\ref{lem:makeRegion-loc}), a combination of these for the object
+references stored in frames (Lemma~\ref{lem:makeRegion-stack-oid}), and the ten invariants.
+
+\subsection{Supporting lemmas}
+
+\begin{lemma}[Frames after \texttt{makeRegion}]
+\label{lem:makeRegion-frames}
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item For every indexed frame $(G', i)$ of $\sigma'$ there is an indexed frame $(G, i)$ of $\sigma$
+    such that every element of $\refs(G')$ is in $\refs(G)$ or equals $\RId(\rho^*)$;
+    \leanpart{swi\_down}
+  \item for every indexed frame $(G, i)$ of $\sigma$ there is an indexed frame $(G', i)$ of $\sigma'$
+    with $G'.\rid = G.\rid$. \leanpart{swi\_up}
+\end{enumerate}
+\end{lemma}
+\begin{proof}
+By Lemma~\ref{lem:stack-split}(a), the indexed frames of $\sigma$ are those of $S$ followed by
+$(F, n)$, and those of $\sigma'$ are those of $S$ followed by $(F', n)$.
+
+(a) If $(G', i)$ is a frame of $S$, take $G = G'$. Otherwise $(G', i) = (F', n)$; take $(F, n)$. By
+Lemma~\ref{lem:write-mem}(e), every element of $\refs(F')$ is $\RId(\rho^*)$ or in $\refs(F)$.
+
+(b) If $(G, i)$ is a frame of $S$, take $G' = G$. Otherwise $(G, i) = (F, n)$; take $(F', n)$, which
+has the same region id.
+\end{proof}
+
+\begin{lemma}[The heap after \texttt{makeRegion}]
+\label{lem:makeRegion-heap}
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item The entries of $H'$ are $(\rho^*, R^*)$ followed by the entries of $H$;
+    \leanpart{heap\_entries}
+  \item $\refs(H') = \refs(H)$. \leanpart{heap\_refs\_eq}
+\end{enumerate}
+\leanform{(a) is stated for an insert of any region at $\mathit{freshRegionId}$.}
+\end{lemma}
+\begin{proof}
+(a) By Lemma~\ref{lem:fresh}(a), $\rho^* \notin \dom(H)$, so the insert prepends an entry and removes
+none. (b) By (a), $\refs(H') = \refs(R^*) \cat \refs(H)$, and $\refs(R^*)$ is empty because the only
+object of $R^*$ has no fields.
+\end{proof}
+
+\begin{lemma}[Object ids after \texttt{makeRegion}]
+\label{lem:makeRegion-oids}
+\lean{objectIds\_perm}
+$\oids(\sigma') \perm [o^*] \cat \oids(\sigma)$.
+\end{lemma}
+\begin{proof}
+By Lemma~\ref{lem:stack-split}(c), Lemma~\ref{lem:makeRegion-heap}(a) and
+$\oids(F') = \dom(F.\omap) = \oids(F)$,
+\begin{align*}
+  \oids(\sigma') &= \oids(S) \cat \dom(F.\omap) \cat [o^*] \cat \oids(H) \\
+    &\perm [o^*] \cat \oids(S) \cat \dom(F.\omap) \cat \oids(H),
+\end{align*}
+and the last line is $[o^*] \cat \oids(\sigma)$.
+\end{proof}
+
+\begin{lemma}[References after \texttt{makeRegion}]
+\label{lem:makeRegion-refs}
+\lean{refs\_mem}
+Every element of $\refs(\sigma')$ is $\RId(\rho^*)$ or an element of $\refs(\sigma)$.
+\end{lemma}
+\begin{proof}
+Let $r \in \refs(\sigma')$. By Lemma~\ref{lem:stack-split}(d) and
+Lemma~\ref{lem:makeRegion-heap}(b), $r$ is in $\refs(S)$, $\refs(F')$ or $\refs(H)$. In the first and
+last cases $r \in \refs(\sigma)$. If $r \in \refs(F')$ then by Lemma~\ref{lem:write-mem}(e) either
+$r = \RId(\rho^*)$, or $r \in \refs(F)$, and hence $r \in \refs(\sigma)$.
+\end{proof}
+
+\begin{lemma}[Locations after \texttt{makeRegion}]
+\label{lem:makeRegion-loc}
+\lean{loc\_eq}
+For every $oid$,
+\[ \loc{\sigma'}{\OId(oid)} =
+   \begin{cases}
+     \Rgn(\rho^*) & \text{if } oid = o^*, \\
+     \loc{\sigma}{\OId(oid)} & \text{otherwise.}
+   \end{cases} \]
+\end{lemma}
+\begin{proof}
+The stack search of Definition~\ref{def:loc} looks at the top frame first and then at the frames of
+$S$; the heap search looks at the entries of $H'$ in the order given by
+Lemma~\ref{lem:makeRegion-heap}(a), so at $(\rho^*, R^*)$ first.
+\begin{itemize}[nosep]
+  \item If $oid = o^*$: by Lemma~\ref{lem:fresh}(b), $o^*$ is not in $\dom(F.\omap)$, which is the
+    $\omap$ of $F'$, nor in the $\omap$ of any frame of $S$. So the stack search fails. The heap
+    search stops at $(\rho^*, R^*)$, since $o^* \in \dom(R^*.\omap)$. Hence the location is
+    $\Rgn(\rho^*)$.
+  \item If $oid \ne o^*$: $oid \notin \dom(R^*.\omap) = \{o^*\}$, so the heap search passes over
+    $(\rho^*, R^*)$ and continues exactly as the search of $H$. The stack searches agree by
+    Lemma~\ref{lem:stack-search}, as $F'.\omap = F.\omap$. By Lemma~\ref{lem:loc-searches} the two
+    locations agree. \qedhere
+\end{itemize}
+\end{proof}
+
+\begin{corollary}
+\label{cor:makeRegion-loc}
+\lean{makeRegion\_corollary\_loc\_eq}
+For every $oid \ne o^*$, $\loc{\sigma}{\OId(oid)} = \loc{\sigma'}{\OId(oid)}$.
+\leanform{It takes $\mathit{ValidConfig}\ \sigma$ as a hypothesis but does not use it.}
+\end{corollary}
+\begin{proof}
+The second case of Lemma~\ref{lem:makeRegion-loc}.
+\end{proof}
+
+\begin{lemma}[Object references in frames]
+\label{lem:makeRegion-stack-oid}
+\lean{stack\_oid\_down}
+Let $(G', i)$ be an indexed frame of $\sigma'$ with $\OId(oid) \in \refs(G')$. Then there is an
+indexed frame $(G, i)$ of $\sigma$ with $\OId(oid) \in \refs(G)$, and
+$\loc{\sigma'}{\OId(oid)} = \loc{\sigma}{\OId(oid)}$.
+\end{lemma}
+\begin{proof}
+Take $(G, i)$ as in Lemma~\ref{lem:makeRegion-frames}(a). Since $\OId(oid) \ne \RId(\rho^*)$, we have
+$\OId(oid) \in \refs(G)$. So $\OId(oid) \in \refs(\sigma)$ by Lemma~\ref{lem:stored}(d), and
+$oid \ne o^*$ by Lemma~\ref{lem:fresh}(c). Lemma~\ref{lem:makeRegion-loc} then gives the equality of
+locations.
+\end{proof}
+
+\subsection{The invariants}
+
+\begin{lemma}[\inv{L1}] \lean{makeRegion\_L1}
+$\sigma' \vdash \inv{L1}$.
+\end{lemma}
+\begin{proof}
+$[o^*] \cat \oids(\sigma)$ is duplicate-free, since $\oids(\sigma)$ is by \inv{L1} for $\sigma$ and
+$o^* \notin \oids(\sigma)$ by Lemma~\ref{lem:fresh}(a). By Lemma~\ref{lem:makeRegion-oids},
+$\oids(\sigma')$ is a permutation of it.
+\end{proof}
+
+\begin{lemma}[\inv{L2}] \lean{makeRegion\_L2}
+$\sigma' \vdash \inv{L2}$.
+\end{lemma}
+\begin{proof}
+Let $G' \in S :: F'$. Either $G' \in S$, or $G' = F'$, which has the same region id as $F$. In both
+cases \inv{L2} for $\sigma$ gives an $\Open$ region $Q$ with $H(G'.\rid) = Q$. Then
+$G'.\rid \in \dom(H)$, so $G'.\rid \ne \rho^*$ by Lemma~\ref{lem:fresh}(a), and
+$H'(G'.\rid) = H(G'.\rid) = Q$.
+\end{proof}
+
+\begin{lemma}[\inv{H1}] \lean{makeRegion\_H1}
+$\sigma' \vdash \inv{H1}$.
+\end{lemma}
+\begin{proof}
+By Lemma~\ref{lem:makeRegion-heap}(a), a region of $H'$ is either $R^*$ or a region of $H$. The
+bridge object $o^*$ of $R^*$ is in $\dom(R^*.\omap) = \{o^*\}$. For a region of $H$, \inv{H1} for
+$\sigma$ applies directly.
+\end{proof}
+
+\begin{lemma}[\inv{H2}] \lean{makeRegion\_H2}
+$\sigma' \vdash \inv{H2}$.
+\end{lemma}
+\begin{proof}
+Fix $rid$ and write $\#\ell$ for the number of occurrences of $\RId(rid)$ in $\ell$, and
+$\delta$ for $1$ if $rid = \rho^*$ and $0$ otherwise. First,
+\[ \#\refs(F') \le \#\refs(F) + \delta. \]
+Indeed, $F'$ and $F$ have the same $\omap$, and the values of $F.\vmap[x \mapsto \RId(\rho^*)]$ are
+$\RId(\rho^*)$ together with the values of $F.\vmap$ with the entry for $x$ (if any) removed, the
+latter being a sublist of the values of $F.\vmap$. Next, by Lemma~\ref{lem:stack-split}(c) and
+Lemma~\ref{lem:makeRegion-heap}(b), the quantity to bound is
+\[ \#\refs(S :: F') + \#\refs(H') = \#\refs(S) + \#\refs(F') + \#\refs(H), \]
+while \inv{H2} for $\sigma$ reads
+$\#\refs(S) + \#\refs(F) + \#\refs(H) \le 1$.
+\begin{itemize}[nosep]
+  \item If $rid \ne \rho^*$, then $\delta = 0$ and the bound follows from the two displays.
+  \item If $rid = \rho^*$, then $\RId(\rho^*) \notin \refs(\sigma)$: otherwise \inv{HS2} for $\sigma$
+    would give $\rho^* \in \dom(H)$, contradicting Lemma~\ref{lem:fresh}(a). So
+    $\#\refs(S) = \#\refs(F) = \#\refs(H) = 0$, hence $\#\refs(F') \le 1$ and the sum is at most
+    $1$. \qedhere
+\end{itemize}
+\end{proof}
+
+\begin{lemma}[\inv{H3}] \lean{makeRegion\_H3}
+$\sigma' \vdash \inv{H3}$.
+\end{lemma}
+\begin{proof}
+Let $H'(rid) = Q$ and $\OId(oid) \in \refs(Q)$. If $rid = \rho^*$ then $Q = R^*$, which has no
+references, so this case is impossible. Hence $rid \ne \rho^*$ and $H(rid) = Q$. By
+Lemma~\ref{lem:stored}(b), $\OId(oid) \in \refs(H) \sublist \refs(\sigma)$, so $oid \ne o^*$ by
+Lemma~\ref{lem:fresh}(c). Therefore, by Lemma~\ref{lem:makeRegion-loc} and \inv{H3} for $\sigma$,
+$\loc{\sigma'}{\OId(oid)} = \loc{\sigma}{\OId(oid)} = \Rgn(rid)$.
+\end{proof}
+
+\begin{lemma}[\inv{S1}] \lean{makeRegion\_S1}
+$\sigma' \vdash \inv{S1}$.
+\end{lemma}
+\begin{proof}
+$F'.\rid = F.\rid$, so $[G.\rid \mid G \in S :: F'] = [G.\rid \mid G \in S :: F]$, which is
+duplicate-free by \inv{S1} for $\sigma$.
+\end{proof}
+
+\begin{lemma}[\inv{S2}] \lean{makeRegion\_S2}
+$\sigma' \vdash \inv{S2}$.
+\end{lemma}
+\begin{proof}
+Let $(G', i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G')$ and
+$\loc{\sigma'}{\OId(oid)} = \Stk(j)$. Lemma~\ref{lem:makeRegion-stack-oid} gives an indexed frame
+$(G, i)$ of $\sigma$ with $\OId(oid) \in \refs(G)$ and $\loc{\sigma}{\OId(oid)} = \Stk(j)$. By \inv{S2} for
+$\sigma$, $j \le i$.
+\end{proof}
+
+\begin{lemma}[\inv{S3}] \lean{makeRegion\_S3}
+$\sigma' \vdash \inv{S3}$.
+\end{lemma}
+\begin{proof}
+Let $(G', i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G')$ and
+$\loc{\sigma'}{\OId(oid)} = \Rgn(rid')$. Lemma~\ref{lem:makeRegion-stack-oid} gives an indexed frame
+$(G, i)$ of $\sigma$ with $\OId(oid) \in \refs(G)$ and $\loc{\sigma}{\OId(oid)} = \Rgn(rid')$. \inv{S3} for
+$\sigma$ gives an indexed frame $(G'', k)$ of $\sigma$ with $G''.\rid = rid'$ and $k \le i$. By
+Lemma~\ref{lem:makeRegion-frames}(b), $\sigma'$ has an indexed frame with index $k$ and region id $rid'$,
+which is the required witness.
+\end{proof}
+
+\begin{lemma}[\inv{HS1}] \lean{makeRegion\_HS1}
+$\sigma' \vdash \inv{HS1}$.
+\end{lemma}
+\begin{proof}
+Let $\OId(oid) \in \refs(\sigma')$. It is not $\RId(\rho^*)$, so by Lemma~\ref{lem:makeRegion-refs}
+it is in $\refs(\sigma)$. By \inv{HS1} for $\sigma$, $oid \in \oids(\sigma)$, and so
+$oid \in \oids(\sigma')$ by Lemma~\ref{lem:makeRegion-oids}.
+\end{proof}
+
+\begin{lemma}[\inv{HS2}] \lean{makeRegion\_HS2}
+$\sigma' \vdash \inv{HS2}$.
+\end{lemma}
+\begin{proof}
+Let $\RId(rid) \in \refs(\sigma')$, and note that $\dom(H') = \dom(H) \cup \{\rho^*\}$. By
+Lemma~\ref{lem:makeRegion-refs}, either $\RId(rid) = \RId(\rho^*)$, so $rid = \rho^* \in \dom(H')$,
+or $\RId(rid) \in \refs(\sigma)$, so $rid \in \dom(H) \subseteq \dom(H')$ by \inv{HS2} for $\sigma$.
+\end{proof}
+
+\begin{theorem} \lean{makeRegion\_valid}
+If $\sigma \vdash \inv{ValidConfig}$ and $\sigma \xrightarrow{\texttt{makeRegion}\ x} \sigma'$, then
+$\sigma' \vdash \inv{ValidConfig}$.
+\end{theorem}
+\begin{proof}
+The ten lemmas above.
+\end{proof}

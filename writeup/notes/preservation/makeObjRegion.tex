@@ -1,0 +1,249 @@
+%======================================================================
+\section{\texttt{makeObjRegion}}
+%======================================================================
+
+\begin{mathpar}
+  \inferrule* [lab=make-obj-region]
+    {H(F.\rid) = R \\ R.\status = \Open \\ o^* = \mathit{freshObjectId}(\langle S :: F, H\rangle)}
+    {\langle S :: F, H \rangle \xrightarrow{\texttt{makeObjRegion}\ x} \langle S :: F',\ H[F.\rid \mapsto R'] \rangle}
+\end{mathpar}
+where $F' = F$ with $\vmap[x \mapsto \OId(o^*)]$ and $R' = R$ with $\omap[o^* \mapsto \emptyset]$.
+
+\texttt{makeObjRegion} allocates an empty object in the region of the top frame $F$, which must be
+$\Open$, and binds $x$ in $F$ to it. Throughout this section fix $\sigma = \langle S :: F, H\rangle$
+with $\sigma \vdash \inv{ValidConfig}$, and $\sigma' = \langle S :: F', H'\rangle$ with
+$H' = H[F.\rid \mapsto R']$, where $o^*$, $F'$, $R$ and $R'$ are as above. Let $n = |S|$, the index
+of $F$ in $\sigma$ and of $F'$ in $\sigma'$. This is exactly what \texttt{makeObjRegion\_cases}
+extracts from $\texttt{makeObjRegion}\ x\ \sigma = \mathsf{some}\ \sigma'$. Note that $F'$ has the
+same $\rid$ and $\omap$ as $F$, and $R'$ has the same $\bridge$ and $\status$ as $R$.
+
+The proof has three parts: lemmas that compare the frames, object ids and stored references of
+$\sigma'$ with those of $\sigma$ (Lemmas~\ref{lem:makeObjRegion-region}--\ref{lem:makeObjRegion-refs}),
+lemmas that give every object location of $\sigma'$ (Lemmas~\ref{lem:makeObjRegion-loc-eq} and~\ref{lem:makeObjRegion-loc-fresh}), and the ten
+invariants.
+
+\subsection{Supporting lemmas}
+
+\begin{lemma}[The new object in its region]
+\label{lem:makeObjRegion-region}
+$o^* \notin \dom(R.\omap)$, \leanpart{fresh\_not\_in\_region}\\
+and $\refs(R') = \refs(R)$. \leanpart{newRegion\_refs}
+\leanform{Both are stated for any $rid$ and region with $H(rid) = R$; neither needs $R$ to be
+$\Open$.}
+\end{lemma}
+\begin{proof}
+By Lemma~\ref{lem:stored}(e), $\dom(R.\omap)$ is contained in $\oids(H)$, hence in $\oids(\sigma)$,
+which does not contain $o^*$ by Lemma~\ref{lem:fresh}(a). So $o^*$ is a new key of $R.\omap$, and
+$R'.\omap$ consists of the entry $(o^*, \emptyset)$ followed by the entries of $R.\omap$. The empty
+object has no references.
+\end{proof}
+
+\begin{lemma}[Frames after \texttt{makeObjRegion}]
+\label{lem:makeObjRegion-frames}
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item For every indexed frame $(G', i)$ of $\sigma'$ there is an indexed frame $(G, i)$ of
+    $\sigma$ with $G.\rid = G'.\rid$ and
+    $G.\omap = G'.\omap$, such that every $r \in \refs(G')$ either is in $\refs(G)$, or satisfies
+    $r = \OId(o^*)$ and $G'.\rid = F.\rid$. \leanpart{swi\_down}
+  \item For every indexed frame $(G, i)$ of $\sigma$ there is an indexed frame $(G', i)$ of
+    $\sigma'$ with $G'.\rid = G.\rid$.
+    \leanpart{swi\_up}
+\end{enumerate}
+\leanform{In (a), ``$G'.\rid = F.\rid$'' is
+\texttt{cfg.stack.getLast?.map Frame.regionId = some f'.regionId}.}
+\end{lemma}
+\begin{proof}
+By Lemma~\ref{lem:stack-split}(a), the indexed frames of $\sigma$ are those of $S$ followed by
+$(F, n)$, and those of $\sigma'$ are those of $S$ followed by $(F', n)$. A frame of $S$ is its own
+counterpart in both directions. The remaining pair is $(F, n)$ and $(F', n)$, which have the same
+$\rid$ and $\omap$. For (a), by Lemma~\ref{lem:write-mem}(e) every element of $\refs(F')$ is
+$\OId(o^*)$ or in $\refs(F)$, and $F'.\rid = F.\rid$.
+\end{proof}
+
+\begin{lemma}[Object ids after \texttt{makeObjRegion}]
+\label{lem:makeObjRegion-oids}
+\lean{objectIds\_perm}
+$\oids(\sigma') \perm [o^*] \cat \oids(\sigma)$.
+\end{lemma}
+\begin{proof}
+On the stack, $F'.\omap = F.\omap$, so $\oids(S :: F') = \oids(S :: F)$. On the heap, let
+$H_0 = H[F.\rid \mapsto R]$. The heaps $H'$ and $H_0$ both have the entry for $F.\rid$ at the front,
+followed by the same other entries, and by Lemma~\ref{lem:makeObjRegion-region}
+$\dom(R'.\omap) = [o^*] \cat \dom(R.\omap)$. Hence $\oids(H') = [o^*] \cat \oids(H_0)$. By
+Lemma~\ref{lem:heap-insert}(c), $\oids(H_0) \perm \oids(H)$. Therefore
+\begin{align*}
+  \oids(\sigma') &= \oids(S :: F) \cat ([o^*] \cat \oids(H_0)) \\
+    &\perm \oids(S :: F) \cat ([o^*] \cat \oids(H))
+     \perm [o^*] \cat \oids(\sigma). \qedhere
+\end{align*}
+\end{proof}
+
+\begin{lemma}[Stored references after \texttt{makeObjRegion}]
+\label{lem:makeObjRegion-refs}
+\lean{refs\_mem}
+Every element of $\refs(\sigma')$ is $\OId(o^*)$ or an element of $\refs(\sigma)$.
+\end{lemma}
+\begin{proof}
+Let $r \in \refs(\sigma') = \refs(S) \cat \refs(F') \cat \refs(H')$
+(Lemma~\ref{lem:stack-split}(c)).
+\begin{itemize}[nosep]
+  \item If $r \in \refs(S)$, then $r \in \refs(S :: F)$.
+  \item If $r \in \refs(F')$, then by Lemma~\ref{lem:write-mem}(e) $r = \OId(o^*)$ or
+    $r \in \refs(F)$, and in the latter case $r \in \refs(S :: F)$ by Lemma~\ref{lem:stored}(c).
+  \item If $r \in \refs(H')$, then $r \in \refs(H)$, since $\refs(H') \perm \refs(H)$ by
+    Lemmas~\ref{lem:makeObjRegion-region} and~\ref{lem:heap-insert}(b). \qedhere
+\end{itemize}
+\end{proof}
+
+\begin{lemma}[Locations of old object ids]
+\label{lem:makeObjRegion-loc-eq}
+\lean{makeObjRegion\_corollary\_loc\_eq}
+For every $oid \ne o^*$, $\loc{\sigma'}{\OId(oid)} = \loc{\sigma}{\OId(oid)}$.
+\end{lemma}
+\begin{proof}
+By Lemma~\ref{lem:loc-searches} it suffices that the two searches agree.
+
+\emph{Stack search.} Since $F'.\omap = F.\omap$, this is Lemma~\ref{lem:stack-search}.
+
+\emph{Heap search.} $\dom(R'.\omap) = \dom(R.\omap) \cup \{o^*\}$, so since $oid \ne o^*$,
+$oid \in \dom(R'.\omap)$ iff $oid \in \dom(R.\omap)$. By Lemma~\ref{lem:heap-search} the heap search
+gives the same answer in $H'$ as in $H$.
+\end{proof}
+
+\begin{lemma}[Location of the new object]
+\label{lem:makeObjRegion-loc-fresh}
+\lean{makeObjRegion\_corollary\_loc\_fresh}
+$\loc{\sigma'}{\OId(o^*)} = \Rgn(F.\rid)$.
+\end{lemma}
+\begin{proof}
+The stack search in $\sigma'$ fails: by Lemma~\ref{lem:makeObjRegion-frames}(a), every frame of
+$\sigma'$ has the same $\omap$ as some frame of $\sigma$, and no frame of $\sigma$ has $o^*$ in its
+$\omap$ (Lemma~\ref{lem:fresh}(b)). The heap search succeeds at $F.\rid$: the first entry of $H'$ is
+$(F.\rid, R')$, and $o^* \in \dom(R'.\omap)$.
+\end{proof}
+
+\subsection{The invariants}
+
+\begin{lemma}[\inv{L1}] \lean{makeObjRegion\_L1}
+$\sigma' \vdash \inv{L1}$.
+\end{lemma}
+\begin{proof}
+By Lemma~\ref{lem:fresh}(a), $o^* \notin \oids(\sigma)$, and $\oids(\sigma)$ is duplicate-free by
+\inv{L1}, so $[o^*] \cat \oids(\sigma)$ is duplicate-free. By Lemma~\ref{lem:makeObjRegion-oids} so is
+$\oids(\sigma')$.
+\end{proof}
+
+\begin{lemma}[\inv{L2}] \lean{makeObjRegion\_L2}
+$\sigma' \vdash \inv{L2}$.
+\end{lemma}
+\begin{proof}
+Let $G \in S :: F'$. If $G.\rid = F.\rid$, then $H'(G.\rid) = R'$, and
+$R'.\status = R.\status = \Open$ by the premise of the rule. Otherwise $G \ne F'$, so $G \in S$, and
+$H'(G.\rid) = H(G.\rid)$, which by \inv{L2} for $\sigma$ is an $\Open$ region.
+\end{proof}
+
+\begin{lemma}[\inv{H1}] \lean{makeObjRegion\_H1}
+$\sigma' \vdash \inv{H1}$.
+\end{lemma}
+\begin{proof}
+By Lemma~\ref{lem:heap-insert}(e), a region of $H'$ is $R'$ or a region of $H$. In the second case
+\inv{H1} for $\sigma$ applies directly. In the first, $R$ is a region of $H$, so
+$R.\bridge \in \dom(R.\omap)$, and hence
+\[ R'.\bridge = R.\bridge \in \dom(R.\omap) \subseteq \dom(R'.\omap). \qedhere \]
+\end{proof}
+
+\begin{lemma}[\inv{H2}] \lean{makeObjRegion\_H2}
+$\sigma' \vdash \inv{H2}$.
+\end{lemma}
+\begin{proof}
+Fix $rid$ and write $\#\ell$ for the number of occurrences of $\RId(rid)$ in $\ell$. The frames $F$
+and $F'$ have the same $\omap$, and the values of $F'.\vmap$ are $\OId(o^*)$, which is not
+$\RId(rid)$, together with the values of $F.\vmap$ at keys other than $x$. So
+$\#\refs(F') \le \#\refs(F)$. By Lemmas~\ref{lem:makeObjRegion-region}
+and~\ref{lem:heap-insert}(b), $\#\refs(H') = \#\refs(H)$. Therefore, using
+Lemma~\ref{lem:stack-split}(c),
+\[ \#\refs(S) + \#\refs(F') + \#\refs(H') \le \#\refs(S) + \#\refs(F) + \#\refs(H) \le 1 \]
+by \inv{H2} for $\sigma$.
+\end{proof}
+
+\begin{lemma}[\inv{H3}] \lean{makeObjRegion\_H3}
+$\sigma' \vdash \inv{H3}$.
+\end{lemma}
+\begin{proof}
+Let $H'(rid) = Q'$ and $\OId(oid) \in \refs(Q')$. First, there is $Q$ with $H(rid) = Q$ and
+$\OId(oid) \in \refs(Q)$: if $rid = F.\rid$ then $Q' = R'$ and we take $Q = R$
+(Lemma~\ref{lem:makeObjRegion-region}); otherwise $H(rid) = Q'$.
+
+So $\OId(oid) \in \refs(H)$ by Lemma~\ref{lem:stored}(b), and $oid \ne o^*$ by
+Lemma~\ref{lem:fresh}(c). By \inv{H3} for $\sigma$, $\loc{\sigma}{\OId(oid)} = \Rgn(rid)$, and by
+Lemma~\ref{lem:makeObjRegion-loc-eq}, $\loc{\sigma'}{\OId(oid)} = \Rgn(rid)$.
+\end{proof}
+
+\begin{lemma}[\inv{S1}] \lean{makeObjRegion\_S1}
+$\sigma' \vdash \inv{S1}$.
+\end{lemma}
+\begin{proof}
+Since $F'.\rid = F.\rid$, the stacks $S :: F'$ and $S :: F$ have the same list of region ids, which
+is duplicate-free by \inv{S1} for $\sigma$.
+\end{proof}
+
+\begin{lemma}[\inv{S2}] \lean{makeObjRegion\_S2}
+$\sigma' \vdash \inv{S2}$.
+\end{lemma}
+\begin{proof}
+Let $(G', i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G')$ and
+$\loc{\sigma'}{\OId(oid)} = \Stk(j)$. Take the counterpart $(G, i)$ of
+Lemma~\ref{lem:makeObjRegion-frames}(a). We have $oid \ne o^*$, since otherwise
+$\loc{\sigma'}{\OId(oid)}$ would be a region location
+(Lemma~\ref{lem:makeObjRegion-loc-fresh}). Hence $\OId(oid) \in \refs(G)$, and
+$\loc{\sigma}{\OId(oid)} = \Stk(j)$ by Lemma~\ref{lem:makeObjRegion-loc-eq}. \inv{S2} for $\sigma$
+gives $j \le i$.
+\end{proof}
+
+\begin{lemma}[\inv{S3}] \lean{makeObjRegion\_S3}
+$\sigma' \vdash \inv{S3}$.
+\end{lemma}
+\begin{proof}
+Let $(G', i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G')$ and
+$\loc{\sigma'}{\OId(oid)} = \Rgn(rid')$. Take the counterpart $(G, i)$ of
+Lemma~\ref{lem:makeObjRegion-frames}(a).
+
+\emph{Case $oid = o^*$.} By Lemma~\ref{lem:makeObjRegion-loc-fresh}, $rid' = F.\rid$. By
+Lemma~\ref{lem:makeObjRegion-frames}(a), either $\OId(o^*) \in \refs(G)$ or $G'.\rid = F.\rid$. The
+former is impossible: $\refs(G)$ is part of $\refs(\sigma)$ (Lemma~\ref{lem:stored}(d)), so this
+contradicts Lemma~\ref{lem:fresh}(c). In the latter, $G'.\rid = rid'$, so $(G', i)$ itself is the
+required witness.
+
+\emph{Case $oid \ne o^*$.} Here $\OId(oid) \in \refs(G)$, and
+$\loc{\sigma}{\OId(oid)} = \Rgn(rid')$ by Lemma~\ref{lem:makeObjRegion-loc-eq}. \inv{S3} for
+$\sigma$ gives an indexed frame $(G'', k)$ of $\sigma$ with $G''.\rid = rid'$ and
+$k \le i$. Lemma~\ref{lem:makeObjRegion-frames}(b) gives an indexed frame of $\sigma'$ with index $k$ and region id
+$rid'$, which is the required witness.
+\end{proof}
+
+\begin{lemma}[\inv{HS1}] \lean{makeObjRegion\_HS1}
+$\sigma' \vdash \inv{HS1}$.
+\end{lemma}
+\begin{proof}
+Let $\OId(oid) \in \refs(\sigma')$. By Lemma~\ref{lem:makeObjRegion-refs}, either $oid = o^*$, or
+$\OId(oid) \in \refs(\sigma)$ and then $oid \in \oids(\sigma)$ by \inv{HS1} for $\sigma$. In both
+cases $oid \in [o^*] \cat \oids(\sigma)$, so $oid \in \oids(\sigma')$ by
+Lemma~\ref{lem:makeObjRegion-oids}.
+\end{proof}
+
+\begin{lemma}[\inv{HS2}] \lean{makeObjRegion\_HS2}
+$\sigma' \vdash \inv{HS2}$.
+\end{lemma}
+\begin{proof}
+Let $\RId(rid) \in \refs(\sigma')$. It is not $\OId(o^*)$, so by
+Lemma~\ref{lem:makeObjRegion-refs} it is in $\refs(\sigma)$. By \inv{HS2} for $\sigma$ and
+Lemma~\ref{lem:heap-insert}(a), $rid \in \dom(H) = \dom(H')$.
+\end{proof}
+
+\begin{theorem} \lean{makeObjRegion\_valid}
+If $\sigma \vdash \inv{ValidConfig}$ and $\sigma \xrightarrow{\texttt{makeObjRegion}\ x} \sigma'$,
+then $\sigma' \vdash \inv{ValidConfig}$.
+\end{theorem}
+\begin{proof}
+The ten lemmas above.
+\end{proof}

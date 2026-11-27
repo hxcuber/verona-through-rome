@@ -1,0 +1,322 @@
+%======================================================================
+\section{\texttt{varAsgn}}
+%======================================================================
+
+In both rules $\sigma = \langle S :: F, H\rangle$.
+\begin{mathpar}
+  \inferrule* [lab=var-asgn-bridge]
+    {\mathit{resolveFA}(y.f, \sigma) = \OId(oid) \\ x = F.\mathit{bridgeVar} \\
+     \loc{\sigma}{\OId(oid)} = \Rgn(F.\rid) \\ H(F.\rid) = R}
+    {\sigma \xrightarrow{\texttt{varAsgn}\ x\ (y.f)} \langle S :: F,\ H[F.\rid \mapsto R'] \rangle}
+  \\
+  \inferrule* [lab=var-asgn-stack]
+    {\mathit{resolveFA}(y.f, \sigma) = \OId(oid) \\ x \ne F.\mathit{bridgeVar} \\
+     \mathit{resolveV}(x, \sigma)\ \text{undefined}}
+    {\sigma \xrightarrow{\texttt{varAsgn}\ x\ (y.f)} \langle S :: F',\ H \rangle}
+\end{mathpar}
+where $R' = R$ with $\bridge := oid$, and $F' = F$ with $\vmap[x \mapsto \OId(oid)]$.
+
+\texttt{varAsgn} stores the object reference read from the field $y.f$ in the variable $x$ of the top
+frame $F$. If $x$ is $F$'s bridge variable, the object must lie in $F$'s region and becomes that
+region's bridge object; otherwise $x$ must not yet resolve, and is added to $F.\vmap$. Throughout this
+section fix $\sigma = \langle S :: F, H\rangle$ with $\sigma \vdash \inv{ValidConfig}$, and $oid$ with
+$\mathit{resolveFA}(y.f, \sigma) = \OId(oid)$. Let $n = |S|$, the index of $F$ in $\sigma$. There are
+two cases:
+\begin{itemize}[nosep]
+  \item \emph{bridge case} (\textsc{var-asgn-bridge}): $x = F.\mathit{bridgeVar}$,\\
+    $\loc{\sigma}{\OId(oid)} = \Rgn(F.\rid)$, $H(F.\rid) = R$, and
+    $\sigma' = \langle S :: F, H'\rangle$ with $H' = H[F.\rid \mapsto R']$;
+  \item \emph{stack case} (\textsc{var-asgn-stack}): $x \ne F.\mathit{bridgeVar}$, $\mathit{resolveV}(x, \sigma)$ is
+    undefined, and $\sigma' = \langle S :: F', H\rangle$.
+\end{itemize}
+This is exactly what \texttt{varAsgn\_cases} extracts from
+$\texttt{varAsgn}\ x\ (y.f)\ \sigma = \mathsf{some}\ \sigma'$. In the bridge case, $R'$ has the same $\omap$
+as $R$, hence the same $\refs$ and $\oids$, and Lemma~\ref{lem:heap-insert} applies with
+$rid_0 = F.\rid$, $R_0 = R$ and $R_1 = R'$. In the stack case, $F'$ has the same $\rid$ and $\omap$ as $F$.
+
+The proof has four parts: one lemma saying that no object changes location
+(Lemma~\ref{lem:varAsgn-loc}), a description of where the written value $\OId(oid)$ was already stored
+in $\sigma$ (Lemmas~\ref{lem:varAsgn-resolve} and~\ref{lem:varAsgn-owner}), frame-counterpart lemmas
+relating the stacks of $\sigma$ and $\sigma'$ (Lemma~\ref{lem:varAsgn-swi}), and the ten invariants.
+
+\subsection{Supporting lemmas}
+
+\begin{lemma}[The assigned variable is fresh in the top frame]
+\label{lem:varAsgn-fresh}
+\lean{varAsgn\_corollary\_fresh\_not\_in\_frame}
+If $\mathit{resolveV}(x, \sigma)$ is undefined, then $x \notin \dom(F.\vmap)$.
+\end{lemma}
+\begin{proof}
+Suppose $x \in \dom(F.\vmap)$. The search of Definition~\ref{def:resolve} looks from the top, so it
+takes $F$, and returns $F.\vmap(x)$, which is defined. This contradicts the hypothesis.
+\end{proof}
+
+\begin{lemma}[References of the extended frame]
+\label{lem:varAsgn-frame-refs}
+\lean{newFrame\_refs\_perm}
+Let $G$ be a frame, $x \notin \dom(G.\vmap)$, and $G^+$ be $G$ with $\vmap[x \mapsto v]$. Then
+$\refs(G^+) \perm [v] \cat \refs(G)$.
+\end{lemma}
+\begin{proof}
+$\refs(G)$ is the list of references of objects in $G.\omap$ followed by the values of $G.\vmap$, and
+$G^+$ has the same $\omap$. Inserting at a key not yet present puts the new entry $(x, v)$ in front of
+the old entries, so the values of $G^+.\vmap$ are $v$ followed by those of $G.\vmap$. Moving $v$ from
+the middle of the list to its front is a permutation.
+\end{proof}
+
+In the stack case, Lemmas~\ref{lem:varAsgn-fresh} and~\ref{lem:varAsgn-frame-refs} give
+$\refs(F') \perm [\OId(oid)] \cat \refs(F)$.
+
+\begin{lemma}[Replacing a region without changing its objects]
+\label{lem:varAsgn-heap-loc}
+\lean{heap\_insert\_loc\_eq}
+Let $\langle S_0, H_0\rangle \vdash \inv{L1}$, $H_0(rid_0) = R_0$, and let $R_1$ be a region with
+$R_1.\omap = R_0.\omap$. Then for every $oid'$,
+$\loc{\langle S_0, H_0[rid_0 \mapsto R_1]\rangle}{\OId(oid')} = \loc{\langle S_0, H_0\rangle}{\OId(oid')}$.
+\leanform{In \texttt{Preservation/Common.lean}. It only requires $\dom(R_1.\omap)$ to be a permutation
+of $\dom(R_0.\omap)$, so that the region cases of \texttt{fieldAsgn} and \texttt{swap} use it too.}
+\end{lemma}
+\begin{proof}
+The stack is the same, and the heap searches in $H_0$ and $H_0[rid_0 \mapsto R_1]$ agree by
+Lemma~\ref{lem:heap-search}, since $R_1.\omap = R_0.\omap$. So the locations agree by
+Lemma~\ref{lem:loc-searches}.
+\end{proof}
+
+\begin{lemma}[Locations after \texttt{varAsgn}]
+\label{lem:varAsgn-loc}
+\lean{varAsgn\_corollary\_loc\_eq}
+For every $oid'$, $\loc{\sigma}{\OId(oid')} = \loc{\sigma'}{\OId(oid')}$.
+\leanform{Takes $\mathit{ValidConfig}\ \sigma$ as hypothesis but uses only its \inv{L1} field, and only
+in the bridge case.}
+\end{lemma}
+\begin{proof}
+Bridge case: Lemma~\ref{lem:varAsgn-heap-loc} with $S_0 = S :: F$, $H_0 = H$, $rid_0 = F.\rid$, $R_0 = R$
+and $R_1 = R'$.
+
+Stack case: the heap is unchanged, and the stack searches agree by Lemma~\ref{lem:stack-search},
+since $F'.\omap = F.\omap$. So the locations agree by Lemma~\ref{lem:loc-searches}.
+\end{proof}
+
+\begin{lemma}[Resolved values are stored]
+\label{lem:varAsgn-resolve}
+Let $\mathit{resolveFA}(y.f, \sigma) = r$.
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item There is $oid_0$ with $\mathit{resolveV}(y, \sigma) = \OId(oid_0)$ such that either
+    $r \in \refs(G)$ for some indexed frame $(G, i)$ of $\sigma$, or there are $rid_0$ and $R_0$ with
+    $\loc{\sigma}{\OId(oid_0)} = \Rgn(rid_0)$, $H(rid_0) = R_0$ and $r \in \refs(R_0)$;
+    \leanpart{resolveFA\_mem}
+  \item $r \in \refs(\sigma)$. \leanpart{resolveFA\_refs\_mem}
+\end{enumerate}
+\end{lemma}
+\begin{proof}
+(a) By Definition~\ref{def:resolve}, $\mathit{resolveV}(y, \sigma) = \OId(oid_0)$ for some $oid_0$
+whose location is defined, and $r$ is the value of field $f$ of the object $o$ found at that location.
+If the location is $\Stk(i)$, then $o = G.\omap(oid_0)$ for the indexed frame $(G, i)$ of $\sigma$, so
+$r \in \refs(o)$ is the reference of an object of $G.\omap$ (Lemma~\ref{lem:stored}(a)) and hence in
+$\refs(G)$. If it is $\Rgn(rid_0)$, then $o = R_0.\omap(oid_0)$ with $H(rid_0) = R_0$, and
+$r \in \refs(R_0)$ in the same way.
+
+(b) From (a), by Lemma~\ref{lem:stored}(d) in the first alternative and Lemma~\ref{lem:stored}(b) in
+the second.
+\end{proof}
+
+\begin{lemma}[Owning frames of resolved objects]
+\label{lem:varAsgn-owner}
+\lean{resolveFA\_loc\_ancestor}
+If $\mathit{resolveFA}(y.f, \sigma) = \OId(oid)$ and $\loc{\sigma}{\OId(oid)} = \Rgn(rid')$, then some
+indexed frame $(G'', k)$ of $\sigma$ has $G''.\rid = rid'$ and $k < n + 1$.
+\leanform{The bound $k < n + 1$ is \texttt{frame''.index < cfg.stack.length}; it holds for every
+indexed frame and is recorded for use in \inv{S3}.}
+\end{lemma}
+\begin{proof}
+Apply Lemma~\ref{lem:varAsgn-resolve}(a) to $r = \OId(oid)$.
+\begin{itemize}[nosep]
+  \item If $\OId(oid) \in \refs(G)$ for an indexed frame $(G, i)$, \inv{S3} for $\sigma$ gives
+    $(G'', k)$ with $G''.\rid = rid'$ and $k \le i < n + 1$.
+  \item Otherwise $\mathit{resolveV}(y, \sigma) = \OId(oid_0)$,
+    $\loc{\sigma}{\OId(oid_0)} = \Rgn(rid_0)$, $H(rid_0) = R_0$ and $\OId(oid) \in \refs(R_0)$.
+    \inv{H3} for $\sigma$ gives $\loc{\sigma}{\OId(oid)} = \Rgn(rid_0)$, so $rid_0 = rid'$, and
+    Lemma~\ref{lem:resolveV}(c), applied to $y$, gives the frame. \qedhere
+\end{itemize}
+\end{proof}
+
+\begin{lemma}[Object ids and references after \texttt{varAsgn}]
+\label{lem:varAsgn-refs}
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item $\oids(\sigma') \perm \oids(\sigma)$; \leanpart{objectIds\_perm}
+  \item every element of $\refs(\sigma')$ is an element of $\refs(\sigma)$. \leanpart{refs\_mem}
+\end{enumerate}
+\end{lemma}
+\begin{proof}
+(a) Bridge case: the stack is unchanged and $\oids(H') \perm \oids(H)$ by
+Lemma~\ref{lem:heap-insert}(c). Stack case: the heap is unchanged and $\dom(F'.\omap) = \dom(F.\omap)$,
+so by Lemma~\ref{lem:stack-split}(c) $\oids(S :: F') = \oids(S :: F)$.
+
+(b) Bridge case: the stack is unchanged. By Lemma~\ref{lem:heap-insert}(d) an element of $\refs(H')$ is
+in $\refs(H)$ or in $\refs(R') = \refs(R)$, and $\refs(R)$ is contained in $\refs(H)$ by
+Lemma~\ref{lem:stored}(b).
+
+Stack case: the heap is unchanged, and by Lemma~\ref{lem:stack-split}(c)
+$\refs(S :: F') = \refs(S) \cat \refs(F')$. Elements of $\refs(S)$ are in $\refs(S :: F)$. By
+Lemmas~\ref{lem:varAsgn-fresh} and~\ref{lem:varAsgn-frame-refs} an element of $\refs(F')$ is either
+in $\refs(F)$, hence in $\refs(S :: F)$ (Lemma~\ref{lem:stored}(c)), or equal to $\OId(oid)$, which is
+in $\refs(\sigma)$ by Lemma~\ref{lem:varAsgn-resolve}(b).
+\end{proof}
+
+\begin{lemma}[Frame counterparts]
+\label{lem:varAsgn-swi}
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item For every indexed frame $(G', i)$ of $\sigma'$ there is an indexed frame $(G, i)$ of $\sigma$
+    with $G.\rid = G'.\rid$ such that every $r \in \refs(G')$ satisfies $r \in \refs(G)$, or
+    $\mathit{resolveFA}(y.f, \sigma) = r$ and $i = n$; \leanpart{swi\_down}
+  \item for every indexed frame $(G, i)$ of $\sigma$ there is an indexed frame $(G', i)$ of $\sigma'$
+    with $G'.\rid = G.\rid$. \leanpart{swi\_up}
+\end{enumerate}
+\leanform{``$i = n$'' is \texttt{cfg.stack.length} $\le$ \texttt{f'.index + 1}, which says that
+$(G', i)$ is the top frame.}
+\end{lemma}
+\begin{proof}
+Bridge case: the stacks of $\sigma$ and $\sigma'$ are equal; take the same frame, and in (a) the first
+alternative always holds.
+
+Stack case: by Lemma~\ref{lem:stack-split}(a) the indexed frames of $\sigma$ are those of $S$ followed by
+$(F, n)$, and those of $\sigma'$ are those of $S$ followed by $(F', n)$. A frame of $S$ is its own
+counterpart in both directions. The frames $(F, n)$ and $(F', n)$ are each other's counterparts, as
+$F'.\rid = F.\rid$. For (a) with $(G', i) = (F', n)$: by Lemmas~\ref{lem:varAsgn-fresh}
+and~\ref{lem:varAsgn-frame-refs} an element of $\refs(F')$ is in $\refs(F)$ or equal to $\OId(oid)$,
+which is $\mathit{resolveFA}(y.f, \sigma)$, and $i = n$.
+\end{proof}
+
+\subsection{The invariants}
+
+\begin{lemma}[\inv{L1}] \lean{varAsgn\_L1}
+$\sigma' \vdash \inv{L1}$.
+\end{lemma}
+\begin{proof}
+$\oids(\sigma') \perm \oids(\sigma)$ by Lemma~\ref{lem:varAsgn-refs}(a), and $\oids(\sigma)$ is
+duplicate-free by \inv{L1} for $\sigma$.
+\end{proof}
+
+\begin{lemma}[\inv{L2}] \lean{varAsgn\_L2}
+$\sigma' \vdash \inv{L2}$.
+\end{lemma}
+\begin{proof}
+Bridge case: let $G \in S :: F$. By \inv{L2} for $\sigma$, $H(G.\rid) = Q$ for some $\Open$ region $Q$.
+If $G.\rid = F.\rid$ then $Q = R$ and $H'(G.\rid) = R'$, whose status is that of $R$, namely $\Open$.
+Otherwise $H'(G.\rid) = H(G.\rid) = Q$.
+
+Stack case: the heap is unchanged. A frame of $S :: F'$ is a frame of $S$, hence of $S :: F$, or it is
+$F'$, whose region id is $F.\rid$. In both cases \inv{L2} for $\sigma$ applies.
+\end{proof}
+
+\begin{lemma}[\inv{H1}] \lean{varAsgn\_H1}
+$\sigma' \vdash \inv{H1}$.
+\end{lemma}
+\begin{proof}
+Stack case: the heap is unchanged.
+
+Bridge case: by Lemma~\ref{lem:heap-insert}(e), a region of $H'$ is $R'$ or a region of $H$.
+In the second case \inv{H1} for $\sigma$ applies directly. In the first, we need
+$oid \in \dom(R'.\omap) = \dom(R.\omap)$. By Lemma~\ref{lem:loc-l1}(a),
+$\loc{\sigma}{\OId(oid)} = \Rgn(F.\rid)$ gives $H(F.\rid) = Q$ for some $Q$ with
+$oid \in \dom(Q.\omap)$, and $Q = R$.
+\end{proof}
+
+\begin{lemma}[\inv{H2}] \lean{varAsgn\_H2}
+$\sigma' \vdash \inv{H2}$.
+\end{lemma}
+\begin{proof}
+Fix $rid'$ and write $\#\ell$ for the number of occurrences of $\RId(rid')$ in $\ell$.
+
+Bridge case: the stack is unchanged and $\refs(H') \perm \refs(H)$ by Lemma~\ref{lem:heap-insert}(b),
+since $\refs(R') = \refs(R)$. So both counts are unchanged and \inv{H2} for $\sigma$ applies.
+
+Stack case: the heap is unchanged. By Lemma~\ref{lem:stack-split}(c) and
+Lemmas~\ref{lem:varAsgn-fresh} and~\ref{lem:varAsgn-frame-refs},
+\begin{align*}
+  \#\refs(S :: F') &= \#\refs(S) + \#\refs(F') \\
+  &= \#\refs(S) + [\OId(oid) = \RId(rid')] + \#\refs(F) = \#\refs(S :: F),
+\end{align*}
+since $\OId(oid) \ne \RId(rid')$. So \inv{H2} for $\sigma$ applies.
+\end{proof}
+
+\begin{lemma}[\inv{H3}] \lean{varAsgn\_H3}
+$\sigma' \vdash \inv{H3}$.
+\end{lemma}
+\begin{proof}
+Let $H'(rid_1) = Q'$ (in the stack case, $H' = H$) and $\OId(oid_1) \in \refs(Q')$. By
+Lemma~\ref{lem:varAsgn-loc} it suffices to show $\loc{\sigma}{\OId(oid_1)} = \Rgn(rid_1)$. In the stack case,
+and in the bridge case with $rid_1 \ne F.\rid$, $H(rid_1) = Q'$ and \inv{H3} for $\sigma$ gives this. In the bridge case
+with $rid_1 = F.\rid$, $Q' = R'$, so $\OId(oid_1) \in \refs(R') = \refs(R)$ with $H(rid_1) = R$, and
+\inv{H3} for $\sigma$ again applies.
+\end{proof}
+
+\begin{lemma}[\inv{S1}] \lean{varAsgn\_S1}
+$\sigma' \vdash \inv{S1}$.
+\end{lemma}
+\begin{proof}
+In the bridge case the stack is unchanged. In the stack case, $F'.\rid = F.\rid$, so
+$[G.\rid \mid G \in S :: F'] = [G.\rid \mid G \in S :: F]$. In both cases \inv{S1} for $\sigma$
+applies.
+\end{proof}
+
+\begin{lemma}[\inv{S2}] \lean{varAsgn\_S2}
+$\sigma' \vdash \inv{S2}$.
+\end{lemma}
+\begin{proof}
+Let $(G', i)$ be an indexed frame of $\sigma'$, $\OId(oid_1) \in \refs(G')$ and
+$\loc{\sigma'}{\OId(oid_1)} = \Stk(j)$. By Lemma~\ref{lem:varAsgn-loc},
+$\loc{\sigma}{\OId(oid_1)} = \Stk(j)$. Lemma~\ref{lem:varAsgn-swi}(a) gives an indexed frame $(G, i)$
+of $\sigma$.
+\begin{itemize}[nosep]
+  \item If $\OId(oid_1) \in \refs(G)$, \inv{S2} for $\sigma$ gives $j \le i$.
+  \item Otherwise $i = n$. By Lemma~\ref{lem:loc-l1}(b) there is an indexed frame of $\sigma$ with
+    index $j$, so $j < n + 1$, i.e.\ $j \le n = i$. \qedhere
+\end{itemize}
+\end{proof}
+
+\begin{lemma}[\inv{S3}] \lean{varAsgn\_S3}
+$\sigma' \vdash \inv{S3}$.
+\end{lemma}
+\begin{proof}
+Let $(G', i)$ be an indexed frame of $\sigma'$, $\OId(oid_1) \in \refs(G')$ and
+$\loc{\sigma'}{\OId(oid_1)} = \Rgn(rid')$. By Lemma~\ref{lem:varAsgn-loc},
+$\loc{\sigma}{\OId(oid_1)} = \Rgn(rid')$. Lemma~\ref{lem:varAsgn-swi}(a) gives an indexed frame $(G, i)$
+of $\sigma$.
+\begin{itemize}[nosep]
+  \item If $\OId(oid_1) \in \refs(G)$, \inv{S3} for $\sigma$ gives an indexed frame $(G'', k)$ of
+    $\sigma$ with $G''.\rid = rid'$ and $k \le i$.
+  \item Otherwise $\mathit{resolveFA}(y.f, \sigma) = \OId(oid_1)$ and $i = n$.
+    Lemma~\ref{lem:varAsgn-owner} gives an indexed frame $(G'', k)$ of $\sigma$ with
+    $G''.\rid = rid'$ and $k < n + 1$, so $k \le n = i$.
+\end{itemize}
+In both cases Lemma~\ref{lem:varAsgn-swi}(b) turns $(G'', k)$ into an indexed frame of $\sigma'$ with
+the same index and region id, which is the required witness.
+\end{proof}
+
+\begin{lemma}[\inv{HS1}] \lean{varAsgn\_HS1}
+$\sigma' \vdash \inv{HS1}$.
+\end{lemma}
+\begin{proof}
+If $\OId(oid_1) \in \refs(\sigma')$ then $\OId(oid_1) \in \refs(\sigma)$ by
+Lemma~\ref{lem:varAsgn-refs}(b), so $oid_1 \in \oids(\sigma)$ by \inv{HS1} for $\sigma$, and
+$oid_1 \in \oids(\sigma')$ by Lemma~\ref{lem:varAsgn-refs}(a).
+\end{proof}
+
+\begin{lemma}[\inv{HS2}] \lean{varAsgn\_HS2}
+$\sigma' \vdash \inv{HS2}$.
+\end{lemma}
+\begin{proof}
+If $\RId(rid_1) \in \refs(\sigma')$ then $\RId(rid_1) \in \refs(\sigma)$ by
+Lemma~\ref{lem:varAsgn-refs}(b), so $rid_1 \in \dom(H)$ by \inv{HS2} for $\sigma$. In the stack case the heap
+is unchanged; in the bridge case, $\dom(H') = \dom(H)$ by Lemma~\ref{lem:heap-insert}(a).
+\end{proof}
+
+\begin{theorem} \lean{varAsgn\_valid}
+If $\sigma \vdash \inv{ValidConfig}$ and $\sigma \xrightarrow{\texttt{varAsgn}\ x\ (y.f)} \sigma'$, then
+$\sigma' \vdash \inv{ValidConfig}$.
+\end{theorem}
+\begin{proof}
+The ten lemmas above.
+\end{proof}
+

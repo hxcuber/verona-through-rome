@@ -1,0 +1,289 @@
+%======================================================================
+\section{\texttt{fieldAsgn}}
+%======================================================================
+
+In both rules $\sigma = \langle S :: F, H\rangle$ and $n = |S|$, the index of $F$ in $\sigma$
+(Lemma~\ref{lem:stack-split}(b)).
+\begin{mathpar}
+  \inferrule* [lab=field-asgn-stack]
+    {\mathit{resolveV}(x, \sigma) = \OId(oid) \\ \mathit{resolveV}(y, \sigma) = \OId(oid_y) \\
+     \loc{\sigma}{\OId(oid)} = \Stk(n) \\ F.\omap(oid) = o}
+    {\sigma \xrightarrow{\texttt{fieldAsgn}\ (x.f)\ y} \langle S :: F',\ H \rangle}
+  \\
+  \inferrule* [lab=field-asgn-region]
+    {\mathit{resolveV}(x, \sigma) = \OId(oid) \\ \mathit{resolveV}(y, \sigma) = \OId(oid_y) \\
+     \loc{\sigma}{\OId(oid)} = \Rgn(F.\rid) \\ \loc{\sigma}{\OId(oid_y)} = \Rgn(F.\rid) \\
+     H(F.\rid) = R \\ R.\status = \Open \\ R.\omap(oid) = o}
+    {\sigma \xrightarrow{\texttt{fieldAsgn}\ (x.f)\ y} \langle S :: F,\ H[F.\rid \mapsto R'] \rangle}
+\end{mathpar}
+where $F' = F$ with $\omap[oid \mapsto o[f \mapsto \OId(oid_y)]]$, and $R' = R$ with
+$\omap[oid \mapsto o[f \mapsto \OId(oid_y)]]$.
+
+\texttt{fieldAsgn} overwrites the field $f$ of one existing object $oid$, either a temporary of the top
+frame or an object of the top frame's (open) region. Throughout this section fix
+$\sigma = \langle S :: F, H\rangle$ with $\sigma \vdash \inv{ValidConfig}$, and $n$, $oid$, $oid_y$,
+$o$ as in the
+rules. Write $v = \OId(oid_y)$ for the written reference and $o' = o[f \mapsto v]$. There are two cases:
+\begin{itemize}[nosep]
+  \item \emph{stack case} (\textsc{field-asgn-stack}): $\sigma' = \langle S :: F', H\rangle$;
+  \item \emph{region case} (\textsc{field-asgn-region}): $\sigma' = \langle S :: F, H'\rangle$ with
+    $rid_0 = F.\rid$ and $H' = H[rid_0 \mapsto R']$.
+\end{itemize}
+This is exactly what \texttt{fieldAsgn\_cases} extracts from
+$\texttt{fieldAsgn}\ (x.f)\ y\ \sigma = \mathsf{some}\ \sigma'$. Every proof below treats the two cases
+separately.
+
+Since $oid$ is already a key of $F.\omap$ (stack case), resp.\ of $R.\omap$ (region case), inserting at it only
+reorders the keys: $\dom(F'.\omap) \perm \dom(F.\omap)$, resp.\ $\dom(R'.\omap) \perm \dom(R.\omap)$.
+
+The proof shows that the operation changes neither the object ids (up to order), the heap keys, the
+region statuses, the frames' region ids, nor any location
+(Lemmas~\ref{lem:fieldAsgn-shape} and~\ref{lem:fieldAsgn-loc}), and that the only new reference
+stored is $v$, which names a live object (Lemmas~\ref{lem:fieldAsgn-refs}
+and~\ref{lem:fieldAsgn-frames}). The invariants that look at where stored references point
+(\inv{H3}, \inv{S2}, \inv{S3}) then need a separate argument for $v$ only.
+
+\subsection{Supporting lemmas}
+
+\begin{lemma}[Writing one field never adds a reference to count]
+\label{lem:fieldAsgn-write}
+\lean{objMap\_insert\_field\_count\_le}
+Let $m$ be an $\omap$ with $m(oid) = o$, let $f$ be a field, $v$ and $t$ references with $v \ne t$,
+and $m' = m[oid \mapsto o[f \mapsto v]]$. Then $\#\refs(m') \le \#\refs(m)$, where $\#$ counts
+occurrences of $t$.
+\leanform{$v \ne t$ is assumed as \texttt{(v == t) = false}.}
+\end{lemma}
+\begin{proof}
+By Lemma~\ref{lem:write-count}(b) with $g = \refs$,
+$\#\refs(m') + \#\refs(o) = \#\refs(m) + \#\refs(o[f \mapsto v])$, so it suffices that
+$\#\refs(o[f \mapsto v]) \le \#\refs(o)$. Inserting $f$ into $o$ removes any existing entry for $f$ and
+puts $(f, v)$ in front, so $\refs(o[f \mapsto v]) = [v] \cat \ell$ where $\ell$ (the values of $o$ with
+the entry for $f$ erased) is a sublist of $\refs(o)$. As $v \ne t$,
+$\#\refs(o[f \mapsto v]) = \#\ell \le \#\refs(o)$.
+\end{proof}
+
+\begin{lemma}[What \texttt{fieldAsgn} leaves unchanged]
+\label{lem:fieldAsgn-shape}
+Write $S_{\sigma'}$ and $H_{\sigma'}$ for the stack and heap of $\sigma'$.
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item $[G.\rid \mid G \in S_{\sigma'}] = [G.\rid \mid G \in S :: F]$;
+    \leanpart{fieldAsgn\_stack\_regionIds}
+  \item $\oids(\sigma') \perm \oids(\sigma)$; \leanpart{fieldAsgn\_objectIds\_perm}
+  \item $\dom(H_{\sigma'}) = \dom(H)$; \leanpart{fieldAsgn\_heap\_keys}
+  \item if $H(rid) = Q$ then $H_{\sigma'}(rid) = Q'$ for some $Q'$ with $Q'.\status = Q.\status$.
+    \leanpart{fieldAsgn\_heap\_status}
+\end{enumerate}
+\end{lemma}
+\begin{proof}
+\emph{Stack case.} The heap is unchanged, which gives (c) and (d). $F'$ differs from $F$ only in its
+$\omap$, which gives (a). For (b), by Lemma~\ref{lem:stack-split}(c),
+\begin{align*}
+  \oids(\sigma') &= \oids(S) \cat \dom(F'.\omap) \cat \oids(H) \\
+  &\perm \oids(S) \cat \dom(F.\omap) \cat \oids(H) = \oids(\sigma).
+\end{align*}
+
+\emph{Region case.} The stack is unchanged, which gives (a). (c) is
+Lemma~\ref{lem:heap-insert}(a). For (b), $\oids(S :: F)$ is unchanged, and
+Lemma~\ref{lem:heap-insert}(c), applied to $\dom(R'.\omap) \perm \dom(R.\omap)$, gives
+$\oids(H') \perm \oids(H)$. For (d): if
+$rid = rid_0$ then $Q = R$ and $H'(rid) = R'$, which has the status of $R$; otherwise
+$H'(rid) = H(rid) = Q$.
+\end{proof}
+
+\begin{lemma}[Locations after \texttt{fieldAsgn}]
+\label{lem:fieldAsgn-loc}
+For every $oid'$, $\loc{\sigma'}{\OId(oid')} = \loc{\sigma}{\OId(oid')}$. \leanpart{fieldAsgn\_loc\_eq}
+More precisely:
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item in the stack case this holds without any invariant;
+    \leanpart{fieldAsgn\_corollary\_stack\_loc\_eq}
+  \item in the region case it holds using \inv{L1} for $\sigma$.
+    \leanpart{fieldAsgn\_corollary\_region\_loc\_eq}
+\end{enumerate}
+\leanform{(a) and (b) are stated for an arbitrary written reference in place of $v$, since the
+locations depend only on the key sets. (b) takes $\mathit{ValidConfig}\ \sigma$ but uses only its
+\inv{L1} field.}
+\end{lemma}
+\begin{proof}
+By Lemma~\ref{lem:loc-searches} it suffices that the stack search and the heap search of
+Definition~\ref{def:loc} for $oid'$ give the same frame index, resp.\ region key, in $\sigma$ and
+$\sigma'$ (including whether they succeed).
+
+(a) The heap is unchanged, so the heap search agrees. Since $\dom(F'.\omap) \perm \dom(F.\omap)$,
+the stack search agrees by Lemma~\ref{lem:stack-search}.
+
+(b) The stack is unchanged, so the stack search agrees. The heap search agrees by
+Lemma~\ref{lem:heap-search}, since $\dom(R'.\omap) \perm \dom(R.\omap)$.
+\end{proof}
+
+\begin{lemma}[References after \texttt{fieldAsgn}]
+\label{lem:fieldAsgn-refs}
+\lean{fieldAsgn\_refs\_mem}
+Every element of $\refs(\sigma')$ is in $\refs(\sigma)$ or is $v$; and $oid_y \in \oids(\sigma)$.
+\leanform{The conclusion is ``$r \in \refs(\sigma)$, or $r = \OId(p)$ for some $p \in \oids(\sigma)$''.}
+\end{lemma}
+\begin{proof}
+$oid_y \in \oids(\sigma)$ is Lemma~\ref{lem:resolveV}(b) applied to
+$\mathit{resolveV}(y, \sigma) = v$. Let $r \in \refs(\sigma')$.
+
+\emph{Stack case.} By Lemma~\ref{lem:stack-split}(d), $r$ is in $\refs(S)$, $\refs(F')$ or
+$\refs(H)$. By the same lemma for $\sigma$, $\refs(S)$ and $\refs(H)$ are part of $\refs(\sigma)$. If
+$r \in \refs(F')$, Lemma~\ref{lem:write-mem}(f) gives $r = v$ or $r \in \refs(F)$, and $\refs(F)$
+is part of $\refs(\sigma)$.
+
+\emph{Region case.} $\refs(\sigma') = \refs(S :: F) \cat \refs(H')$, and $\refs(S :: F)$ is part of
+$\refs(\sigma)$. If $r \in \refs(H')$, Lemma~\ref{lem:heap-insert}(d) gives $r \in \refs(R')$ or
+$r \in \refs(H)$. In the first case, $\refs(R') = \refs(R.\omap[oid \mapsto o'])$, so by
+Lemma~\ref{lem:write-mem}(d) $r = v$ or $r \in \refs(R)$, and $\refs(R)$ is part of $\refs(H)$ by
+Lemma~\ref{lem:stored}(b).
+\end{proof}
+
+\begin{lemma}[Frames after \texttt{fieldAsgn}]
+\label{lem:fieldAsgn-frames}
+\lean{fieldAsgn\_stackWithIndex\_mem}
+Every indexed frame $(G', i)$ of $\sigma'$ is an indexed frame of $\sigma$, or $i = n$ and every
+element of $\refs(G')$ is in $\refs(F)$ or is $v$, where $\mathit{resolveV}(y, \sigma) = v$.
+\end{lemma}
+\begin{proof}
+In the region case the stack is unchanged. In the stack case, by Lemma~\ref{lem:stack-split}(a), the
+indexed frames of $\sigma'$ are those of $S$, which are indexed frames of $\sigma$ with the same
+indices, and $(F', n)$. For the latter, Lemma~\ref{lem:write-mem}(f) bounds $\refs(F')$.
+\end{proof}
+
+\subsection{The invariants}
+
+\begin{lemma}[\inv{L1}] \lean{fieldAsgn\_L1}
+$\sigma' \vdash \inv{L1}$.
+\end{lemma}
+\begin{proof}
+$\oids(\sigma') \perm \oids(\sigma)$ by Lemma~\ref{lem:fieldAsgn-shape}(b), and $\oids(\sigma)$ is
+duplicate-free by \inv{L1} for $\sigma$.
+\end{proof}
+
+\begin{lemma}[\inv{L2}] \lean{fieldAsgn\_L2}
+$\sigma' \vdash \inv{L2}$.
+\end{lemma}
+\begin{proof}
+Let $G$ be a frame of $\sigma'$. By Lemma~\ref{lem:fieldAsgn-shape}(a), $G.\rid$ is the region id of
+some frame $G_0 \in S :: F$. By \inv{L2} for $\sigma$, $H(G_0.\rid) = Q$ with $Q.\status = \Open$. By
+Lemma~\ref{lem:fieldAsgn-shape}(d), the heap of $\sigma'$ maps $G.\rid = G_0.\rid$ to a region with
+the same status, $\Open$.
+\end{proof}
+
+\begin{lemma}[\inv{H1}] \lean{fieldAsgn\_H1}
+$\sigma' \vdash \inv{H1}$.
+\end{lemma}
+\begin{proof}
+In the stack case the heap is unchanged. In the region case, by Lemma~\ref{lem:heap-insert}(e) a region
+of $H'$ is $R'$ or a region of $H$, and the latter satisfy \inv{H1} for $\sigma$. For $R'$: $R'.\bridge = R.\bridge$, which is in $\dom(R.\omap)$ by \inv{H1} for
+$\sigma$, and $\dom(R.\omap) \subseteq \dom(R.\omap[oid \mapsto o']) = \dom(R'.\omap)$.
+\end{proof}
+
+\begin{lemma}[\inv{H2}] \lean{fieldAsgn\_H2}
+$\sigma' \vdash \inv{H2}$.
+\end{lemma}
+\begin{proof}
+Fix $rid$ and write $\#\ell$ for the number of occurrences of $t = \RId(rid)$ in $\ell$. We show that
+the count for $\sigma'$ is at most that for $\sigma$, which is at most $1$ by \inv{H2} for $\sigma$.
+Note $v = \OId(oid_y) \ne t$.
+
+\emph{Stack case.} The heap is unchanged, and by Lemma~\ref{lem:stack-split}(c)
+\[ \refs(S :: F') = \refs(S) \cat \refs(F'.\omap) \cat \mathit{values}(F.\vmap), \]
+and likewise for $S :: F$ with $\refs(F.\omap)$ in the middle. Lemma~\ref{lem:fieldAsgn-write}
+with $m = F.\omap$ gives $\#\refs(F'.\omap) \le \#\refs(F.\omap)$.
+
+\emph{Region case.} The stack is unchanged. Lemma~\ref{lem:write-count}(b), with $g$ the $\refs$ of a
+region, gives $\#\refs(H') + \#\refs(R) = \#\refs(H) + \#\refs(R')$, and
+Lemma~\ref{lem:fieldAsgn-write} with $m = R.\omap$ gives $\#\refs(R') \le \#\refs(R)$. Hence
+$\#\refs(H') \le \#\refs(H)$.
+\end{proof}
+
+\begin{lemma}[\inv{H3}] \lean{fieldAsgn\_H3}
+$\sigma' \vdash \inv{H3}$.
+\end{lemma}
+\begin{proof}
+Let $H_{\sigma'}(rid_1) = Q'$ and $\OId(oid_1) \in \refs(Q')$. By Lemma~\ref{lem:fieldAsgn-loc}, it
+suffices to show that $\loc{\sigma}{\OId(oid_1)} = \Rgn(rid_1)$.
+
+\emph{Stack case.} The heap is unchanged, so \inv{H3} for $\sigma$ applies.
+
+\emph{Region case.} If $rid_1 \ne rid_0$, then $H(rid_1) = H'(rid_1) = Q'$ and \inv{H3} for $\sigma$
+applies. If $rid_1 = rid_0$, then $Q' = R'$, and by Lemma~\ref{lem:write-mem}(d), $\OId(oid_1)$ is $v$
+or in $\refs(R)$. If $\OId(oid_1) = v$ then $oid_1 = oid_y$, and the rule's premise gives
+$\loc{\sigma}{\OId(oid_y)} = \Rgn(F.\rid) = \Rgn(rid_0)$. Otherwise \inv{H3} for $\sigma$ applied to
+$H(rid_0) = R$ gives $\loc{\sigma}{\OId(oid_1)} = \Rgn(rid_0)$.
+\end{proof}
+
+\begin{lemma}[\inv{S1}] \lean{fieldAsgn\_S1}
+$\sigma' \vdash \inv{S1}$.
+\end{lemma}
+\begin{proof}
+By Lemma~\ref{lem:fieldAsgn-shape}(a) the list of region ids is that of $\sigma$, which is
+duplicate-free by \inv{S1} for $\sigma$.
+\end{proof}
+
+\begin{lemma}[\inv{S2}] \lean{fieldAsgn\_S2}
+$\sigma' \vdash \inv{S2}$.
+\end{lemma}
+\begin{proof}
+Let $(G', i)$ be an indexed frame of $\sigma'$, $\OId(oid_1) \in \refs(G')$ and
+$\loc{\sigma'}{\OId(oid_1)} = \Stk(j)$. By Lemma~\ref{lem:fieldAsgn-loc},
+$\loc{\sigma}{\OId(oid_1)} = \Stk(j)$. Apply Lemma~\ref{lem:fieldAsgn-frames}:
+\begin{itemize}[nosep]
+  \item if $(G', i)$ is an indexed frame of $\sigma$, \inv{S2} for $\sigma$ gives $j \le i$;
+  \item if $i = n$ and $\OId(oid_1) \in \refs(F)$, \inv{S2} for $\sigma$ applied to $(F, n)$ gives
+    $j \le n = i$;
+  \item if $i = n$ and $\OId(oid_1) = v$: by Lemma~\ref{lem:loc-l1}(b), $j$ is the index of a frame of
+    $\sigma$, so $j < |S :: F| = n + 1$, i.e.\ $j \le n = i$. \qedhere
+\end{itemize}
+\end{proof}
+
+\begin{lemma}[\inv{S3}] \lean{fieldAsgn\_S3}
+$\sigma' \vdash \inv{S3}$.
+\end{lemma}
+\begin{proof}
+Let $(G', i)$ be an indexed frame of $\sigma'$, $\OId(oid_1) \in \refs(G')$ and
+$\loc{\sigma'}{\OId(oid_1)} = \Rgn(rid')$. By Lemma~\ref{lem:fieldAsgn-loc},
+$\loc{\sigma}{\OId(oid_1)} = \Rgn(rid')$.
+
+First, any indexed frame $(G_0, k)$ of $\sigma$ with $G_0.\rid = rid'$ and $k \le i$ yields the
+required witness in $\sigma'$: by Lemma~\ref{lem:fieldAsgn-shape}(a) the two stacks agree position by
+position on region ids, so Lemma~\ref{lem:frame-index}(b) gives an indexed frame $(G_1, k)$ of
+$\sigma'$ with $G_1.\rid = G_0.\rid = rid'$. It remains to find such a $(G_0, k)$. Apply
+Lemma~\ref{lem:fieldAsgn-frames}:
+\begin{itemize}[nosep]
+  \item if $(G', i)$ is an indexed frame of $\sigma$, \inv{S3} for $\sigma$ gives it;
+  \item if $i = n$ and $\OId(oid_1) \in \refs(F)$, \inv{S3} for $\sigma$ applied to $(F, n)$ gives it,
+    with $k \le n = i$;
+  \item if $i = n$ and $\OId(oid_1) = v$: Lemma~\ref{lem:resolveV}(c), applied to
+    $\mathit{resolveV}(y, \sigma) = \OId(oid_y)$ and $\loc{\sigma}{\OId(oid_y)} = \Rgn(rid')$, gives
+    $(G_0, k)$ with $G_0.\rid = rid'$ and $k < |S :: F| = n + 1$, so $k \le n = i$. \qedhere
+\end{itemize}
+\end{proof}
+
+\begin{lemma}[\inv{HS1}] \lean{fieldAsgn\_HS1}
+$\sigma' \vdash \inv{HS1}$.
+\end{lemma}
+\begin{proof}
+Let $\OId(oid_1) \in \refs(\sigma')$. By Lemma~\ref{lem:fieldAsgn-refs}, either
+$\OId(oid_1) \in \refs(\sigma)$, and then $oid_1 \in \oids(\sigma)$ by \inv{HS1} for $\sigma$, or
+$oid_1 = oid_y \in \oids(\sigma)$. In both cases $oid_1 \in \oids(\sigma')$ by
+Lemma~\ref{lem:fieldAsgn-shape}(b).
+\end{proof}
+
+\begin{lemma}[\inv{HS2}] \lean{fieldAsgn\_HS2}
+$\sigma' \vdash \inv{HS2}$.
+\end{lemma}
+\begin{proof}
+Let $\RId(rid) \in \refs(\sigma')$. It is not $v$, which is an $\OId$, so by
+Lemma~\ref{lem:fieldAsgn-refs} it is in $\refs(\sigma)$. By \inv{HS2} for $\sigma$,
+$rid \in \dom(H)$, which equals the heap domain of $\sigma'$ by Lemma~\ref{lem:fieldAsgn-shape}(c).
+\end{proof}
+
+\begin{theorem} \lean{fieldAsgn\_valid}
+If $\sigma \vdash \inv{ValidConfig}$ and $\sigma \xrightarrow{\texttt{fieldAsgn}\ (x.f)\ y} \sigma'$, then
+$\sigma' \vdash \inv{ValidConfig}$.
+\end{theorem}
+\begin{proof}
+The ten lemmas above.
+\end{proof}

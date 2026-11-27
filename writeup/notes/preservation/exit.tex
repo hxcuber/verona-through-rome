@@ -1,0 +1,192 @@
+%======================================================================
+\section{\texttt{exit}}
+%======================================================================
+
+\begin{mathpar}
+  \inferrule* [lab=exit]
+    {|S| \ge 1 \\ H(F.\rid) = R \\ R.\status = \Open}
+    {\langle S :: F, H \rangle \xrightarrow{\texttt{exit}} \langle S,\ H[F.\rid \mapsto R'] \rangle}
+\end{mathpar}
+where $R' = R$ with $\status := \Closed$.
+
+\texttt{exit} pops the top frame $F$ and closes its region. Throughout this section fix
+$\sigma = \langle S :: F, H\rangle$ with $\sigma \vdash \inv{ValidConfig}$, and
+$\sigma' = \langle S, H'\rangle$ with $H' = H[F.\rid \mapsto R']$ as above. Let $n = |S|$, the
+index of $F$ in $\sigma$. This is exactly what \texttt{exit\_cases} extracts from
+$\texttt{exit}\ \sigma = \mathsf{some}\ \sigma'$. Lemma~\ref{lem:status-update} applies with
+$rid_0 = F.\rid$ and $s = \Closed$.
+
+The proof has three parts: one lemma that describes every location of $\sigma'$ in terms of $\sigma$
+(Lemma~\ref{lem:exit-loc}), the observation that nothing new is stored (Lemma~\ref{lem:exit-refs}),
+and the ten invariants.
+
+\subsection{Supporting lemmas}
+
+\begin{lemma}[Locations after \texttt{exit}]
+\label{lem:exit-loc}
+\lean{exit\_loc}
+For every reference $r$, either $\loc{\sigma'}{r} = \loc{\sigma}{r}$, or $\loc{\sigma'}{r} = \noloc$
+and $\loc{\sigma}{r} = \Stk(i)$ for some $i$.
+\end{lemma}
+\begin{proof}
+For $r = \RId(rid)$: the location depends only on $\dom$, which is unchanged by
+Lemma~\ref{lem:heap-insert}(a), so $\loc{\sigma'}{r} = \loc{\sigma}{r}$.
+
+For $r = \OId(oid)$: by Lemma~\ref{lem:status-update}(b), the heap search gives the same answer in
+$H'$ as in $H$, so only the stack search can differ. The frames of $\sigma'$ are those of $\sigma$
+minus the top one, with the same indices. Searching $\sigma$'s stack from the top therefore first
+looks at $(F, n)$, and if $oid \notin \dom(F.\omap)$ then continues exactly as the search of
+$\sigma'$'s stack.
+\begin{itemize}[nosep]
+  \item If $oid \notin \dom(F.\omap)$, both searches return the same result, so the two locations
+    agree.
+  \item If $oid \in \dom(F.\omap)$, the stack search in $\sigma$ returns $(F, n)$. By \inv{L1},
+    $oid$ is in no region of $H$, so the heap search fails and $\loc{\sigma}{r} = \Stk(n)$. Again by
+    \inv{L1}, $oid$ is in no frame of $S$, since $\oids(S :: F) = \oids(S) \cat \dom(F.\omap)$ is
+    duplicate-free. So in $\sigma'$ both searches fail, and $\loc{\sigma'}{r} = \noloc$. \qedhere
+\end{itemize}
+\end{proof}
+
+\begin{corollary}
+\label{cor:exit-loc}
+For every reference $r$:
+\begin{enumerate}[nosep,label=(\alph*)]
+  \item $\loc{\sigma}{r} = \Rgn(rid)$ iff $\loc{\sigma'}{r} = \Rgn(rid)$;
+    \leanpart{exit\_corollary\_1}
+  \item if $\loc{\sigma'}{r} = \Stk(i)$ then $\loc{\sigma}{r} = \Stk(i)$.
+    \leanpart{exit\_corollary\_3}
+\end{enumerate}
+\end{corollary}
+\begin{proof}
+In the second case of Lemma~\ref{lem:exit-loc}, $\loc{\sigma'}{r}$ is undefined and
+$\loc{\sigma}{r}$ is a stack location, so neither side of (a) holds and the premise of (b) is false.
+In the first case both statements are trivial.
+\end{proof}
+
+\begin{lemma}[No new references]
+\label{lem:exit-refs}
+\lean{exit\_refs\_mem}
+Every element of $\refs(\sigma')$ is an element of $\refs(\sigma)$. More precisely,
+$\refs(S) \sublist \refs(S :: F)$ and $\refs(H') \perm \refs(H)$.
+\end{lemma}
+\begin{proof}
+$\refs(S :: F) = \refs(S) \cat \refs(F)$, and $\refs(H') \perm \refs(H)$ is
+Lemma~\ref{lem:heap-insert}(b).
+\end{proof}
+
+\subsection{The invariants}
+
+\begin{lemma}[\inv{L1}] \lean{exit\_L1}
+$\sigma' \vdash \inv{L1}$.
+\end{lemma}
+\begin{proof}
+\[ \oids(\sigma') = \oids(S) \cat \oids(H') \perm \oids(S) \cat \oids(H) \]
+by
+Lemma~\ref{lem:heap-insert}(c), and this is a sublist of
+$\oids(S) \cat \dom(F.\omap) \cat \oids(H) = \oids(\sigma)$, which is duplicate-free by \inv{L1}.
+\end{proof}
+
+\begin{lemma}[\inv{L2}] \lean{exit\_L2}
+$\sigma' \vdash \inv{L2}$.
+\end{lemma}
+\begin{proof}
+Let $G \in S$. By \inv{S1} for $\sigma$, the region ids of $S :: F$ are pairwise distinct, so
+$G.\rid \ne F.\rid$. Hence $H'(G.\rid) = H(G.\rid)$, which by \inv{L2} for $\sigma$ (as
+$G \in S :: F$) is an $\Open$ region.
+\end{proof}
+
+\begin{lemma}[\inv{H1}] \lean{exit\_H1}
+$\sigma' \vdash \inv{H1}$.
+\end{lemma}
+\begin{proof}
+By Lemma~\ref{lem:heap-insert}(e), a region of $H'$ is $R'$ or a region of $H$. In the second case
+\inv{H1} for $\sigma$ applies directly. In the first, $R'$ has the same $\bridge$ and $\omap$ as $R$,
+and $R$ satisfies \inv{H1} since it is a region of $H$.
+\end{proof}
+
+\begin{lemma}[\inv{H2}] \lean{exit\_H2}
+$\sigma' \vdash \inv{H2}$.
+\end{lemma}
+\begin{proof}
+Fix $rid$ and write $\#\ell$ for the number of occurrences of $\RId(rid)$ in $\ell$. By
+Lemma~\ref{lem:exit-refs}, $\#\refs(S) \le \#\refs(S :: F)$ and $\#\refs(H') = \#\refs(H)$, so
+$\#\refs(S) + \#\refs(H') \le \#\refs(S :: F) + \#\refs(H) \le 1$ by \inv{H2} for $\sigma$.
+\end{proof}
+
+\begin{lemma}[\inv{H3}] \lean{exit\_H3}
+$\sigma' \vdash \inv{H3}$.
+\end{lemma}
+\begin{proof}
+Let $H'(rid) = Q'$ and $\OId(oid) \in \refs(Q')$. By Lemma~\ref{lem:status-update}(a),
+$H(rid) = Q$ for some $Q$ with the same $\omap$ as $Q'$, and $\refs$ of a region depends only on its
+$\omap$, so $\OId(oid) \in \refs(Q)$. By \inv{H3} for $\sigma$,
+$\loc{\sigma}{\OId(oid)} = \Rgn(rid)$, and by Corollary~\ref{cor:exit-loc}(a),
+$\loc{\sigma'}{\OId(oid)} = \Rgn(rid)$.
+\end{proof}
+
+\begin{lemma}[\inv{S1}] \lean{exit\_S1}
+$\sigma' \vdash \inv{S1}$.
+\end{lemma}
+\begin{proof}
+$[G.\rid \mid G \in S]$ is a sublist of $[G.\rid \mid G \in S :: F]$, which is duplicate-free by
+\inv{S1} for $\sigma$.
+\end{proof}
+
+\begin{lemma}[\inv{S2}] \lean{exit\_S2}
+$\sigma' \vdash \inv{S2}$.
+\end{lemma}
+\begin{proof}
+Let $(G, i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G)$ and
+$\loc{\sigma'}{\OId(oid)} = \Stk(j)$. Then $(G,i)$ is also an indexed frame of $\sigma$. By Corollary~\ref{cor:exit-loc}(b),
+$\loc{\sigma}{\OId(oid)} = \Stk(j)$, so \inv{S2} for $\sigma$ gives $j \le i$.
+\end{proof}
+
+\begin{lemma}[\inv{S3}] \lean{exit\_S3}
+$\sigma' \vdash \inv{S3}$.
+\end{lemma}
+\begin{proof}
+Let $(G, i)$ be an indexed frame of $\sigma'$, $\OId(oid) \in \refs(G)$ and
+$\loc{\sigma'}{\OId(oid)} = \Rgn(rid')$. As in the proof of \inv{S2}, $(G, i)$ is an indexed frame of $\sigma$, and by Corollary~\ref{cor:exit-loc}(a)
+$\loc{\sigma}{\OId(oid)} = \Rgn(rid')$. \inv{S3} for $\sigma$ gives an indexed frame $(G'', k)$ of $\sigma$
+with $G''.\rid = rid'$ and $k \le i$. Since $i < n$ we have $k < n$, so $(G'', k)$ is not the popped
+frame: it is an indexed frame of $\sigma'$, the required witness.
+\end{proof}
+
+\begin{lemma}[\inv{HS1}] \lean{exit\_HS1}
+$\sigma' \vdash \inv{HS1}$.
+\end{lemma}
+\begin{proof}
+Let $\OId(oid) \in \refs(\sigma')$. By Lemma~\ref{lem:exit-refs} it is in $\refs(\sigma)$, so by
+\inv{HS1} for $\sigma$,
+\[ oid \in \oids(\sigma) = \oids(S) \cat \dom(F.\omap) \cat \oids(H). \]
+If $oid \in \oids(S)$ it is in $\oids(\sigma')$ directly; if $oid \in \oids(H)$ it is in
+$\oids(H') \perm \oids(H)$ (Lemma~\ref{lem:heap-insert}(c)).
+
+It remains to rule out $oid \in \dom(F.\omap)$: the popped frame's objects must not still be
+referenced. Suppose $oid \in \dom(F.\omap)$. By Lemma~\ref{lem:loc-l1}(b),
+$\loc{\sigma}{\OId(oid)} = \Stk(n)$. Now $\OId(oid)$ is in $\refs(\sigma') = \refs(S) \cat \refs(H')$:
+\begin{itemize}[nosep]
+  \item If $\OId(oid) \in \refs(G)$ for some indexed frame $(G, m)$ of $\sigma'$, then $(G, m)$ is also one of $\sigma$ and
+    \inv{S2} for $\sigma$ gives $n \le m$, contradicting $m < n$.
+  \item If $\OId(oid) \in \refs(H')$, then by Lemma~\ref{lem:heap-insert}(b) it is in $\refs(Q)$
+    for some $H(rid) = Q$. \inv{H3} for $\sigma$ gives $\loc{\sigma}{\OId(oid)} = \Rgn(rid)$,
+    contradicting $\loc{\sigma}{\OId(oid)} = \Stk(n)$. \qedhere
+\end{itemize}
+\end{proof}
+
+\begin{lemma}[\inv{HS2}] \lean{exit\_HS2}
+$\sigma' \vdash \inv{HS2}$.
+\end{lemma}
+\begin{proof}
+If $\RId(rid) \in \refs(\sigma')$ then $\RId(rid) \in \refs(\sigma)$ by Lemma~\ref{lem:exit-refs}, so
+$rid \in \dom(H) = \dom(H')$ by \inv{HS2} for $\sigma$ and Lemma~\ref{lem:heap-insert}(a).
+\end{proof}
+
+\begin{theorem} \lean{exit\_valid}
+If $\sigma \vdash \inv{ValidConfig}$ and $\sigma \xrightarrow{\texttt{exit}} \sigma'$, then
+$\sigma' \vdash \inv{ValidConfig}$.
+\end{theorem}
+\begin{proof}
+The ten lemmas above.
+\end{proof}
+
