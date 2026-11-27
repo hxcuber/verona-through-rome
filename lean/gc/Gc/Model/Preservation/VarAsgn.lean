@@ -5,42 +5,11 @@ public import Gc.Model.Preservation.Common
 
 @[expose] public section
 
--- A stackWithIndex frame's index is below the stack length.
-private theorem swi_index_lt {cfg : RuntimeConfig} {f : FrameWithIndex} (hf : f ∈ cfg.stackWithIndex) :
-    f.index < cfg.stack.length := by
-  obtain ⟨n, hn, rfl⟩ := List.mem_mapIdx.mp hf
-  exact hn
-
 -- Inserting a fresh variable adds exactly its value to the frame's refs.
 private theorem newFrame_refs_perm {frame : Frame} {x : VarName} {v : Reference} (hx : x ∉ frame.varMap.keys) :
     (Frame.refs { frame with varMap := frame.varMap.insert x v }).Perm (v :: frame.refs) := by
   simp only [Frame.refs, AList.entries_insert, List.kerase_of_notMem_keys hx, List.map_cons]
   exact List.perm_middle
-
--- Inserting a region with the same objMap at an existing heap key preserves every loc?.
-private theorem heap_insert_loc_eq {cfg : RuntimeConfig} {rid : RegionId} {region newRegion : Region}
-    (l1 : L1 cfg) (hregion : cfg.heap.lookup rid = some region) (hobj : newRegion.objMap = region.objMap)
-    (oid' : ObjectId) :
-    (Reference.OId oid').loc? { cfg with heap := cfg.heap.insert rid newRegion } = (Reference.OId oid').loc? cfg := by
-  obtain ⟨region2, l1e, l2e, -, heq, hkerase⟩ := List.exists_of_kerase (AList.mem_keys_of_lookup_eq_some hregion)
-  have hmem : (⟨rid, region⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries :=
-    AList.lookup_mem_entries hregion
-  have := List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys (heq ▸ List.mem_append_right _ List.mem_cons_self) hmem
-  subst region2
-  have hfind : ((cfg.heap.insert rid newRegion).entries.find? (fun p => p.2.objMap.keys.contains oid')).map
-      Sigma.fst = (cfg.heap.entries.find? (fun p => p.2.objMap.keys.contains oid')).map Sigma.fst := by
-    rw [AList.entries_insert, hkerase]
-    by_cases hb : region.objMap.keys.contains oid'
-    · rw [List.find?_eq_some_of_unique hmem hb fun ⟨r, g⟩ hy hp => by
-        obtain rfl := heap_region_unique l1 hy (List.contains_iff_mem.mp hp) hmem (List.contains_iff_mem.mp hb)
-        rw [List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys hy hmem]]
-      simp [hobj, show oid' ∈ region.objMap.keys by simpa using hb]
-    · rw [heq]
-      simp [List.find?_append, hobj, show oid' ∉ region.objMap.keys by simpa using hb]
-  have h1 := loc_match_eq (cfg.stackWithIndex.findRev? (fun f => f.objMap.keys.contains oid'))
-    ((cfg.heap.insert rid newRegion).entries.find? (fun p => p.2.objMap.keys.contains oid'))
-  rw [hfind, ← loc_match_eq] at h1
-  exact h1
 
 -- `resolveV xf cfg = none` means the last frame's varMap doesn't contain xf.
 theorem varAsgn_corollary_fresh_not_in_frame {cfg : RuntimeConfig} {frame : Frame} {xf : VarName}
@@ -74,24 +43,6 @@ private theorem resolveFA_refs_mem {cfg : RuntimeConfig} {y : FieldAccess} {r : 
   · exact refs_mem_of_stackWithIndex hf hr
   · exact List.mem_append_right _ (heap_refs_mem_of_lookup hreg hr)
 
--- An object in region rid0 named by a variable already has an owning frame on the stack.
-theorem varAsgn_corollary_resolveV_loc_ancestor {cfg : RuntimeConfig} {var : VarName} {oid0 : ObjectId}
-    (vcfg : ValidConfig cfg) (hrv : resolveV var cfg = some (Reference.OId oid0)) (rid0 : RegionId)
-    (hloc0 : (Reference.OId oid0).loc? cfg = some (Location.Rgn rid0)) :
-    ∃ frame'' ∈ cfg.stackWithIndex, frame''.regionId = rid0 ∧ frame''.index < cfg.stack.length := by
-  simp [resolveV, Option.bind_eq_some_iff] at hrv
-  obtain ⟨frameV, hfV, hrv⟩ := hrv
-  have hmem : frameV ∈ cfg.stackWithIndex := List.mem_reverse.mp (List.mem_of_find?_eq_some hfV)
-  rcases hrv with hlk | ⟨-, -, regionV, hregV, rfl⟩
-  · obtain ⟨g, hg, hgr, hgi⟩ := vcfg.s3 frameV hmem _
-      (List.mem_append_right _ (List.mem_map_of_mem (AList.lookup_mem_entries hlk))) rid0 oid0 rfl hloc0
-    exact ⟨g, hg, hgr, hgi.trans_lt (swi_index_lt hmem)⟩
-  · have := (oid_loc_rgn_iff_in_heap vcfg).mpr
-      ⟨regionV, hregV, vcfg.h1 regionV (List.mem_map_of_mem (AList.lookup_mem_entries hregV))⟩
-    rw [hloc0] at this
-    cases this
-    exact ⟨frameV, hmem, rfl, swi_index_lt hmem⟩
-
 -- A resolved field value located in region rid' already has an owning frame on the stack.
 private theorem resolveFA_loc_ancestor {cfg : RuntimeConfig} {y : FieldAccess} {oid : ObjectId}
     (vcfg : ValidConfig cfg) (hyf : resolveFA y cfg = some (Reference.OId oid)) {rid' : RegionId}
@@ -99,11 +50,11 @@ private theorem resolveFA_loc_ancestor {cfg : RuntimeConfig} {y : FieldAccess} {
     ∃ frame'' ∈ cfg.stackWithIndex, frame''.regionId = rid' ∧ frame''.index < cfg.stack.length := by
   obtain ⟨oid0, hrv, ⟨f, hf, hr⟩ | ⟨rid0, reg0, hloc0, hreg, hr⟩⟩ := resolveFA_mem hyf
   · obtain ⟨g, hg, hgr, hgi⟩ := vcfg.s3 f hf _ hr rid' oid rfl hloc
-    exact ⟨g, hg, hgr, hgi.trans_lt (swi_index_lt hf)⟩
+    exact ⟨g, hg, hgr, hgi.trans_lt (stackWithIndex_index_lt hf)⟩
   · have := vcfg.h3 rid0 oid reg0 hreg hr
     rw [hloc] at this
     cases this
-    exact varAsgn_corollary_resolveV_loc_ancestor vcfg hrv rid' hloc0
+    exact resolveV_loc_ancestor vcfg hrv hloc0
 
 -- varAsgn preserves every object's location.
 theorem varAsgn_corollary_loc_eq : ValidConfig cfg →
@@ -111,7 +62,8 @@ theorem varAsgn_corollary_loc_eq : ValidConfig cfg →
   ∀ oid', (Reference.OId oid').loc? cfg = (Reference.OId oid').loc? cfg' := by
   intro vcfg h oid'
   obtain ⟨frame, hframe, ⟨oid, rid, region, -, -, -, -, hregion, rfl⟩ | ⟨oid, -, -, -, rfl⟩⟩ := varAsgn_cases h
-  · exact (heap_insert_loc_eq (newRegion := { region with bridgeObjectId := oid }) vcfg.l1 hregion rfl oid').symm
+  · exact heap_insert_loc_eq (newRegion := { region with bridgeObjectId := oid }) vcfg.l1 hregion
+      (List.Perm.refl _) oid'
   · simp only [Reference.loc?]
     rw [stackWithIndex_eq_of_getLast? hframe, stackWithIndex_mk_append_singleton]
     simp only [List.findRev?_eq_find?_reverse, List.reverse_append, List.reverse_singleton, List.singleton_append,

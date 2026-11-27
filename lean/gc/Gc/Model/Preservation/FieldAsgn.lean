@@ -52,48 +52,8 @@ theorem fieldAsgn_corollary_region_loc_eq {cfg : RuntimeConfig} {rid oid : Objec
     (hregion : cfg.heap.lookup rid = some region) (hobj : region.objMap.lookup oid = some obj)
     (oid' : ObjectId) :
     (Reference.OId oid').loc? cfg =
-      (Reference.OId oid').loc? { cfg with heap := cfg.heap.insert rid { region with objMap := region.objMap.insert oid (obj.insert field yRef) } } := by
-  have keys_perm : (region.objMap.insert oid (obj.insert field yRef)).keys.Perm region.objMap.keys :=
-    AList.keys_insert_perm_of_mem (AList.mem_keys_of_lookup_eq_some hobj)
-  refine loc_eq_of_find_map_eq rfl ?_
-  obtain ⟨region2, l1e, l2e, hnotmem, heq, hkerase⟩ :=
-    List.exists_of_kerase (AList.mem_keys_of_lookup_eq_some hregion)
-  have region_mem_cfg : (⟨rid, region⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries :=
-    AList.mem_lookup_iff.mp (by rw [hregion]; rfl)
-  obtain rfl : region2 = region := List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys
-    (heq ▸ List.mem_append_right _ List.mem_cons_self) region_mem_cfg
-  dsimp only
-  rw [AList.entries_insert, hkerase, List.find?_cons, keys_perm.contains_eq]
-  by_cases hb2 : region2.objMap.keys.contains oid'
-  · rw [hb2, List.find?_eq_some_of_unique region_mem_cfg hb2 fun ⟨rid_y, region_y⟩ hy hpy => by
-      obtain rfl := heap_region_unique vcfg.l1 hy (List.contains_iff_mem.mp hpy)
-        region_mem_cfg (List.contains_iff_mem.mp hb2)
-      rw [List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys hy region_mem_cfg]]
-    rfl
-  · rw [Bool.not_eq_true] at hb2
-    simp only [hb2, heq, List.find?_append, List.find?_cons]
-
--- A resolved object reference is stored in some frame, or is the bridge object of some frame's region.
-private theorem resolveV_oid_source {cfg : RuntimeConfig} {var : VarName} {oid : ObjectId}
-    (hrv : resolveV var cfg = some (Reference.OId oid)) : ∃ f ∈ cfg.stackWithIndex,
-      Reference.OId oid ∈ f.refs ∨
-        ∃ region, cfg.heap.lookup f.regionId = some region ∧ region.bridgeObjectId = oid := by
-  unfold resolveV at hrv
-  rcases hf : cfg.stackWithIndex.findRev? (fun frame => frame.varMap.keys.contains var ∨ frame.bridgeVar == var)
-    with _ | f
-  · rw [hf] at hrv
-    contradiction
-  rw [hf] at hrv
-  dsimp at hrv
-  refine ⟨f, ?_, ?_⟩
-  · rw [List.findRev?_eq_find?_reverse] at hf
-    exact List.mem_reverse.mp (List.mem_of_find?_eq_some hf)
-  rcases hl : f.varMap.lookup var with _ | r
-  · rw [hl] at hrv
-    rcases hreg : cfg.heap.lookup f.regionId with _ | region <;> split_ifs at hrv <;> simp_all
-  · rw [hl] at hrv
-    cases hrv
-    exact Or.inl (List.mem_append_right _ (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hl)))
+      (Reference.OId oid').loc? { cfg with heap := cfg.heap.insert rid { region with objMap := region.objMap.insert oid (obj.insert field yRef) } } :=
+  heap_insert_loc_eq vcfg.l1 hregion (AList.keys_insert_perm_of_mem (AList.mem_keys_of_lookup_eq_some hobj)) oid'
 
 -- A resolved object reference names a live object.
 private theorem resolveV_oid_mem_objectIds {cfg : RuntimeConfig} (vcfg : ValidConfig cfg) {var : VarName}
@@ -103,23 +63,6 @@ private theorem resolveV_oid_mem_objectIds {cfg : RuntimeConfig} (vcfg : ValidCo
   · have hmem := AList.lookup_mem_entries hregion
     exact List.mem_append_right _ (heap_objectIds_of_mem hmem
       (AList.mem_keys.mp (vcfg.h1 region (List.mem_map_of_mem (f := (·.2)) hmem))))
-
--- A resolved object reference living in a region has that region owned by some on-stack frame.
-private theorem resolveV_loc_ancestor {cfg : RuntimeConfig} (vcfg : ValidConfig cfg) {var : VarName}
-    {oid : ObjectId} {rid : RegionId} (hrv : resolveV var cfg = some (Reference.OId oid))
-    (hloc : (Reference.OId oid).loc? cfg = some (Location.Rgn rid)) :
-    ∃ g ∈ cfg.stackWithIndex, g.regionId = rid ∧ g.index < cfg.stack.length := by
-  obtain ⟨f, hf, hsrc⟩ := resolveV_oid_source hrv
-  have hlt : f.index < cfg.stack.length := by
-    obtain ⟨n, hn, rfl⟩ := List.mem_mapIdx.mp hf
-    exact hn
-  rcases hsrc with hr | ⟨region, hregion, rfl⟩
-  · obtain ⟨g, hg, hrid, hle⟩ := vcfg.s3 f hf _ hr rid _ rfl hloc
-    exact ⟨g, hg, hrid, hle.trans_lt hlt⟩
-  · have hb := (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region, hregion,
-      vcfg.h1 region (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hregion))⟩
-    rw [hloc, Option.some_inj, Location.Rgn.injEq] at hb
-    exact ⟨f, hf, hb.symm, hlt⟩
 
 -- fieldAsgn never changes the stack's sequence of region ids.
 private theorem fieldAsgn_stack_regionIds (h : fieldAsgn x yf cfg = some cfg') :

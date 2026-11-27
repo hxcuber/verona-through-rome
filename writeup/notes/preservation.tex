@@ -245,11 +245,11 @@ Let $\sigma = \langle S, H\rangle \vdash \inv{L1}$ and let $oid$ be an object id
     \leanpart{heap\_find\_fst\_eq}
   \item The assumption of (a) holds for $\hat H = H[rid_0 \mapsto R_1]$ if $H(rid_0) = R_0$, and
     $oid \in \dom(R_1.\omap)$ iff $oid \in \dom(R_0.\omap)$.
+    \leanpart{heap\_insert\_find\_fst}
 \end{enumerate}
-\leanform{(a) is private in \texttt{Preservation/MakeObjRegion.lean}. (b) has no lemma of its own; the case it
-covers is argued directly in each of \texttt{heap\_status\_update\_find\_fst},
-\texttt{heap\_insert\_loc\_eq}, \texttt{fieldAsgn\_corollary\_region\_loc\_eq} and
-\texttt{swap\_corollary\_region\_loc\_eq}.}
+\leanform{(a) is private in \texttt{Preservation/Common.lean}. The Lean theorem for (b),
+\texttt{heap\_insert\_find\_fst} in the same file, states the conclusion of (a) for
+$\hat H = H[rid_0 \mapsto R_1]$ under the assumption of (b).}
 \end{lemma}
 \begin{proof}
 (a) If the search in $H$ fails, no entry of $H$ contains $oid$, so by the assumption no entry of
@@ -377,8 +377,8 @@ $\mathit{resolveV}(z, \tau) = \OId(p)$.
     indexed frame $(G'', k)$ of $\tau$ with $G''.\rid = rid$ and $k < |S_\tau|$.
     \leanpart{resolveV\_loc\_ancestor}
 \end{enumerate}
-\leanform{All three are private in \texttt{Preservation/FieldAsgn.lean}. (c) is proved a second time,
-as \texttt{varAsgn\_corollary\_resolveV\_loc\_ancestor} in \texttt{Preservation/VarAsgn.lean}. The
+\leanform{(a) and (c) are in \texttt{Preservation/Common.lean}; (b) is private in
+\texttt{Preservation/FieldAsgn.lean}. The
 bound $k < |S_\tau|$ holds for every indexed frame and is recorded for use in \inv{S3}.}
 \end{lemma}
 \begin{proof}
