@@ -119,32 +119,6 @@ theorem makeObjRegion_H2 : ValidConfig cfg →
   rw [stack_refs_append_singleton, List.count_append, (heap_insert_refs_perm hlookup (newRegion_refs hlookup)).count_eq]
   omega
 
--- Under L1, `find?` locates an oid in the same region of any heap with the same oid-holding keys.
-private theorem heap_find_fst_eq {cfg : RuntimeConfig} {heap : Heap} {oid : ObjectId} (l1 : L1 cfg)
-    (hiff : ∀ r, (∃ reg, (⟨r, reg⟩ : Sigma (fun _ : RegionId => Region)) ∈ heap.entries ∧ oid ∈ reg.objMap.keys) ↔
-      ∃ reg, (⟨r, reg⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries ∧ oid ∈ reg.objMap.keys) :
-    (heap.entries.find? (fun x => x.2.objMap.keys.contains oid)).map Sigma.fst =
-      (cfg.heap.entries.find? (fun x => x.2.objMap.keys.contains oid)).map Sigma.fst := by
-  cases ho : cfg.heap.entries.find? (fun x => x.2.objMap.keys.contains oid) with
-  | none =>
-    rw [Option.map_none, Option.map_eq_none_iff, List.find?_eq_none]
-    rintro ⟨r, reg⟩ hm hp
-    obtain ⟨reg0, hm0, hp0⟩ := (hiff r).mp ⟨reg, hm, List.contains_iff_mem.mp hp⟩
-    exact List.find?_eq_none.mp ho _ hm0 (List.contains_iff_mem.mpr hp0)
-  | some e =>
-    obtain ⟨r, reg⟩ := e
-    have hp := List.find?_some ho
-    rw [List.contains_iff_mem] at hp
-    obtain ⟨reg', hm', hp'⟩ := (hiff r).mpr ⟨reg, List.mem_of_find?_eq_some ho, hp⟩
-    cases hn : heap.entries.find? (fun x => x.2.objMap.keys.contains oid) with
-    | none => exact absurd (List.contains_iff_mem.mpr hp') (List.find?_eq_none.mp hn _ hm')
-    | some e' =>
-      obtain ⟨r', reg''⟩ := e'
-      have hp'' := List.find?_some hn
-      rw [List.contains_iff_mem] at hp''
-      obtain ⟨reg0, hm0, hp0⟩ := (hiff r').mp ⟨reg'', List.mem_of_find?_eq_some hn, hp''⟩
-      exact congrArg some (heap_region_unique l1 hm0 hp0 (List.mem_of_find?_eq_some ho) hp)
-
 theorem makeObjRegion_corollary_loc_eq : ValidConfig cfg →
   makeObjRegion x cfg = some cfg' →
   ∀ oid, oid ≠ cfg.freshObjectId →
@@ -159,13 +133,8 @@ theorem makeObjRegion_corollary_loc_eq : ValidConfig cfg →
     simp only [List.findRev?_eq_find?_reverse, List.reverse_append, List.reverse_singleton, List.singleton_append,
       List.find?_cons]
     cases frame.objMap.keys.contains oid <;> rfl
-  have hH := heap_find_fst_eq (heap := cfg.heap.insert frame.regionId
-    { region with objMap := region.objMap.insert cfg.freshObjectId ∅ }) (oid := oid) vcfg.l1 fun r => by
-    simp only [← AList.mem_lookup_iff, Option.mem_def]
-    by_cases hr : r = frame.regionId
-    · subst hr
-      simp [hlookup, AList.keys_insert, List.mem_erase_of_ne hne, hne]
-    · rw [AList.lookup_insert_ne hr]
+  have hH := heap_insert_find_fst (newRegion := { region with objMap := region.objMap.insert cfg.freshObjectId ∅ })
+    (oid := oid) vcfg.l1 hlookup (by simp [AList.keys_insert, List.mem_erase_of_ne hne, hne])
   simp only [Reference.loc?]
   refine (loc_match_eq _ _).trans ?_
   rw [hS, ← hH]

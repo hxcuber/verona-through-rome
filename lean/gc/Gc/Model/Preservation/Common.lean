@@ -287,35 +287,50 @@ theorem heap_status_update_entries_mem_iff {heap : Heap} {rid : RegionId} {regio
   · subst hr; simp [hlookup]
   · rw [AList.lookup_insert_ne hr]
 
+-- Under L1, `find?` locates an oid in the same region of any heap with the same oid-holding keys.
+private theorem heap_find_fst_eq {cfg : RuntimeConfig} {heap : Heap} {oid : ObjectId} (l1 : L1 cfg)
+    (hiff : ∀ r, (∃ reg, (⟨r, reg⟩ : Sigma (fun _ : RegionId => Region)) ∈ heap.entries ∧ oid ∈ reg.objMap.keys) ↔
+      ∃ reg, (⟨r, reg⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries ∧ oid ∈ reg.objMap.keys) :
+    (heap.entries.find? (fun x => x.2.objMap.keys.contains oid)).map Sigma.fst =
+      (cfg.heap.entries.find? (fun x => x.2.objMap.keys.contains oid)).map Sigma.fst := by
+  cases ho : cfg.heap.entries.find? (fun x => x.2.objMap.keys.contains oid) with
+  | none =>
+    rw [Option.map_none, Option.map_eq_none_iff, List.find?_eq_none]
+    rintro ⟨r, reg⟩ hm hp
+    obtain ⟨reg0, hm0, hp0⟩ := (hiff r).mp ⟨reg, hm, List.contains_iff_mem.mp hp⟩
+    exact List.find?_eq_none.mp ho _ hm0 (List.contains_iff_mem.mpr hp0)
+  | some e =>
+    obtain ⟨r, reg⟩ := e
+    have hp := List.find?_some ho
+    rw [List.contains_iff_mem] at hp
+    obtain ⟨reg', hm', hp'⟩ := (hiff r).mpr ⟨reg, List.mem_of_find?_eq_some ho, hp⟩
+    cases hn : heap.entries.find? (fun x => x.2.objMap.keys.contains oid) with
+    | none => exact absurd (List.contains_iff_mem.mpr hp') (List.find?_eq_none.mp hn _ hm')
+    | some e' =>
+      obtain ⟨r', reg''⟩ := e'
+      have hp'' := List.find?_some hn
+      rw [List.contains_iff_mem] at hp''
+      obtain ⟨reg0, hm0, hp0⟩ := (hiff r').mp ⟨reg'', List.mem_of_find?_eq_some hn, hp''⟩
+      exact congrArg some (heap_region_unique l1 hm0 hp0 (List.mem_of_find?_eq_some ho) hp)
+
+-- Under L1, the region found holding an oid survives re-inserting a region that holds it iff the old one did.
+theorem heap_insert_find_fst {cfg : RuntimeConfig} {rid : RegionId} {region newRegion : Region} {oid : ObjectId}
+    (l1 : L1 cfg) (hregion : cfg.heap.lookup rid = some region)
+    (hmem : oid ∈ newRegion.objMap.keys ↔ oid ∈ region.objMap.keys) :
+    ((cfg.heap.insert rid newRegion).entries.find? (fun x => x.2.objMap.keys.contains oid)).map Sigma.fst =
+      (cfg.heap.entries.find? (fun x => x.2.objMap.keys.contains oid)).map Sigma.fst :=
+  heap_find_fst_eq l1 fun r => by
+    simp only [← AList.mem_lookup_iff, Option.mem_def]
+    by_cases hr : r = rid
+    · subst hr; simp [hregion, hmem]
+    · rw [AList.lookup_insert_ne hr]
+
 -- Under L1, the region found holding an oid is unaffected by changing a region's status.
 theorem heap_status_update_find_fst {cfg : RuntimeConfig} {rid : RegionId} {region : Region} {s : Status} {oid : ObjectId}
     (l1 : L1 cfg) (hlookup : cfg.heap.lookup rid = some region) :
     ((cfg.heap.insert rid { region with status := s }).entries.find? (fun x => x.2.objMap.keys.contains oid)).map
-      Sigma.fst = (cfg.heap.entries.find? (fun x => x.2.objMap.keys.contains oid)).map Sigma.fst := by
-  have key : ∀ {r reg}, (⟨r, reg⟩ : Sigma (fun _ : RegionId => Region)) ∈
-      (cfg.heap.insert rid { region with status := s }).entries →
-      ∃ reg0, (⟨r, reg0⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries ∧ reg0.objMap = reg.objMap :=
-    fun h => (heap_status_update_entries_mem_iff hlookup _ _).mp ⟨_, h, rfl⟩
-  cases ho : cfg.heap.entries.find? (fun x => x.2.objMap.keys.contains oid) with
-  | none =>
-    rw [List.find?_eq_none] at ho
-    rw [Option.map_none, Option.map_eq_none_iff, List.find?_eq_none]
-    rintro ⟨r, reg⟩ hm hp
-    obtain ⟨reg0, hm0, he⟩ := key hm
-    exact ho _ hm0 (he ▸ hp)
-  | some e =>
-    obtain ⟨r, reg⟩ := e
-    have hp := List.find?_some ho
-    have hm := List.mem_of_find?_eq_some ho
-    obtain ⟨reg', hm', he'⟩ := (heap_status_update_entries_mem_iff hlookup _ _).mpr ⟨_, hm, rfl⟩
-    cases hn : (cfg.heap.insert rid { region with status := s }).entries.find? (fun x => x.2.objMap.keys.contains oid) with
-    | none => exact absurd (he' ▸ hp) (List.find?_eq_none.mp hn _ hm')
-    | some e' =>
-      obtain ⟨r', reg''⟩ := e'
-      obtain ⟨reg0, hm0, he0⟩ := key (List.mem_of_find?_eq_some hn)
-      have hp' := List.find?_some hn
-      simp only [Option.map_some, Option.some.injEq]
-      exact heap_region_unique l1 hm0 (List.contains_iff_mem.mp (he0 ▸ hp')) hm (List.contains_iff_mem.mp hp)
+      Sigma.fst = (cfg.heap.entries.find? (fun x => x.2.objMap.keys.contains oid)).map Sigma.fst :=
+  heap_insert_find_fst (newRegion := { region with status := s }) l1 hlookup Iff.rfl
 
 -- Membership after inserting at an AList key: either the newly-written value or a pre-existing one.
 theorem alist_insert_refs_mem {α : Type*} [DecidableEq α] {l : AList (fun _ : α => Reference)}
@@ -383,3 +398,53 @@ theorem frame_varMap_insert_refs_mem {frame : Frame} {x : VarName} {v r : Refere
   simp only [Frame.refs, AList.entries_insert, List.map_cons, List.mem_append, List.mem_cons] at hr ⊢
   have := ((List.kerase_sublist x frame.varMap.entries).map (·.2)).mem (a := r)
   tauto
+
+-- Re-inserting a region with a permuted objMap key set leaves every object's `Reference.loc?` unchanged.
+theorem heap_insert_loc_eq {cfg : RuntimeConfig} {rid : RegionId} {region newRegion : Region}
+    (l1 : L1 cfg) (hregion : cfg.heap.lookup rid = some region)
+    (hkeys : newRegion.objMap.keys.Perm region.objMap.keys) (oid : ObjectId) :
+    (Reference.OId oid).loc? cfg = (Reference.OId oid).loc? { cfg with heap := cfg.heap.insert rid newRegion } :=
+  loc_eq_of_find_map_eq rfl (heap_insert_find_fst l1 hregion hkeys.mem_iff).symm
+
+-- A stackWithIndex frame's index is below the stack length.
+theorem stackWithIndex_index_lt {cfg : RuntimeConfig} {f : FrameWithIndex} (hf : f ∈ cfg.stackWithIndex) :
+    f.index < cfg.stack.length := by
+  obtain ⟨n, hn, rfl⟩ := List.mem_mapIdx.mp hf
+  exact hn
+
+-- A resolved object reference is stored in some frame, or is the bridge object of some frame's region.
+theorem resolveV_oid_source {cfg : RuntimeConfig} {var : VarName} {oid : ObjectId}
+    (hrv : resolveV var cfg = some (Reference.OId oid)) : ∃ f ∈ cfg.stackWithIndex,
+      Reference.OId oid ∈ f.refs ∨
+        ∃ region, cfg.heap.lookup f.regionId = some region ∧ region.bridgeObjectId = oid := by
+  unfold resolveV at hrv
+  rcases hf : cfg.stackWithIndex.findRev? (fun frame => frame.varMap.keys.contains var ∨ frame.bridgeVar == var)
+    with _ | f
+  · rw [hf] at hrv
+    contradiction
+  rw [hf] at hrv
+  dsimp at hrv
+  refine ⟨f, ?_, ?_⟩
+  · rw [List.findRev?_eq_find?_reverse] at hf
+    exact List.mem_reverse.mp (List.mem_of_find?_eq_some hf)
+  rcases hl : f.varMap.lookup var with _ | r
+  · rw [hl] at hrv
+    rcases hreg : cfg.heap.lookup f.regionId with _ | region <;> split_ifs at hrv <;> simp_all
+  · rw [hl] at hrv
+    cases hrv
+    exact Or.inl (List.mem_append_right _ (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hl)))
+
+-- A resolved object reference living in a region has that region owned by some on-stack frame.
+theorem resolveV_loc_ancestor {cfg : RuntimeConfig} (vcfg : ValidConfig cfg) {var : VarName}
+    {oid : ObjectId} {rid : RegionId} (hrv : resolveV var cfg = some (Reference.OId oid))
+    (hloc : (Reference.OId oid).loc? cfg = some (Location.Rgn rid)) :
+    ∃ g ∈ cfg.stackWithIndex, g.regionId = rid ∧ g.index < cfg.stack.length := by
+  obtain ⟨f, hf, hsrc⟩ := resolveV_oid_source hrv
+  have hlt := stackWithIndex_index_lt hf
+  rcases hsrc with hr | ⟨region, hregion, rfl⟩
+  · obtain ⟨g, hg, hrid, hle⟩ := vcfg.s3 f hf _ hr rid _ rfl hloc
+    exact ⟨g, hg, hrid, hle.trans_lt hlt⟩
+  · have hb := (oid_loc_rgn_iff_in_heap vcfg).mpr ⟨region, hregion,
+      vcfg.h1 region (List.mem_map_of_mem (f := (·.2)) (AList.lookup_mem_entries hregion))⟩
+    rw [hloc, Option.some_inj, Location.Rgn.injEq] at hb
+    exact ⟨f, hf, hb.symm, hlt⟩

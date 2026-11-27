@@ -118,26 +118,9 @@ theorem swap_corollary_region_loc_eq {cfg : RuntimeConfig} {rid yoid : ObjectId}
     (oid' : ObjectId) :
     (Reference.OId oid').loc? cfg =
       (Reference.OId oid').loc? { cfg with heap := cfg.heap.insert rid newRegion } := by
-  have keys_perm : newRegion.objMap.keys.Perm region.objMap.keys := by
-    rw [hnewRegion]
-    exact AList.keys_insert_perm_of_mem (AList.mem_keys_of_lookup_eq_some hobj)
-  refine loc_eq_of_find_map_eq rfl ?_
-  obtain ⟨region2, l1e, l2e, hnotmem, heq, hkerase⟩ :=
-    List.exists_of_kerase (AList.mem_keys_of_lookup_eq_some hregion)
-  have region_mem_cfg : (⟨rid, region⟩ : Sigma (fun _ : RegionId => Region)) ∈ cfg.heap.entries :=
-    AList.mem_lookup_iff.mp (by rw [hregion]; rfl)
-  obtain rfl : region2 = region := List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys
-    (heq ▸ List.mem_append_right _ List.mem_cons_self) region_mem_cfg
-  dsimp only
-  rw [AList.entries_insert, hkerase, List.find?_cons, keys_perm.contains_eq]
-  by_cases hb2 : region2.objMap.keys.contains oid'
-  · rw [hb2, List.find?_eq_some_of_unique region_mem_cfg hb2 fun ⟨rid_y, region_y⟩ hy hpy => by
-      obtain rfl := heap_region_unique vcfg.l1 hy (List.contains_iff_mem.mp hpy)
-        region_mem_cfg (List.contains_iff_mem.mp hb2)
-      rw [List.NodupKeys.eq_of_mk_mem cfg.heap.nodupKeys hy region_mem_cfg]]
-    rfl
-  · rw [Bool.not_eq_true] at hb2
-    simp only [hb2, heq, List.find?_append, List.find?_cons]
+  refine heap_insert_loc_eq vcfg.l1 hregion ?_ oid'
+  rw [hnewRegion]
+  exact AList.keys_insert_perm_of_mem (AList.mem_keys_of_lookup_eq_some hobj)
 
 -- A varMap-only change to the last frame never affects `Reference.loc?`.
 theorem swap_corollary_stack_varmap_loc_eq {cfg : RuntimeConfig} {frame : FrameWithIndex} {newVarMap : VarMap}

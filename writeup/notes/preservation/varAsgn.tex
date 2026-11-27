@@ -73,6 +73,8 @@ $\refs(F') \perm [\OId(oid)] \cat \refs(F)$.
 Let $\langle S_0, H_0\rangle \vdash \inv{L1}$, $H_0(rid_0) = R_0$, and let $R_1$ be a region with
 $R_1.\omap = R_0.\omap$. Then for every $oid'$,
 $\loc{\langle S_0, H_0[rid_0 \mapsto R_1]\rangle}{\OId(oid')} = \loc{\langle S_0, H_0\rangle}{\OId(oid')}$.
+\leanform{In \texttt{Preservation/Common.lean}. It only requires $\dom(R_1.\omap)$ to be a permutation
+of $\dom(R_0.\omap)$, so that the region cases of \texttt{fieldAsgn} and \texttt{swap} use it too.}
 \end{lemma}
 \begin{proof}
 The stack is the same, and the heap searches in $H_0$ and $H_0[rid_0 \mapsto R_1]$ agree by
